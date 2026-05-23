@@ -24,15 +24,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # LuaJIT is Lua 5.1-compatible and ships the `bit` library our FNV-1a needs.
+      # PUC Lua 5.1 — the same interpreter WoW runs. (LuaJIT's versioned beta
+      # tarball 404s, and PUC 5.1 + LuaBitOp matches the game more faithfully.)
       - uses: leafo/gh-actions-lua@v10
         with:
-          luaVersion: "luajit-2.1.0-beta3"
+          luaVersion: "5.1.5"
       - uses: leafo/gh-actions-luarocks@v4
       - name: Install test dependencies
         run: |
           luarocks install busted
           luarocks install dkjson
+          luarocks install luabitop   # provides require("bit") on PUC Lua 5.1
+
       # Runs from the repo root, where .busted points at tests/ and the specs
       # load core/ + contract/vectors/v1.json by relative path.
       - name: Run busted
