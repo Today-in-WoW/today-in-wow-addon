@@ -1,0 +1,398 @@
+{
+  "meta": {
+    "schema_version": 1,
+    "hash": "fnv1a-32",
+    "basis": "0x54695731",
+    "prime": "0x01000193",
+    "encoding": "utf-8",
+    "output": "8 lowercase hex",
+    "separators": {
+      "join": "^",
+      "field": "|",
+      "list": ",",
+      "pair": ";",
+      "kv": "=",
+      "tuple": ":"
+    }
+  },
+  "hash": [
+    {
+      "input": "",
+      "expected": "54695731"
+    },
+    {
+      "input": "a",
+      "expected": "31d472f0"
+    },
+    {
+      "input": "abc",
+      "expected": "1ee05def"
+    },
+    {
+      "input": "TiW",
+      "expected": "19b2872f"
+    },
+    {
+      "input": "1|1747776000|quest_completed|mapID=2248;questID=70123;source=turned_in",
+      "expected": "10c12a6e"
+    },
+    {
+      "input": "123,456",
+      "expected": "7b0d9280"
+    }
+  ],
+  "canonical_ids": [
+    {
+      "input": [
+        456,
+        123
+      ],
+      "expected": "123,456"
+    },
+    {
+      "input": [],
+      "expected": ""
+    },
+    {
+      "input": [
+        5,
+        5,
+        1
+      ],
+      "expected": "1,5,5"
+    }
+  ],
+  "canonical_payload": [
+    {
+      "input": {
+        "questID": 70123,
+        "mapID": 2248,
+        "source": "scan"
+      },
+      "expected": "mapID=2248;questID=70123;source=scan"
+    },
+    {
+      "input": {
+        "accepted": true,
+        "questID": 1
+      },
+      "expected": "accepted=true;questID=1"
+    },
+    {
+      "input": {
+        "mountID": 1589
+      },
+      "expected": "mountID=1589"
+    }
+  ],
+  "canonical_event": [
+    {
+      "seq": 1,
+      "t": 1747776000,
+      "kind": "quest_completed",
+      "data": {
+        "questID": 70123,
+        "mapID": 2248,
+        "source": "turned_in"
+      },
+      "expected": "1|1747776000|quest_completed|mapID=2248;questID=70123;source=turned_in"
+    },
+    {
+      "seq": 2,
+      "t": 1747776050,
+      "kind": "mount_added",
+      "data": {
+        "mountID": 1589
+      },
+      "expected": "2|1747776050|mount_added|mountID=1589"
+    },
+    {
+      "seq": 3,
+      "t": 1747776100,
+      "kind": "reputation_changed",
+      "data": {
+        "factionID": 2510,
+        "level": 20,
+        "value": 8400
+      },
+      "expected": "3|1747776100|reputation_changed|factionID=2510;level=20;value=8400"
+    },
+    {
+      "seq": 4,
+      "t": 1747776200,
+      "kind": "wq_offered",
+      "data": {
+        "questID": 84123,
+        "mapID": 2248,
+        "x": 4231,
+        "y": 5837,
+        "rewardItemID": 12345,
+        "expiresAt": 1747779600
+      },
+      "expected": "4|1747776200|wq_offered|expiresAt=1747779600;mapID=2248;questID=84123;rewardItemID=12345;x=4231;y=5837"
+    },
+    {
+      "seq": 5,
+      "t": 1747776300,
+      "kind": "npc_defeated",
+      "data": {
+        "npcID": 233814,
+        "spawnTime": 1747770000,
+        "mapID": 2248
+      },
+      "expected": "5|1747776300|npc_defeated|mapID=2248;npcID=233814;spawnTime=1747770000"
+    },
+    {
+      "seq": 6,
+      "t": 1747776400,
+      "kind": "criteria_earned",
+      "data": {
+        "achievementID": 42701,
+        "criteriaID": 105912
+      },
+      "expected": "6|1747776400|criteria_earned|achievementID=42701;criteriaID=105912"
+    },
+    {
+      "seq": 7,
+      "t": 1747776500,
+      "kind": "delve_storyline_seen",
+      "data": {
+        "delveID": 7781,
+        "mapID": 2248,
+        "variant": "Waygate Wiles",
+        "x": 4231,
+        "y": 5837
+      },
+      "expected": "7|1747776500|delve_storyline_seen|delveID=7781;mapID=2248;variant=Waygate Wiles;x=4231;y=5837"
+    }
+  ],
+  "canonical_category": {
+    "basics": {
+      "input": {
+        "level": 80,
+        "class": "MAGE",
+        "race": "Gnome",
+        "faction": "Alliance",
+        "sex": 2,
+        "spec": 63,
+        "ilvl": 639,
+        "played_total": 1234567,
+        "played_level": 23456,
+        "current_covenant": 3
+      },
+      "expected": "class=MAGE;current_covenant=3;faction=Alliance;ilvl=639;level=80;played_level=23456;played_total=1234567;race=Gnome;sex=2;spec=63"
+    },
+    "professions": {
+      "input": {
+        "contents": [
+          164,
+          165
+        ],
+        "data": {
+          "164": {
+            "rank": 100,
+            "maxRank": 100
+          },
+          "165": {
+            "rank": 85,
+            "maxRank": 100
+          }
+        }
+      },
+      "expected": "164:100:100,165:85:100"
+    },
+    "reputations": {
+      "input": {
+        "contents": [
+          2503,
+          2510
+        ],
+        "data": {
+          "2503": {
+            "level": 0,
+            "value": 21000
+          },
+          "2510": {
+            "level": 20,
+            "value": 8400
+          }
+        }
+      },
+      "expected": "2503:0:21000,2510:20:8400"
+    },
+    "currencies": {
+      "input": {
+        "contents": [
+          3008,
+          3028
+        ],
+        "data": {
+          "3008": {
+            "quantity": 1450,
+            "max": 2000
+          },
+          "3028": {
+            "quantity": 500,
+            "max": 1000
+          }
+        }
+      },
+      "expected": "3008:1450:2000,3028:500:1000"
+    },
+    "greatvault": {
+      "input": {
+        "activities": [
+          {
+            "type": 1,
+            "index": 1,
+            "threshold": 2,
+            "progress": 2,
+            "level": 639
+          },
+          {
+            "type": 1,
+            "index": 2,
+            "threshold": 4,
+            "progress": 3,
+            "level": 636
+          }
+        ]
+      },
+      "expected": "1:1:2:2:639,1:2:4:3:636"
+    },
+    "instancelocks": {
+      "input": {
+        "locks": [
+          {
+            "instanceID": 2657,
+            "difficultyID": 16,
+            "encountersDone": 6
+          },
+          {
+            "instanceID": 2657,
+            "difficultyID": 14,
+            "encountersDone": 8
+          }
+        ]
+      },
+      "expected": "2657:14:8,2657:16:6"
+    }
+  },
+  "genesis": {
+    "session_id": "S-abc123",
+    "char_guid": "Player-1234-DEADBEEF",
+    "schema_version": 1,
+    "expected": "efd0a08f"
+  },
+  "chain_step": [
+    {
+      "prev": "efd0a08f",
+      "canonical": "class=MAGE;level=80",
+      "expected": "87354960"
+    },
+    {
+      "prev": "87354960",
+      "canonical": "164:100:100,165:85:100",
+      "expected": "99630ea4"
+    }
+  ],
+  "session": {
+    "session_id": "S-abc123",
+    "char_guid": "Player-1234-DEADBEEF",
+    "schema_version": 1,
+    "genesis": "efd0a08f",
+    "snapshot_chain": [
+      {
+        "category": "basics",
+        "canonical": "class=MAGE;current_covenant=3;faction=Alliance;ilvl=639;level=80;played_level=23456;played_total=1234567;race=Gnome;sex=2;spec=63",
+        "h": "080e88a2"
+      },
+      {
+        "category": "mounts",
+        "canonical": "1581,1589",
+        "h": "eabc4f11"
+      },
+      {
+        "category": "toys",
+        "canonical": "",
+        "h": "1d3a0a12"
+      },
+      {
+        "category": "pets",
+        "canonical": "2891",
+        "h": "5c6e972e"
+      },
+      {
+        "category": "appearances",
+        "canonical": "",
+        "h": "c26b2eed"
+      },
+      {
+        "category": "decor",
+        "canonical": "",
+        "h": "b4702896"
+      },
+      {
+        "category": "achievements",
+        "canonical": "6,503",
+        "h": "9b1a85ef"
+      },
+      {
+        "category": "professions",
+        "canonical": "164:100:100,165:85:100",
+        "h": "204e8ba3"
+      },
+      {
+        "category": "reputations",
+        "canonical": "2503:0:21000,2510:20:8400",
+        "h": "d7325adf"
+      },
+      {
+        "category": "currencies",
+        "canonical": "3008:1450:2000,3028:500:1000",
+        "h": "77a5d73b"
+      },
+      {
+        "category": "greatvault",
+        "canonical": "1:1:2:2:639,1:2:4:3:636",
+        "h": "d898f12e"
+      },
+      {
+        "category": "instancelocks",
+        "canonical": "2657:14:8,2657:16:6",
+        "h": "fb37fc6a"
+      },
+      {
+        "category": "quests",
+        "canonical": "70123,70200,71000",
+        "h": "d2fb9739"
+      }
+    ],
+    "snapshot_tail": "d2fb9739",
+    "event_chain": [
+      {
+        "seq": 1,
+        "t": 1747776000,
+        "kind": "quest_completed",
+        "data": {
+          "questID": 70123,
+          "mapID": 2248,
+          "source": "turned_in"
+        },
+        "canonical": "1|1747776000|quest_completed|mapID=2248;questID=70123;source=turned_in",
+        "h": "3c6eff78"
+      },
+      {
+        "seq": 2,
+        "t": 1747776050,
+        "kind": "mount_added",
+        "data": {
+          "mountID": 1589
+        },
+        "canonical": "2|1747776050|mount_added|mountID=1589",
+        "h": "d1a25eff"
+      }
+    ],
+    "session_tail": "d1a25eff"
+  }
+}
