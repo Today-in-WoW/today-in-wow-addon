@@ -16,6 +16,11 @@ core\eventlog.lua
 core\snapshot.lua
 core\retention.lua
 core\drain.lua
+core\secrets.lua
+core\scheduler.lua
+core\mapcache.lua
+core\whitelist.lua
+core\migrations.lua
 collectors\basics.lua
 collectors\level_up.lua
 collectors\collections.lua
