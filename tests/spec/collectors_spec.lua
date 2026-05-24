@@ -20,7 +20,8 @@ mock.install()
 local function freshNS()
 	local ns = { collectors = {} }
 	for _, f in ipairs({ "core/hash.lua", "core/canonical.lua", "core/chain.lua",
-	                     "core/eventlog.lua", "core/util.lua" }) do
+	                     "core/eventlog.lua", "core/util.lua", "core/secrets.lua",
+	                     "core/scheduler.lua" }) do
 		assert(loadfile(f))("TiW", ns)
 	end
 	ns.session = { snapshot = { tail = "00000000" }, session_tail = "00000000",
@@ -48,9 +49,6 @@ describe("collector wiring (pending until collectors are implemented)", function
 		pending("collector not implemented")
 	end)
 	it("professions §3.7 registers professions + emits profession_learned/unlearned/levelup", function()
-		pending("collector not implemented")
-	end)
-	it("delves §3.9 emits delve_storyline_seen + delve_bountiful_seen (daily-bucket dedup)", function()
 		pending("collector not implemented")
 	end)
 	it("prey_quests §3.10 emits prey_quest (daily-bucket dedup)", function()
@@ -162,5 +160,138 @@ describe("events_schedule §3.16 collector", function()
 		loadCollector(ns)
 		mock.fireEvent("EVENT_SCHEDULER_UPDATE")
 		assert.equal(0, #ns.session.events)
+	end)
+end)
+
+describe("delves §3.9 collector", function()
+	-- The delve/widget/map surface DelverView reads, mocked inline (collector glue).
+	-- Mirrors the real topology that exposed the bug: the continent map (2000) has
+	-- NO direct delves; they live on its child ZONE maps (2001 -> 8527 plain,
+	-- 2002 -> 8528 bountiful), reachable only by walking GetMapChildrenInfo.
+	local function installDelveEnv()
+		_G.C_DateAndTime = { GetSecondsUntilDailyReset = function() return 3600 end }
+		_G.Enum = { UIWidgetVisualizationType = { TextWithState = 1 } }
+		local widgets = {
+			[100] = { { widgetID = 1, widgetType = 1 } },                              -- variant only
+			[200] = { { widgetID = 2, widgetType = 1 }, { widgetID = 3, widgetType = 1 } }, -- variant + bountiful
+		}
+		local winfo = {
+			[1] = { orderIndex = 0, text = "Story Variant: |cnWHITE_FONT_COLOR:Waygate Wiles|r" },
+			[2] = { orderIndex = 0, text = "Story Variant: |cnWHITE_FONT_COLOR:Coffer Chaos|r" },
+			[3] = { orderIndex = 1, text = "2 coffer keys, resets in 5h" },
+		}
+		_G.C_UIWidgetManager = {
+			GetAllWidgetsBySetID = function(id) return widgets[id] end,
+			GetTextWithStateWidgetVisualizationInfo = function(id) return winfo[id] end,
+		}
+		local delvesByMap = { [2001] = { 8527 }, [2002] = { 8528 } }   -- continent 2000 has none
+		_G.C_AreaPoiInfo = {
+			GetDelvesForMap = function(mapID) return delvesByMap[mapID] end,
+			GetAreaPOIInfo = function(_, delveID)
+				if delveID == 8527 then
+					return { name = "A", atlasName = "delves-normal", tooltipWidgetSet = 100,
+					         position = { GetXY = function() return 0.4231, 0.5678 end } }
+				else
+					return { name = "B", atlasName = "delves-bountiful", tooltipWidgetSet = 200,
+					         position = { GetXY = function() return 0.1, 0.2 end } }
+				end
+			end,
+		}
+		-- 2000 = a viewed continent; 946 = the world root (login full-scan). Both
+		-- resolve to the same two delve-bearing zones for the test.
+		_G.C_Map = {
+			GetMapChildrenInfo = function(mapID)
+				if mapID == 2000 or mapID == 946 then
+					return { { mapID = 2001 }, { mapID = 2002 } }
+				end
+				return nil
+			end,
+		}
+		_G.WorldMapFrame = { GetMapID = function() return 2000 end, OnMapChanged = function() end }
+		_G.hooksecurefunc = function(t, name, fn)
+			local orig = t[name]; t[name] = function(...) orig(...); fn(...) end
+		end
+	end
+
+	local function loadCollector(ns)
+		assert(loadfile("collectors/delves.lua"))("TiW", ns)
+	end
+
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]
+			g[#g + 1] = e
+		end
+		return m
+	end
+
+	before_each(function()
+		mock.now = 1747776000
+		mock.frames = {}
+		mock.secrets = {}
+		installDelveEnv()
+	end)
+	after_each(function()
+		_G.C_DateAndTime, _G.Enum, _G.C_UIWidgetManager = nil, nil, nil
+		_G.C_AreaPoiInfo, _G.C_Map = nil, nil
+		_G.WorldMapFrame, _G.hooksecurefunc = nil, nil
+	end)
+
+	it("walks the viewed continent's child zones and emits storyline + bountiful with scaled coords", function()
+		local ns = freshNS()
+		loadCollector(ns)
+		WorldMapFrame:OnMapChanged()   -- viewing the continent (delves are on its child zones)
+
+		local m = byKind(ns.session.events)
+		local story = {}
+		for _, e in ipairs(m.delve_storyline_seen or {}) do story[e.data.delveID] = e.data end
+		assert.equal(2, #(m.delve_storyline_seen or {}))
+		assert.equal("Waygate Wiles", story[8527].variant)
+		assert.equal("Coffer Chaos", story[8528].variant)
+		assert.equal(2001, story[8527].mapID)            -- the child zone it was found on
+		assert.equal(4231, story[8527].x)                 -- 0.4231 -> scaled int
+		assert.equal(5678, story[8527].y)
+
+		-- only the delves-bountiful POI emits the second event
+		assert.equal(1, #(m.delve_bountiful_seen or {}))
+		assert.equal(8528, m.delve_bountiful_seen[1].data.delveID)
+	end)
+
+	it("walks the whole map tree on login via the coroutine runner (no map opened)", function()
+		local ns = freshNS()
+		loadCollector(ns)
+		mock.fireEvent("PLAYER_ENTERING_WORLD")   -- kicks off the full-world scan
+		mock.tick(0)                              -- pump Schedule.Run to completion
+
+		local m = byKind(ns.session.events)
+		assert.equal(2, #(m.delve_storyline_seen or {}))   -- both zones' delves, no map opened
+		assert.equal(1, #(m.delve_bountiful_seen or {}))
+	end)
+
+	it("dedups per delve per day across repeated map views", function()
+		local ns = freshNS()
+		loadCollector(ns)
+		WorldMapFrame:OnMapChanged()
+		local n = #ns.session.events
+		WorldMapFrame:OnMapChanged()   -- same day -> suppressed
+		assert.equal(n, #ns.session.events)
+	end)
+
+	it("guards a secret variant but still emits the delve", function()
+		local ns = freshNS()
+		loadCollector(ns)
+		mock.setSecret("Waygate Wiles")
+		WorldMapFrame:OnMapChanged()
+
+		local m = byKind(ns.session.events)
+		local d8527
+		for _, e in ipairs(m.delve_storyline_seen or {}) do
+			if e.data.delveID == 8527 then d8527 = e.data end
+		end
+		assert.is_nil(d8527.variant)        -- secret text dropped
+		assert.equal(2001, d8527.mapID)     -- but the sighting is still recorded
 	end)
 end)

@@ -25,5 +25,6 @@ collectors\basics.lua
 collectors\level_up.lua
 collectors\collections.lua
 collectors\events_schedule.lua
+collectors\delves.lua
 core\session.lua
 commands.lua
