@@ -15,6 +15,7 @@ read_globals = {
 	"C_PetJournal",
 	"issecretvalue", "C_Secrets",
 	"C_Timer", "C_Map", "InCombatLockdown",
+	"C_EventScheduler", "C_AreaPoiInfo",
 }
 
 exclude_files = {
