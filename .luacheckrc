@@ -13,6 +13,7 @@ read_globals = {
 	"GetSpecialization", "GetSpecializationInfo", "GetAverageItemLevel",
 	"C_Covenants", "RequestTimePlayed",
 	"C_PetJournal",
+	"issecretvalue",
 }
 
 exclude_files = {

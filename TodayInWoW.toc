@@ -8,11 +8,14 @@
 
 # Load order: bootstrap → frozen contract core → log/snapshot → collectors → login.
 core\namespace.lua
+core\util.lua
 core\hash.lua
 core\canonical.lua
 core\chain.lua
 core\eventlog.lua
 core\snapshot.lua
+core\retention.lua
+core\drain.lua
 collectors\basics.lua
 collectors\level_up.lua
 collectors\collections.lua

@@ -74,6 +74,9 @@ function Snapshot.Capture(session)
 
 	bundle.snapshot.tail = running
 	bundle.session_tail  = running   -- events chain from here (eventlog, §8)
+	-- Capture wall-clock so retention can age out event-less sessions (§4.1).
+	-- Not part of any canonical form, so it never touches the chain.
+	bundle.snapshot.scan_time = (GetServerTime and GetServerTime()) or 0
 	return bundle
 end
 

@@ -2,9 +2,8 @@ local _, ns = ...
 ns = ns or {}
 
 -- ===========================================================================
--- core/util.lua  ·  SIGNATURE STUB (not implemented — see tests/README.md)
+-- core/util.lua  ·  shared pure helpers (Tier-1)  ·  see tests/README.md
 --
--- Shared pure helpers used across collectors. Pinned by the test suite:
 --   ns.Util.scaleCoord(x)            -> integer   data_storage §3.6
 --       round(x*10000), clamped to 0..10000. Floats are never hashed; coords
 --       are pre-scaled to ints at capture so canonical sees only integers (§8).
@@ -13,18 +12,23 @@ ns = ns or {}
 --       daily-reset second-of-day so the bucket flips at reset, not UTC midnight.
 -- ===========================================================================
 
+local floor = math.floor
+
 local Util = {}
 ns.Util = Util
 
 function Util.scaleCoord(x)
-	error("not implemented")
+	local n = floor(x * 10000 + 0.5)   -- round half up
+	if n < 0 then return 0 end
+	if n > 10000 then return 10000 end
+	return n
 end
 
 local Bucket = {}
 ns.Bucket = Bucket
 
 function Bucket.daily(serverTime, resetOffset)
-	error("not implemented")
+	return floor((serverTime - resetOffset) / 86400)
 end
 
 return ns

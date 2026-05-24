@@ -2,9 +2,8 @@ local _, ns = ...
 ns = ns or {}
 
 -- ===========================================================================
--- core/retention.lua  ·  SIGNATURE STUB (not implemented — see tests/README.md)
+-- core/retention.lua  ·  7-day WHOLE-SESSION prune (data_storage §4.1)
 --
--- 7-day WHOLE-SESSION prune at login (data_storage §4.1). Pinned signature:
 --   ns.Retention.prune(sessions, now, maxAgeDays) -> keptSessions
 --
 -- Drops a whole session bundle iff its newest activity is strictly older than
@@ -17,8 +16,34 @@ ns = ns or {}
 local Retention = {}
 ns.Retention = Retention
 
+-- Newest activity timestamp for a bundle: latest event `t`, else snapshot scan.
+local function newestActivity(s)
+	local newest
+	local events = s.events
+	if events then
+		for i = 1, #events do
+			local t = events[i].t
+			if t and (not newest or t > newest) then newest = t end
+		end
+	end
+	if not newest then
+		newest = s.snapshot and s.snapshot.scan_time
+	end
+	return newest
+end
+
 function Retention.prune(sessions, now, maxAgeDays)
-	error("not implemented")
+	local maxAge = maxAgeDays * 86400
+	local kept = {}
+	for i = 1, #sessions do
+		local s = sessions[i]
+		local newest = newestActivity(s)
+		-- Undeterminable age (no events, no scan_time) -> keep, never silently drop.
+		if not newest or (now - newest) <= maxAge then
+			kept[#kept + 1] = s
+		end
+	end
+	return kept
 end
 
 return ns

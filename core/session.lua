@@ -6,10 +6,13 @@ local _, ns = ...
 -- At PLAYER_LOGIN: mint a session, capture the snapshot bundle, make it the
 -- active log (ns.session), and append it to the character record in TiWDB.
 --
--- NOTE: drain (§6) and retention (§4.1) are intentionally NOT wired yet — their
--- core modules are still stubs. Add those calls at the top of startSession once
--- implemented (drain first to clear shipped sessions, then prune old ones).
+-- Before capturing the new bundle we bound stored growth: Drain.run clears
+-- sessions the companion has confirmed shipped (§6), then Retention.prune drops
+-- whole sessions older than RETENTION_DAYS (§4.1, whole-session only — never per
+-- row, which would orphan a chain).
 -- ===========================================================================
+
+local RETENTION_DAYS = 7   -- data_storage §4.1 (locked)
 
 local function mintSessionID(guid)
 	-- guid + server time + a sub-second component (GetTime ms). No math.randomseed:
@@ -27,6 +30,10 @@ local function startSession()
 		TiWDB.characters[key] = rec
 	end
 	rec.char_guid = guid
+
+	-- Bound stored growth before adding today's bundle.
+	ns.Drain.run(rec)
+	rec.sessions = ns.Retention.prune(rec.sessions, GetServerTime(), RETENTION_DAYS)
 
 	local bundle = ns.Snapshot.Capture({
 		session_id     = mintSessionID(guid),
