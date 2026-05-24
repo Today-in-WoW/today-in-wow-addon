@@ -14,5 +14,7 @@ core\chain.lua
 core\eventlog.lua
 core\snapshot.lua
 collectors\basics.lua
+collectors\level_up.lua
+collectors\collections.lua
 core\session.lua
 commands.lua

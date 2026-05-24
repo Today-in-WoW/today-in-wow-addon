@@ -12,6 +12,7 @@ read_globals = {
 	"UnitLevel", "UnitClass", "UnitRace", "UnitFactionGroup", "UnitSex",
 	"GetSpecialization", "GetSpecializationInfo", "GetAverageItemLevel",
 	"C_Covenants", "RequestTimePlayed",
+	"C_PetJournal",
 }
 
 exclude_files = {

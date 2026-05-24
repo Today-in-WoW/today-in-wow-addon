@@ -41,12 +41,17 @@ local function debugReport()
 		.. "  " .. mark("Snapshot", hasFns(ns.Snapshot, "Register", "Capture"))
 		.. "  " .. mark("account", type(ns.account) == "table"))
 
-	-- Runtime state.
+	-- Runtime state. session_tail starts at snapshot.tail and advances on each
+	-- Emit, so it's the live proof the event chain is moving.
 	local s = ns.session
 	out("  runtime   " .. mark("session", s ~= nil)
 		.. "  events=" .. tostring(s and #s.events or 0)
 		.. "  next_seq=" .. tostring(s and s.next_seq or 0)
 		.. "  collectors=" .. count(ns.collectors))
+	if s then
+		out("  chain     snap=" .. tostring(s.snapshot and s.snapshot.tail)
+			.. "  session_tail=" .. tostring(s.session_tail or (s.snapshot and s.snapshot.tail)))
+	end
 
 	-- SavedVariables.
 	local db = TiWDB or {}
@@ -61,7 +66,7 @@ local function debugReport()
 	if s and s.snapshot and s.snapshot.basics then
 		local b = s.snapshot.basics.contents or {}
 		out("  basics    lvl=" .. tostring(b.level) .. " " .. tostring(b.class) .. "/" .. tostring(b.race)
-			.. " ilvl=" .. tostring(b.ilvl) .. "  tail=" .. tostring(s.snapshot.tail))
+			.. " ilvl=" .. tostring(b.ilvl))
 	end
 
 	-- Modules not yet in the build (will turn green as they land).
