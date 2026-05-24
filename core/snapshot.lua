@@ -2,41 +2,79 @@ local _, ns = ...
 ns = ns or {}
 
 -- ===========================================================================
--- core/snapshot.lua  ·  SIGNATURE STUB (not implemented — see tests/README.md)
+-- core/snapshot.lua  ·  per-session snapshot capture  (data_storage §5/§7/§8)
 --
--- ns.Snapshot.Register(category, scanFn[, opts])   (data_storage §5/§7/§8)
---   scanFn() -> { contents = sortedIDs }  OR  { contents=…, data=… }  (no h).
---   opts.persist = true marks an account-baseline category (§5).
---
--- ns.Snapshot.Capture(session) -> bundle           (data_storage §5/§7/§8)
---   Runs scanners in the FROZEN chain order (ns.Snapshot.ORDER) regardless of
---   registration order; for the persist categories copies contents from
---   ns.account.collections instead of scanning; hashes each category from
---   genesis via the per-category Canonical form; sets snapshot.tail = the last
---   category's hash; writes a bundle carrying session_id, schema_version, genesis.
---   `session` provides { session_id, char_guid, schema_version }.
+-- ns.Snapshot.Register(category, scanFn[, opts]) — scanFn() returns the category's
+--   raw fields: {contents=…} (id arrays + basics' flat table) / {contents,data}
+--   (composite) / {activities} / {locks}. No `h`.
+-- ns.Snapshot.Capture(session) -> bundle — walks ORDER (regardless of registration
+--   order), scanning each category or copying its account baseline, canonicalizing
+--   via the matching Canonical form, chaining from genesis; sets snapshot.tail and
+--   seeds an empty event log so the bundle is immediately Emit-ready.
+--   `session` = { session_id, char_guid, schema_version }.
 -- ===========================================================================
 
 local Snapshot = {}
 ns.Snapshot = Snapshot
 
--- Frozen, append-only chain order (data_storage §5/§7). Reference data, not
--- logic — the verifier and addon must agree on it exactly.
+-- Frozen, append-only chain order (data_storage §5/§7).
 Snapshot.ORDER = {
 	"basics", "mounts", "toys", "pets", "appearances", "decor", "achievements",
 	"professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
 }
 
--- The persist-and-delta account baselines (data_storage §5): copied in from
--- ns.account.collections rather than rescanned each login.
+-- Persist-and-delta baselines: copied from ns.account.collections, not scanned (§5).
 Snapshot.ACCOUNT_BASELINES = { appearances = true, achievements = true, decor = true }
 
-function Snapshot.Register(category, scanFn, opts)
-	error("not implemented")
+local scanners = {}
+
+function Snapshot.Register(category, scanFn, _opts)
+	scanners[category] = scanFn
+end
+
+-- Per-category canonical form (matching ns.Canonical.*). Inputs are defaulted so
+-- an unregistered category serializes as empty rather than erroring.
+local function canonicalOf(cat, r, C)
+	if cat == "basics" then return C.basics(r.contents or {}) end
+	if cat == "professions" then return C.professions(r.contents or {}, r.data or {}) end
+	if cat == "reputations" then return C.reputations(r.contents or {}, r.data or {}) end
+	if cat == "currencies" then return C.currencies(r.contents or {}, r.data or {}) end
+	if cat == "greatvault" then return C.greatvault(r.activities or {}) end
+	if cat == "instancelocks" then return C.instancelocks(r.locks or {}) end
+	return C.ids(r.contents or {})   -- mounts/toys/pets/appearances/decor/achievements/quests
 end
 
 function Snapshot.Capture(session)
-	error("not implemented")
+	local C, Chain = ns.Canonical, ns.Chain
+	local collections = (ns.account and ns.account.collections) or {}
+
+	local bundle = {
+		session_id     = session.session_id,
+		schema_version = session.schema_version,
+		genesis        = Chain.genesis(session.session_id, session.char_guid, session.schema_version),
+		snapshot       = {},
+		events         = {},
+		next_seq       = 1,
+	}
+
+	local running = bundle.genesis
+	for i = 1, #Snapshot.ORDER do
+		local cat = Snapshot.ORDER[i]
+		local result
+		if Snapshot.ACCOUNT_BASELINES[cat] then
+			result = { contents = collections[cat] or {} }
+		else
+			local scan = scanners[cat]
+			result = (scan and scan()) or { contents = {} }
+		end
+		running = Chain.step(running, canonicalOf(cat, result, C))
+		result.h = running
+		bundle.snapshot[cat] = result
+	end
+
+	bundle.snapshot.tail = running
+	bundle.session_tail  = running   -- events chain from here (eventlog, §8)
+	return bundle
 end
 
 return ns

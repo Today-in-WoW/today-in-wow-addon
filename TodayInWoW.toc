@@ -1,0 +1,18 @@
+## Interface: 120000
+## Title: Today in WoW
+## Notes: Collects world & character data for Today in WoW (todayinwow.com).
+## Author: Today in WoW
+## Version: @project-version@
+## SavedVariables: TiWDB
+## X-Category: Data
+
+# Load order: bootstrap → frozen contract core → log/snapshot → collectors → login.
+core\namespace.lua
+core\hash.lua
+core\canonical.lua
+core\chain.lua
+core\eventlog.lua
+core\snapshot.lua
+collectors\basics.lua
+core\session.lua
+commands.lua
