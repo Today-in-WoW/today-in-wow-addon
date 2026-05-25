@@ -20,6 +20,9 @@ read_globals = {
 	"WorldMapFrame", "hooksecurefunc",
 	"C_Item", "C_ToyBox",
 	"GetNumLootItems", "GetLootSlotType", "GetLootSlotLink", "GetLootSlotInfo", "GetLootSourceInfo",
+	"C_MountJournal", "PlayerHasToy",
+	"GetNumCompletedAchievements", "GetTotalAchievementPoints",
+	"C_TransmogCollection", "C_HousingCatalog",
 }
 
 exclude_files = {

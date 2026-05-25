@@ -82,12 +82,25 @@ def c_instancelocks(locks) -> str:
     return ",".join(f"{l['instanceID']}:{l['difficultyID']}:{l['encountersDone']}" for l in rows)
 
 
-def genesis(sid, guid, sv) -> str:
-    return fnv1a(f"{sid}^{guid}^{sv}")
+def genesis(sid, guid, sv, bh) -> str:
+    return fnv1a(f"{sid}^{guid}^{sv}^{bh}")
 
 
 def step(prev, canon) -> str:
     return fnv1a(f"{prev}^{canon}")
+
+
+# account checkpoint (data_storage §3.4/§7): the six account-wide collection
+# categories hash as their own short chain; the tail is baseline_hash, which the
+# per-session genesis folds in. captured_at / counts ride alongside, NOT hashed.
+BASELINE_ORDER = ["mounts", "pets", "toys", "appearances", "achievements", "decor"]
+
+
+def baseline_hash(collections, sv) -> str:
+    running = fnv1a(f"tiw-baseline^{sv}")
+    for cat in BASELINE_ORDER:
+        running = step(running, c_ids(collections.get(cat, [])))
+    return running
 
 
 # --- vector construction ---------------------------------------------------
@@ -135,6 +148,7 @@ def build():
         (5, 1747776300, "npc_defeated", {"npcID": 233814, "spawnTime": 1747770000, "mapID": 2248}),
         (6, 1747776400, "criteria_earned", {"achievementID": 42701, "criteriaID": 105912}),
         (7, 1747776500, "delve_storyline_seen", {"delveID": 7781, "mapID": 2248, "variant": "Waygate Wiles", "x": 4231, "y": 5837}),
+        (8, 1747776600, "collection_observed", {"cat": "toy", "id": 789}),
     ]
     v["canonical_event"] = [
         {"seq": s, "t": t, "kind": k, "data": d, "expected": c_event(s, t, k, d)} for (s, t, k, d) in events
@@ -160,12 +174,26 @@ def build():
         "instancelocks": {"input": {"locks": locks}, "expected": c_instancelocks(locks)},
     }
 
-    # 6. genesis
-    gv = {"session_id": "S-abc123", "char_guid": "Player-1234-DEADBEEF", "schema_version": 1}
-    g_h = genesis(gv["session_id"], gv["char_guid"], gv["schema_version"])
+    # 6. account checkpoint (baseline_hash) — the six collection categories
+    collections = {"mounts": [1589, 1581], "pets": [2891], "toys": [],
+                   "appearances": [], "achievements": [6, 503], "decor": []}
+    b_genesis = fnv1a("tiw-baseline^1")
+    b_chain = []
+    running = b_genesis
+    for cat in BASELINE_ORDER:
+        canon = c_ids(collections[cat])
+        running = step(running, canon)
+        b_chain.append({"category": cat, "canonical": canon, "h": running})
+    bh = running
+    v["baseline"] = {"schema_version": 1, "collections": collections,
+                     "genesis": b_genesis, "chain": b_chain, "baseline_hash": bh}
+
+    # 7. genesis (folds baseline_hash → binds the session to its checkpoint)
+    gv = {"session_id": "S-abc123", "char_guid": "Player-1234-DEADBEEF", "schema_version": 1, "baseline_hash": bh}
+    g_h = genesis(gv["session_id"], gv["char_guid"], gv["schema_version"], gv["baseline_hash"])
     v["genesis"] = {**gv, "expected": g_h}
 
-    # 7. standalone chain steps
+    # 8. standalone chain steps
     v["chain_step"] = []
     prev = g_h
     for canon in ["class=MAGE;level=80", "164:100:100,165:85:100"]:
@@ -173,16 +201,11 @@ def build():
         v["chain_step"].append({"prev": prev, "canonical": canon, "expected": h})
         prev = h
 
-    # 8. end-to-end session bundle: genesis -> snapshot.tail -> session.tail
-    #    Categories in the FIXED chain order (§7). Empty categories hash "".
+    # 9. end-to-end session bundle: genesis -> snapshot.tail -> session.tail
+    #    Per-CHARACTER categories in the FIXED chain order (§7); account-wide
+    #    collections live in the checkpoint (§6 above), not the snapshot.
     order = [
         ("basics", c_payload(basics)),
-        ("mounts", c_ids([1589, 1581])),
-        ("toys", c_ids([])),
-        ("pets", c_ids([2891])),
-        ("appearances", c_ids([])),
-        ("decor", c_ids([])),
-        ("achievements", c_ids([6, 503])),
         ("professions", c_professions(prof_c, prof_d)),
         ("reputations", c_reputations(rep_c, rep_d)),
         ("currencies", c_currencies(cur_c, cur_d)),
@@ -211,6 +234,7 @@ def build():
 
     v["session"] = {
         "session_id": gv["session_id"], "char_guid": gv["char_guid"], "schema_version": 1,
+        "baseline_hash": bh,
         "genesis": g_h, "snapshot_chain": snap, "snapshot_tail": snapshot_tail,
         "event_chain": evchain, "session_tail": session_tail,
     }

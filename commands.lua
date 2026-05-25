@@ -100,11 +100,45 @@ local function trace(seq, kind, data, h)
 		.. ns.Canonical.payload(data) .. "  |cff808080" .. tostring(h) .. "|r")
 end
 
+-- Throwaway research probe (/tiw probe): dumps the cheap collection-count APIs the
+-- count-gated reconcile depends on (data_storage §3.4). Run it COLD at login, then
+-- again after opening each collection UI and toggling a wardrobe filter, to confirm
+-- each count is stable and filter-independent before it becomes a login gate.
+local function probe()
+	-- Achievements — Wowhead gates on the 2nd return (completed); points is a backup.
+	if GetNumCompletedAchievements then
+		local total, completed = GetNumCompletedAchievements()
+		out("ach     completed=" .. tostring(completed) .. "  total=" .. tostring(total)
+			.. "  points=" .. tostring(GetTotalAchievementPoints and GetTotalAchievementPoints()))
+	end
+
+	-- Appearances — sum collected/total over every transmog category (the gate candidate).
+	if C_TransmogCollection and C_TransmogCollection.GetCategoryCollectedCount
+		and Enum and Enum.TransmogCollectionTypeMeta then
+		local c, t = 0, 0
+		for i = Enum.TransmogCollectionTypeMeta.MinValue, Enum.TransmogCollectionTypeMeta.MaxValue do
+			c = c + (C_TransmogCollection.GetCategoryCollectedCount(i) or 0)
+			t = t + (C_TransmogCollection.GetCategoryTotal(i) or 0)
+		end
+		out("appear  collected=" .. c .. "  total=" .. t .. "  (counts visuals, not sourceIDs)")
+	else
+		out("appear  C_TransmogCollection count API unavailable")
+	end
+
+	-- Decor — GetDecorTotalOwnedCount returns (owned?, placed?); the first is the gate.
+	if C_HousingCatalog and C_HousingCatalog.GetDecorTotalOwnedCount then
+		local a, b = C_HousingCatalog.GetDecorTotalOwnedCount()
+		out("decor   totalOwned=(" .. tostring(a) .. ", " .. tostring(b) .. ")")
+	end
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	msg = (msg or ""):lower():gsub("^%s*(.-)%s*$", "%1")
 	if msg == "debug" then
 		debugReport()
+	elseif msg == "probe" then
+		probe()
 	elseif msg == "trace" then
 		if ns.OnEmit then
 			ns.OnEmit = nil
@@ -114,6 +148,6 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (suppressed in restricted content)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw trace")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw trace")
 	end
 end

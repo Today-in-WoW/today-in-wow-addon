@@ -164,6 +164,16 @@
         "y": 5837
       },
       "expected": "7|1747776500|delve_storyline_seen|delveID=7781;mapID=2248;variant=Waygate Wiles;x=4231;y=5837"
+    },
+    {
+      "seq": 8,
+      "t": 1747776600,
+      "kind": "collection_observed",
+      "data": {
+        "cat": "toy",
+        "id": 789
+      },
+      "expected": "8|1747776600|collection_observed|cat=toy;id=789"
     }
   ],
   "canonical_category": {
@@ -278,97 +288,122 @@
       "expected": "2657:14:8,2657:16:6"
     }
   },
+  "baseline": {
+    "schema_version": 1,
+    "collections": {
+      "mounts": [
+        1589,
+        1581
+      ],
+      "pets": [
+        2891
+      ],
+      "toys": [],
+      "appearances": [],
+      "achievements": [
+        6,
+        503
+      ],
+      "decor": []
+    },
+    "genesis": "43139f14",
+    "chain": [
+      {
+        "category": "mounts",
+        "canonical": "1581,1589",
+        "h": "2acb7a46"
+      },
+      {
+        "category": "pets",
+        "canonical": "2891",
+        "h": "5f38e0c7"
+      },
+      {
+        "category": "toys",
+        "canonical": "",
+        "h": "5e302ce4"
+      },
+      {
+        "category": "appearances",
+        "canonical": "",
+        "h": "ca4a7128"
+      },
+      {
+        "category": "achievements",
+        "canonical": "6,503",
+        "h": "7456918e"
+      },
+      {
+        "category": "decor",
+        "canonical": "",
+        "h": "7b696126"
+      }
+    ],
+    "baseline_hash": "7b696126"
+  },
   "genesis": {
     "session_id": "S-abc123",
     "char_guid": "Player-1234-DEADBEEF",
     "schema_version": 1,
-    "expected": "efd0a08f"
+    "baseline_hash": "7b696126",
+    "expected": "7a6d266e"
   },
   "chain_step": [
     {
-      "prev": "efd0a08f",
+      "prev": "7a6d266e",
       "canonical": "class=MAGE;level=80",
-      "expected": "87354960"
+      "expected": "844a0bdf"
     },
     {
-      "prev": "87354960",
+      "prev": "844a0bdf",
       "canonical": "164:100:100,165:85:100",
-      "expected": "99630ea4"
+      "expected": "6e19f1b5"
     }
   ],
   "session": {
     "session_id": "S-abc123",
     "char_guid": "Player-1234-DEADBEEF",
     "schema_version": 1,
-    "genesis": "efd0a08f",
+    "baseline_hash": "7b696126",
+    "genesis": "7a6d266e",
     "snapshot_chain": [
       {
         "category": "basics",
         "canonical": "class=MAGE;current_covenant=3;faction=Alliance;ilvl=639;level=80;played_level=23456;played_total=1234567;race=Gnome;sex=2;spec=63",
-        "h": "080e88a2"
-      },
-      {
-        "category": "mounts",
-        "canonical": "1581,1589",
-        "h": "eabc4f11"
-      },
-      {
-        "category": "toys",
-        "canonical": "",
-        "h": "1d3a0a12"
-      },
-      {
-        "category": "pets",
-        "canonical": "2891",
-        "h": "5c6e972e"
-      },
-      {
-        "category": "appearances",
-        "canonical": "",
-        "h": "c26b2eed"
-      },
-      {
-        "category": "decor",
-        "canonical": "",
-        "h": "b4702896"
-      },
-      {
-        "category": "achievements",
-        "canonical": "6,503",
-        "h": "9b1a85ef"
+        "h": "92ddf681"
       },
       {
         "category": "professions",
         "canonical": "164:100:100,165:85:100",
-        "h": "204e8ba3"
+        "h": "22a3c618"
       },
       {
         "category": "reputations",
         "canonical": "2503:0:21000,2510:20:8400",
-        "h": "d7325adf"
+        "h": "7d690be0"
       },
       {
         "category": "currencies",
         "canonical": "3008:1450:2000,3028:500:1000",
-        "h": "77a5d73b"
+        "h": "700eb134"
       },
       {
         "category": "greatvault",
         "canonical": "1:1:2:2:639,1:2:4:3:636",
-        "h": "d898f12e"
+        "h": "13f4703c"
       },
       {
         "category": "instancelocks",
         "canonical": "2657:14:8,2657:16:6",
-        "h": "fb37fc6a"
+        "h": "0a4cfa08"
       },
       {
         "category": "quests",
         "canonical": "70123,70200,71000",
-        "h": "d2fb9739"
+        "h": "0c4a5152"
       }
     ],
-    "snapshot_tail": "d2fb9739",
+    "snapshot_tail": "0c4a5152",
     "event_chain": [
       {
         "seq": 1,
@@ -380,7 +415,7 @@
           "source": "turned_in"
         },
         "canonical": "1|1747776000|quest_completed|mapID=2248;questID=70123;source=turned_in",
-        "h": "3c6eff78"
+        "h": "80280a9f"
       },
       {
         "seq": 2,
@@ -390,9 +425,9 @@
           "mountID": 1589
         },
         "canonical": "2|1747776050|mount_added|mountID=1589",
-        "h": "d1a25eff"
+        "h": "af04e3d5"
       }
     ],
-    "session_tail": "d1a25eff"
+    "session_tail": "af04e3d5"
   }
 }

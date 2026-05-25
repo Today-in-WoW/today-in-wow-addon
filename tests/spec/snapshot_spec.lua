@@ -1,16 +1,16 @@
 -- snapshot_spec.lua  ·  data_storage §5/§7/§8
 -- ns.Snapshot.Capture runs registered scanners in the FROZEN chain order
--- regardless of registration order, copies the account.collections baselines
--- (appearances/achievements/decor) into the snapshot, builds the per-category
--- chain from genesis, sets snapshot.tail = the last category's hash, and writes
--- a bundle carrying session_id / schema_version / genesis.
+-- regardless of registration order, builds the per-category chain from a genesis
+-- that folds the account checkpoint's baseline_hash, sets snapshot.tail = the last
+-- category's hash, and writes a bundle carrying session_id / schema_version /
+-- baseline_hash / genesis. The six account-wide collection categories are NOT in
+-- the per-session snapshot — they live in the checkpoint (core/baseline.lua).
 -- Run from the repo root: busted
 
--- The frozen, append-only chain order (data_storage §5/§7) — pinned here as the
--- spec, independent of any value the module might expose.
+-- The frozen, append-only per-character chain order (data_storage §5/§7) — pinned
+-- here as the spec, independent of any value the module might expose.
 local ORDER = {
-	"basics", "mounts", "toys", "pets", "appearances", "decor", "achievements",
-	"professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
+	"basics", "professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
 }
 
 local function freshSnapshot()
@@ -18,7 +18,9 @@ local function freshSnapshot()
 	assert(loadfile("core/hash.lua"))("TiW", ns)
 	assert(loadfile("core/canonical.lua"))("TiW", ns)
 	assert(loadfile("core/chain.lua"))("TiW", ns)
+	assert(loadfile("core/baseline.lua"))("TiW", ns)
 	assert(loadfile("core/snapshot.lua"))("TiW", ns)
+	ns.SCHEMA_VERSION = 1   -- core/baseline.lua reads this (namespace.lua sets it in-game)
 	return ns
 end
 
@@ -33,39 +35,34 @@ local vault = { { type = 1, index = 1, threshold = 2, progress = 2, level = 639 
 local locks = { { instanceID = 2657, difficultyID = 16, encountersDone = 6 },
                 { instanceID = 2657, difficultyID = 14, encountersDone = 8 } }
 
+-- A representative account checkpoint, so genesis has a real baseline_hash to fold.
+local CHECKPOINT = { mounts = { 1589, 1581 }, pets = { 2891 }, toys = {},
+                     appearances = {}, achievements = { 6, 503 }, decor = {} }
+
 local SESSION = { session_id = "S-abc123", char_guid = "Player-1234-DEADBEEF", schema_version = 1 }
 
+-- Register the seven per-character categories (the test sets scrambled order itself).
+local function registerAll(ns)
+	ns.Snapshot.Register("quests", function() return { contents = { 70123, 70200, 71000 } } end)
+	ns.Snapshot.Register("basics", function() return { contents = basics } end)
+	ns.Snapshot.Register("instancelocks", function() return { locks = locks } end)
+	ns.Snapshot.Register("currencies", function() return { contents = cur_c, data = cur_d } end)
+	ns.Snapshot.Register("greatvault", function() return { activities = vault } end)
+	ns.Snapshot.Register("professions", function() return { contents = prof_c, data = prof_d } end)
+	ns.Snapshot.Register("reputations", function() return { contents = rep_c, data = rep_d } end)
+end
+
 describe("§5/§7/§8 snapshot Capture", function()
-	it("chains every category in the FROZEN order regardless of registration order", function()
+	it("chains every per-character category in the FROZEN order regardless of registration order", function()
 		local ns = freshSnapshot()
 		local C, Chain = ns.Canonical, ns.Chain
-
-		-- account-baseline categories are NOT scanned — copied from the store (§5)
-		ns.account = { collections = { appearances = {}, achievements = { 6, 503 }, decor = {} } }
-
-		-- Register the rescan-at-login categories in a deliberately SCRAMBLED order.
-		ns.Snapshot.Register("quests", function() return { contents = { 70123, 70200, 71000 } } end)
-		ns.Snapshot.Register("basics", function() return { contents = basics } end)
-		ns.Snapshot.Register("instancelocks", function() return { locks = locks } end)
-		ns.Snapshot.Register("mounts", function() return { contents = { 1589, 1581 } } end)
-		ns.Snapshot.Register("currencies", function() return { contents = cur_c, data = cur_d } end)
-		ns.Snapshot.Register("toys", function() return { contents = {} } end)
-		ns.Snapshot.Register("greatvault", function() return { activities = vault } end)
-		ns.Snapshot.Register("pets", function() return { contents = { 2891 } } end)
-		ns.Snapshot.Register("professions", function() return { contents = prof_c, data = prof_d } end)
-		ns.Snapshot.Register("reputations", function() return { contents = rep_c, data = rep_d } end)
+		ns.account = { collections = CHECKPOINT }
+		registerAll(ns)
 
 		local bundle = ns.Snapshot.Capture(SESSION)
 
-		-- Expected canonical form per category, computed with the frozen Canonical.
 		local canon = {
 			basics = C.basics(basics),
-			mounts = C.ids({ 1589, 1581 }),
-			toys = C.ids({}),
-			pets = C.ids({ 2891 }),
-			appearances = C.ids({}),
-			decor = C.ids({}),
-			achievements = C.ids({ 6, 503 }),
 			professions = C.professions(prof_c, prof_d),
 			reputations = C.reputations(rep_c, rep_d),
 			currencies = C.currencies(cur_c, cur_d),
@@ -74,7 +71,8 @@ describe("§5/§7/§8 snapshot Capture", function()
 			quests = C.ids({ 70123, 70200, 71000 }),
 		}
 
-		local running = Chain.genesis(SESSION.session_id, SESSION.char_guid, SESSION.schema_version)
+		local baseline_hash = ns.Baseline.hash(CHECKPOINT)
+		local running = Chain.genesis(SESSION.session_id, SESSION.char_guid, SESSION.schema_version, baseline_hash)
 		for i = 1, #ORDER do
 			local cat = ORDER[i]
 			running = Chain.step(running, canon[cat])
@@ -84,45 +82,31 @@ describe("§5/§7/§8 snapshot Capture", function()
 		assert.equal(running, bundle.snapshot.tail)
 	end)
 
-	it("copies the account.collections baselines into the snapshot (§5)", function()
+	it("does NOT put account-wide collections in the snapshot; binds to the checkpoint by baseline_hash (§3.4/§7)", function()
 		local ns = freshSnapshot()
-		ns.account = { collections = { appearances = { 12, 34 }, achievements = { 6 }, decor = { 900 } } }
-		-- register only the cheap categories; baselines come from the store
-		ns.Snapshot.Register("basics", function() return { contents = basics } end)
-		ns.Snapshot.Register("mounts", function() return { contents = {} } end)
-		ns.Snapshot.Register("toys", function() return { contents = {} } end)
-		ns.Snapshot.Register("pets", function() return { contents = {} } end)
-		ns.Snapshot.Register("professions", function() return { contents = {}, data = {} } end)
-		ns.Snapshot.Register("reputations", function() return { contents = {}, data = {} } end)
-		ns.Snapshot.Register("currencies", function() return { contents = {}, data = {} } end)
-		ns.Snapshot.Register("greatvault", function() return { activities = {} } end)
-		ns.Snapshot.Register("instancelocks", function() return { locks = {} } end)
-		ns.Snapshot.Register("quests", function() return { contents = {} } end)
+		ns.account = { collections = { mounts = { 1, 2 }, h = "deadbeef" } }   -- pre-frozen checkpoint hash
+		registerAll(ns)
 
 		local bundle = ns.Snapshot.Capture(SESSION)
-		assert.same({ 12, 34 }, bundle.snapshot.appearances.contents)
-		assert.same({ 6 }, bundle.snapshot.achievements.contents)
-		assert.same({ 900 }, bundle.snapshot.decor.contents)
+
+		for _, cat in ipairs({ "mounts", "pets", "toys", "appearances", "achievements", "decor" }) do
+			assert.is_nil(bundle.snapshot[cat])
+		end
+		assert.equal("deadbeef", bundle.baseline_hash)   -- uses the stored frozen hash, not a recompute
+		assert.equal(ns.Chain.genesis(SESSION.session_id, SESSION.char_guid, SESSION.schema_version, "deadbeef"),
+			bundle.genesis)
 	end)
 
-	it("writes a bundle carrying session_id, schema_version, and genesis", function()
+	it("writes a bundle carrying session_id, schema_version, baseline_hash, and genesis", function()
 		local ns = freshSnapshot()
-		ns.account = { collections = { appearances = {}, achievements = {}, decor = {} } }
-		for _, cat in ipairs({ "basics", "mounts", "toys", "pets", "professions",
-		                       "reputations", "currencies", "greatvault", "instancelocks", "quests" }) do
-			ns.Snapshot.Register(cat, function()
-				if cat == "basics" then return { contents = basics } end
-				if cat == "greatvault" then return { activities = {} } end
-				if cat == "instancelocks" then return { locks = {} } end
-				if cat == "professions" or cat == "reputations" or cat == "currencies" then
-					return { contents = {}, data = {} }
-				end
-				return { contents = {} }
-			end)
-		end
+		ns.account = { collections = CHECKPOINT }
+		registerAll(ns)
+
 		local bundle = ns.Snapshot.Capture(SESSION)
+		local baseline_hash = ns.Baseline.hash(CHECKPOINT)
 		assert.equal("S-abc123", bundle.session_id)
 		assert.equal(1, bundle.schema_version)
-		assert.equal(ns.Chain.genesis("S-abc123", "Player-1234-DEADBEEF", 1), bundle.genesis)
+		assert.equal(baseline_hash, bundle.baseline_hash)
+		assert.equal(ns.Chain.genesis("S-abc123", "Player-1234-DEADBEEF", 1, baseline_hash), bundle.genesis)
 	end)
 end)

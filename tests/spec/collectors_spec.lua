@@ -20,10 +20,12 @@ mock.install()
 local function freshNS()
 	local ns = { collectors = {} }
 	for _, f in ipairs({ "core/hash.lua", "core/canonical.lua", "core/chain.lua",
-	                     "core/eventlog.lua", "core/util.lua", "core/secrets.lua",
-	                     "core/scheduler.lua" }) do
+	                     "core/baseline.lua", "core/eventlog.lua", "core/util.lua",
+	                     "core/secrets.lua", "core/scheduler.lua", "core/snapshot.lua" }) do
 		assert(loadfile(f))("TiW", ns)
 	end
+	ns.SCHEMA_VERSION = 1               -- core/baseline.lua reads this (namespace.lua sets it in-game)
+	ns.account = { collections = {} }   -- the account checkpoint (§3.4); empty until establish/reconcile
 	ns.session = { snapshot = { tail = "00000000" }, session_tail = "00000000",
 	               events = {}, next_seq = 1 }
 	return ns
@@ -39,10 +41,10 @@ describe("collector wiring (pending until collectors are implemented)", function
 	it("quest_completion §3.3 emits quest_completed / quest_unflagged (path A/B dedup)", function()
 		pending("collector not implemented")
 	end)
-	it("collections §3.4 emits mount_added/pet_added/toy_added/appearance_added/decor_added/achievement_earned/criteria_earned", function()
+	it("collections §3.4 emits appearance_added/decor_added/achievement_earned/criteria_earned (persist categories)", function()
 		pending("collector not implemented")
 	end)
-	it("collections §3.4/§5 registers mounts/toys/pets (rescan) + appearances/achievements/decor (persist)", function()
+	it("collections §3.4/§5 persists appearances/achievements/decor baselines", function()
 		pending("collector not implemented")
 	end)
 	it("npc_defeats §3.5 emits npc_defeated only for no-HQT whitelisted rares (dead+tap)", function()
@@ -445,5 +447,120 @@ describe("loot §3.17 collector", function()
 		assert.equal(1, #items)
 		assert.equal("object", items[1].data.sourceType)
 		assert.equal(88001, items[1].data.sourceID)
+	end)
+end)
+
+describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", function()
+	-- The collection journals, mocked inline. isCollected is the 11th return of
+	-- GetMountInfoByID; owned is the 3rd of GetPetInfoByIndex.
+	local function installJournals(cfg)
+		_G.C_MountJournal = {
+			GetMountIDs = function() return cfg.mountIDs or {} end,
+			GetMountInfoByID = function(id)
+				return "m" .. id, 0, 0, false, false, 0, false, false, nil, false, cfg.mounts[id] == true, id
+			end,
+		}
+		_G.C_PetJournal = {
+			GetNumPets = function() return #(cfg.pets or {}) end,
+			GetPetInfoByIndex = function(i)
+				local p = cfg.pets[i]
+				return "guid" .. i, p.speciesID, p.owned == true
+			end,
+			GetPetInfoByPetID = function(guid) return (cfg.guidSpecies or {})[guid] end,
+		}
+		_G.C_ToyBox = {
+			GetNumToys = function() return #(cfg.toyIndex or {}) end,
+			GetToyFromIndex = function(i) return cfg.toyIndex[i] end,
+		}
+		_G.PlayerHasToy = function(itemID) return (cfg.toys or {})[itemID] == true end
+	end
+
+	local function loadCollector(ns) assert(loadfile("collectors/collections.lua"))("TiW", ns) end
+
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]
+			g[#g + 1] = e
+		end
+		return m
+	end
+	local function sortedContents(t)
+		local c = {}
+		for i = 1, #t do c[i] = t[i] end
+		table.sort(c)
+		return c
+	end
+
+	after_each(function()
+		_G.C_MountJournal, _G.C_PetJournal, _G.C_ToyBox, _G.PlayerHasToy = nil, nil, nil, nil
+	end)
+
+	it("establish() seeds the checkpoint (collected only) and freezes baseline_hash, with no events", function()
+		local ns = freshNS()
+		installJournals({
+			mountIDs = { 100, 200, 300 }, mounts = { [100] = true, [200] = false, [300] = true },
+			pets = { { speciesID = 11, owned = true }, { speciesID = 22, owned = false }, { speciesID = 33, owned = true } },
+			toyIndex = { 500, 600 }, toys = { [500] = true, [600] = false },
+		})
+		loadCollector(ns)
+		ns.Collections.establish()
+
+		local col = ns.account.collections
+		assert.same({ 100, 300 }, sortedContents(col.mounts))   -- collected only
+		assert.same({ 11, 33 }, sortedContents(col.pets))
+		assert.same({ 500 }, sortedContents(col.toys))
+		assert.is_not_nil(col.h)                                -- baseline_hash frozen
+		assert.equal(0, #ns.session.events)                     -- ships wholesale; no per-item events
+	end)
+
+	it("reconcile() emits collection_observed (upper-bound time) for collectibles gained while away", function()
+		local ns = freshNS()
+		-- A prior checkpoint already shipped (h set → not establishing); mount 300 was gained elsewhere.
+		ns.account.collections = { mounts = { 100 }, pets = {}, toys = {}, h = "frozenhash" }
+		installJournals({
+			mountIDs = { 100, 300 }, mounts = { [100] = true, [300] = true },
+			pets = {}, toyIndex = {},
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.collection_observed or {}))
+		assert.equal("mount", m.collection_observed[1].data.cat)
+		assert.equal(300, m.collection_observed[1].data.id)
+		assert.same({ 100, 300 }, sortedContents(ns.account.collections.mounts))
+		assert.equal("frozenhash", ns.account.collections.h)    -- baseline_hash frozen across reconcile
+	end)
+
+	it("live NEW_* deltas emit precise *_added, deduped against the reconciled set", function()
+		local ns = freshNS()
+		installJournals({
+			mountIDs = { 100 }, mounts = { [100] = true },
+			pets = { { speciesID = 11, owned = true } },
+			toyIndex = { 500 }, toys = { [500] = true },
+			guidSpecies = { ["new-pet-guid"] = 99 },
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()                 -- first login: establishes + seeds owned, no events
+		assert.equal(0, #ns.session.events)
+
+		mock.fireEvent("NEW_MOUNT_ADDED", 100)            -- already owned -> suppressed
+		mock.fireEvent("NEW_MOUNT_ADDED", 777)            -- new -> emit
+		mock.fireEvent("NEW_TOY_ADDED", 500)              -- owned -> suppressed
+		mock.fireEvent("NEW_TOY_ADDED", 888)              -- new -> emit
+		mock.fireEvent("NEW_PET_ADDED", "new-pet-guid")   -- species 99 new -> emit
+		mock.fireEvent("NEW_PET_ADDED", "new-pet-guid")   -- duplicate cage -> suppressed
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.mount_added or {}))
+		assert.equal(777, m.mount_added[1].data.mountID)
+		assert.equal(1, #(m.toy_added or {}))
+		assert.equal(888, m.toy_added[1].data.itemID)
+		assert.equal(1, #(m.pet_added or {}))
+		assert.equal(99, m.pet_added[1].data.speciesID)
+		assert.same({ 100, 777 }, sortedContents(ns.account.collections.mounts))   -- delta appended to checkpoint
 	end)
 end)

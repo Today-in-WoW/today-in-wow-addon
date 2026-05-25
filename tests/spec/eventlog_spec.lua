@@ -17,7 +17,7 @@ local function freshLog()
 	assert(loadfile("core/canonical.lua"))("TiW", ns)
 	assert(loadfile("core/chain.lua"))("TiW", ns)
 	assert(loadfile("core/eventlog.lua"))("TiW", ns)
-	local tail = ns.Chain.genesis("S-test", "Player-1-1", 1)   -- stand-in anchor
+	local tail = ns.Chain.genesis("S-test", "Player-1-1", 1, "00000000")   -- stand-in anchor
 	ns.session = {
 		snapshot = { tail = tail },
 		events = {},

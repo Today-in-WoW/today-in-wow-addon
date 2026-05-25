@@ -9,6 +9,8 @@ local ns = {}
 assert(loadfile("core/hash.lua"))("TiW", ns)
 assert(loadfile("core/canonical.lua"))("TiW", ns)
 assert(loadfile("core/chain.lua"))("TiW", ns)
+assert(loadfile("core/baseline.lua"))("TiW", ns)
+ns.SCHEMA_VERSION = 1   -- core/baseline.lua reads this (namespace.lua sets it in-game)
 local Hash, C, Chain = ns.Hash, ns.Canonical, ns.Chain
 
 local f = assert(io.open("contract/vectors/v1.json", "r"))
@@ -83,7 +85,7 @@ end)
 describe("chain", function()
 	it("genesis", function()
 		local g = V.genesis
-		assert.equal(g.expected, Chain.genesis(g.session_id, g.char_guid, g.schema_version))
+		assert.equal(g.expected, Chain.genesis(g.session_id, g.char_guid, g.schema_version, g.baseline_hash))
 	end)
 
 	it("steps", function()
@@ -94,7 +96,7 @@ describe("chain", function()
 
 	it("end-to-end session bundle", function()
 		local s = V.session
-		local h = Chain.genesis(s.session_id, s.char_guid, s.schema_version)
+		local h = Chain.genesis(s.session_id, s.char_guid, s.schema_version, s.baseline_hash)
 		assert.equal(s.genesis, h)
 		for _, c in ipairs(s.snapshot_chain) do
 			h = Chain.step(h, c.canonical)
@@ -107,5 +109,21 @@ describe("chain", function()
 			assert.equal(e.h, h)
 		end
 		assert.equal(s.session_tail, h)
+	end)
+end)
+
+describe("baseline checkpoint", function()
+	it("hashes the six-category checkpoint to baseline_hash", function()
+		assert.equal(V.baseline.baseline_hash, ns.Baseline.hash(V.baseline.collections))
+	end)
+
+	it("chains each checkpoint category in the fixed baseline order", function()
+		local b = V.baseline
+		local h = Hash.fnv1a("tiw-baseline^" .. b.schema_version)
+		for _, c in ipairs(b.chain) do
+			h = Chain.step(h, c.canonical)
+			assert.equal(c.h, h)
+		end
+		assert.equal(b.baseline_hash, h)
 	end)
 end)

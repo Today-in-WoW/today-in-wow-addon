@@ -35,6 +35,10 @@ local function startSession()
 	ns.Drain.run(rec)
 	rec.sessions = ns.Retention.prune(rec.sessions, GetServerTime(), RETENTION_DAYS)
 
+	-- Establish the account checkpoint (first login only) BEFORE Capture, so the
+	-- snapshot's genesis binds to the real baseline_hash (§3.4/§7).
+	if ns.Collections then ns.Collections.establish() end
+
 	local bundle = ns.Snapshot.Capture({
 		session_id     = mintSessionID(guid),
 		char_guid      = guid,
@@ -43,6 +47,10 @@ local function startSession()
 
 	ns.session = bundle
 	rec.sessions[#rec.sessions + 1] = bundle
+
+	-- Reconcile collections AFTER the session exists, so any "gained while away"
+	-- collection_observed deltas land in this session's event log (§3.4).
+	if ns.Collections then ns.Collections.reconcile() end
 end
 
 ns.StartSession = startSession   -- exposed for manual re-capture / debugging

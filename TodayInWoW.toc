@@ -12,6 +12,7 @@ core\util.lua
 core\hash.lua
 core\canonical.lua
 core\chain.lua
+core\baseline.lua
 core\eventlog.lua
 core\snapshot.lua
 core\retention.lua

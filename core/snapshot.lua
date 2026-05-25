@@ -8,23 +8,22 @@ ns = ns or {}
 --   raw fields: {contents=…} (id arrays + basics' flat table) / {contents,data}
 --   (composite) / {activities} / {locks}. No `h`.
 -- ns.Snapshot.Capture(session) -> bundle — walks ORDER (regardless of registration
---   order), scanning each category or copying its account baseline, canonicalizing
---   via the matching Canonical form, chaining from genesis; sets snapshot.tail and
---   seeds an empty event log so the bundle is immediately Emit-ready.
---   `session` = { session_id, char_guid, schema_version }.
+--   order), scanning each category, canonicalizing via the matching Canonical form,
+--   chaining from genesis; sets snapshot.tail and seeds an empty event log so the
+--   bundle is immediately Emit-ready. `session` = { session_id, char_guid,
+--   schema_version }. The genesis folds the account checkpoint's baseline_hash
+--   (ns.account.collections.h, core/baseline.lua) — the six account-wide
+--   collection categories are NOT in the per-session snapshot (§3.4/§5/§7).
 -- ===========================================================================
 
 local Snapshot = {}
 ns.Snapshot = Snapshot
 
--- Frozen, append-only chain order (data_storage §5/§7).
+-- Frozen, append-only chain order (data_storage §5/§7) — per-CHARACTER categories
+-- only; account-wide collections live in the checkpoint (core/baseline.lua), not here.
 Snapshot.ORDER = {
-	"basics", "mounts", "toys", "pets", "appearances", "decor", "achievements",
-	"professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
+	"basics", "professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
 }
-
--- Persist-and-delta baselines: copied from ns.account.collections, not scanned (§5).
-Snapshot.ACCOUNT_BASELINES = { appearances = true, achievements = true, decor = true }
 
 local scanners = {}
 
@@ -47,11 +46,16 @@ end
 function Snapshot.Capture(session)
 	local C, Chain = ns.Canonical, ns.Chain
 	local collections = (ns.account and ns.account.collections) or {}
+	-- The checkpoint's baseline_hash anchors this session's genesis. Reconcile sets
+	-- collections.h at login (before Capture); fall back to computing it so Capture
+	-- is self-contained (tests, or a session before any reconcile ran).
+	local baseline_hash = collections.h or ns.Baseline.hash(collections)
 
 	local bundle = {
 		session_id     = session.session_id,
 		schema_version = session.schema_version,
-		genesis        = Chain.genesis(session.session_id, session.char_guid, session.schema_version),
+		baseline_hash  = baseline_hash,
+		genesis        = Chain.genesis(session.session_id, session.char_guid, session.schema_version, baseline_hash),
 		snapshot       = {},
 		events         = {},
 		next_seq       = 1,
@@ -60,13 +64,8 @@ function Snapshot.Capture(session)
 	local running = bundle.genesis
 	for i = 1, #Snapshot.ORDER do
 		local cat = Snapshot.ORDER[i]
-		local result
-		if Snapshot.ACCOUNT_BASELINES[cat] then
-			result = { contents = collections[cat] or {} }
-		else
-			local scan = scanners[cat]
-			result = (scan and scan()) or { contents = {} }
-		end
+		local scan = scanners[cat]
+		local result = (scan and scan()) or { contents = {} }
 		running = Chain.step(running, canonicalOf(cat, result, C))
 		result.h = running
 		bundle.snapshot[cat] = result

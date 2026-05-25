@@ -38,7 +38,8 @@ Thin signature stubs added so the suite is runnable and uniformly red:
 
 - `core/util.lua` — `ns.Util.scaleCoord`, `ns.Bucket.daily`
 - `core/eventlog.lua` — `ns.Emit` (+ `ns.EVENT_CAP = 50000`)
-- `core/snapshot.lua` — `ns.Snapshot.Register/Capture` (+ `ORDER`, `ACCOUNT_BASELINES`)
+- `core/snapshot.lua` — `ns.Snapshot.Register/Capture` (+ `ORDER`, per-character only)
+- `core/baseline.lua` — `ns.Baseline.hash` (account checkpoint → `baseline_hash`)
 - `core/retention.lua` — `ns.Retention.prune`
 - `core/drain.lua` — `ns.Drain.run`
 - `core/migrations.lua` — `ns.Migrations.register/run`
@@ -89,11 +90,15 @@ Implementers must conform:
   dropping oldest. First event chains from `ns.session.snapshot.tail`.
 - **`ns.Snapshot.Capture(session)`** where `session = {session_id, char_guid,
   schema_version}`. Returns/populates a bundle with `session_id`,
-  `schema_version`, `genesis`, and `snapshot[category] = { …, h }` for every
-  category in `ns.Snapshot.ORDER` (the frozen order), plus `snapshot.tail`.
-  Per-category canonical = the matching `ns.Canonical.*` form. The three
-  `ACCOUNT_BASELINES` (appearances/achievements/decor) are copied from
-  `ns.account.collections.<cat>` instead of scanned.
+  `schema_version`, `baseline_hash`, `genesis`, and `snapshot[category] = { …, h }`
+  for every category in `ns.Snapshot.ORDER` (the frozen, per-CHARACTER order),
+  plus `snapshot.tail`. Per-category canonical = the matching `ns.Canonical.*`
+  form. `genesis` folds `baseline_hash` (`ns.account.collections.h`, or computed
+  via `ns.Baseline.hash`); the six account-wide collection categories live in the
+  checkpoint, NOT the snapshot (§3.4/§5/§7).
+- **`ns.Baseline.hash(collections)`** chains the six collection id-arrays
+  (`mounts,pets,toys,appearances,achievements,decor`) from a `"tiw-baseline"^sv`
+  genesis → the checkpoint's `baseline_hash`. Reads `ns.SCHEMA_VERSION`.
 - **`ns.Drain.run(charRecord)`** mutates `charRecord.sessions` in place, removing
   bundles whose `session_id ∈ _G.TiWCompanionDB.shipped_sessions`; nil
   `_G.TiWCompanionDB` keeps all and never errors.
