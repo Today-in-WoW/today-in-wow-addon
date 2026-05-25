@@ -128,7 +128,7 @@ local function fullWorldScan()
 		local maps = C_Map.GetMapChildrenInfo(WORLD_ROOT, nil, true) or {}
 		for i = 1, #maps do
 			scanMap(maps[i].mapID)
-			if i % 50 == 0 then coroutine.yield() end
+			if i % 25 == 0 then coroutine.yield() end
 		end
 	end)
 end

@@ -91,12 +91,29 @@ local function debugReport()
 	out("  pending   " .. table.concat(parts, "  "))
 end
 
+-- Live record trace (toggled by /tiw trace): one line per Emit. Suppressed in
+-- restricted instanced content (raids/M+/rated PvP) where chat output is unsafe —
+-- records are still captured there, just not printed.
+local function trace(seq, kind, data, h)
+	if ns.Secrets and ns.Secrets.HasRestrictions and ns.Secrets.HasRestrictions() then return end
+	out("|cff40ff40+" .. seq .. "|r " .. tostring(kind) .. "  "
+		.. ns.Canonical.payload(data) .. "  |cff808080" .. tostring(h) .. "|r")
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	msg = (msg or ""):lower():gsub("^%s*(.-)%s*$", "%1")
 	if msg == "debug" then
 		debugReport()
+	elseif msg == "trace" then
+		if ns.OnEmit then
+			ns.OnEmit = nil
+			out("trace off")
+		else
+			ns.OnEmit = trace
+			out("trace on — one line per new record (suppressed in restricted content)")
+		end
 	else
-		out("commands:  /tiw debug")
+		out("commands:  /tiw debug  ·  /tiw trace")
 	end
 end

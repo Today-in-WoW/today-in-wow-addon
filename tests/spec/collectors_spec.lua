@@ -295,3 +295,155 @@ describe("delves §3.9 collector", function()
 		assert.equal(2001, d8527.mapID)     -- but the sighting is still recorded
 	end)
 end)
+
+describe("loot §3.17 collector", function()
+	-- The loot-window surface, mocked inline. `slots` describes each loot slot;
+	-- `toys` is the set of itemIDs C_ToyBox treats as toys.
+	local function installLootEnv(slots, toys)
+		toys = toys or {}
+		local linkmap = {}
+		for i = 1, #slots do if slots[i].link then linkmap[slots[i].link] = slots[i] end end
+
+		_G.Enum = _G.Enum or {}
+		_G.Enum.LootSlotType = { None = 0, Item = 1, Money = 2, Currency = 3 }
+		_G.Enum.ItemClass = { Recipe = 9, Miscellaneous = 15, Battlepet = 17 }
+		_G.Enum.ItemMiscellaneousSubclass = { CompanionPet = 2, Mount = 5 }
+
+		_G.GetNumLootItems = function() return #slots end
+		_G.GetLootSlotType = function(s) return slots[s].stype end
+		_G.GetLootSlotLink = function(s) return slots[s].link end
+		_G.GetLootSlotInfo = function(s)   -- texture, item, quantity, currencyID, quality, ...
+			return "icon", "name", slots[s].qty or 1, nil, slots[s].quality, false, false, nil, false
+		end
+		_G.GetLootSourceInfo = function(s) return unpack(slots[s].sources or {}) end
+		_G.C_Item = { GetItemInfoInstant = function(link)
+			local sl = linkmap[link]
+			if not sl then return nil end
+			return sl.itemID, "Type", "Sub", "", 0, sl.classID, sl.subclassID
+		end }
+		_G.C_ToyBox = { GetToyInfo = function(itemID) return toys[itemID] and itemID or nil end }
+	end
+
+	local function loadCollector(ns)
+		assert(loadfile("collectors/loot.lua"))("TiW", ns)
+	end
+
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]
+			g[#g + 1] = e
+		end
+		return m
+	end
+
+	-- Common GUIDs (Type-0-server-instance-zone-ID-spawn). ID is the 5th numeric field.
+	local CREATURE = "Creature-0-1-1-1-77001-aaaa"
+	local CREATURE2 = "Creature-0-1-1-1-77002-bbbb"
+	local OBJECT = "GameObject-0-1-1-1-88001-cccc"
+
+	before_each(function()
+		mock.now = 1747776000
+		mock.frames = {}
+		mock.secrets = {}
+	end)
+	after_each(function()
+		_G.GetNumLootItems, _G.GetLootSlotType, _G.GetLootSlotLink = nil, nil, nil
+		_G.GetLootSlotInfo, _G.GetLootSourceInfo, _G.C_Item, _G.C_ToyBox = nil, nil, nil, nil
+	end)
+
+	it("emits loot_item only for collectible classes, with source/item/quality", function()
+		local ns = freshNS()
+		installLootEnv({
+			{ stype = 1, link = "L-mount",  itemID = 1234, classID = 15, subclassID = 5, quality = 4, sources = { CREATURE, 1 } },
+			{ stype = 1, link = "L-recipe", itemID = 5678, classID = 9,  subclassID = 0, quality = 3, sources = { CREATURE, 1 } },
+			{ stype = 1, link = "L-green",  itemID = 9999, classID = 4,  subclassID = 0, quality = 2, sources = { CREATURE, 1 } },
+		})
+		loadCollector(ns)
+		mock.fireEvent("LOOT_OPENED")
+
+		local items = byKind(ns.session.events).loot_item or {}
+		assert.equal(2, #items)                       -- mount + recipe; green armor skipped
+		local byItem = {}
+		for _, e in ipairs(items) do byItem[e.data.itemID] = e.data end
+		assert.is_nil(byItem[9999])                   -- non-collectible never emitted
+		assert.equal("creature", byItem[1234].sourceType)
+		assert.equal(77001, byItem[1234].sourceID)
+		assert.equal(1, byItem[1234].quantity)
+		assert.equal(4, byItem[1234].quality)
+	end)
+
+	it("matches toys by the C_ToyBox predicate, not by class", function()
+		local ns = freshNS()
+		installLootEnv({
+			{ stype = 1, link = "L-toy",  itemID = 4444, classID = 15, subclassID = 0, quality = 3, sources = { CREATURE, 1 } },
+			{ stype = 1, link = "L-misc", itemID = 4445, classID = 15, subclassID = 0, quality = 3, sources = { CREATURE, 1 } },
+		}, { [4444] = true })
+		loadCollector(ns)
+		mock.fireEvent("LOOT_OPENED")
+
+		local items = byKind(ns.session.events).loot_item or {}
+		assert.equal(1, #items)                       -- only the toy; the non-toy misc item skipped
+		assert.equal(4444, items[1].data.itemID)
+	end)
+
+	it("skips Money and Currency slots", function()
+		local ns = freshNS()
+		installLootEnv({
+			{ stype = 2, quality = 0, sources = {} },   -- Money
+			{ stype = 3, quality = 0, sources = {} },   -- Currency
+		})
+		loadCollector(ns)
+		mock.fireEvent("LOOT_OPENED")
+		assert.equal(0, #(byKind(ns.session.events).loot_item or {}))
+	end)
+
+	it("attributes one loot_item per source for AoE multi-source loot", function()
+		local ns = freshNS()
+		installLootEnv({
+			{ stype = 1, link = "L-mount", itemID = 1234, classID = 15, subclassID = 5, quality = 4,
+			  sources = { CREATURE, 1, CREATURE2, 1 } },
+		})
+		loadCollector(ns)
+		mock.fireEvent("LOOT_OPENED")
+
+		local items = byKind(ns.session.events).loot_item or {}
+		assert.equal(2, #items)
+		local ids = {}
+		for _, e in ipairs(items) do ids[e.data.sourceID] = true end
+		assert.is_true(ids[77001])
+		assert.is_true(ids[77002])
+	end)
+
+	it("drops a secret source GUID but keeps the rest", function()
+		local ns = freshNS()
+		installLootEnv({
+			{ stype = 1, link = "L-mount", itemID = 1234, classID = 15, subclassID = 5, quality = 4,
+			  sources = { CREATURE, 1, CREATURE2, 1 } },
+		})
+		mock.setSecret(CREATURE2)
+		loadCollector(ns)
+		mock.fireEvent("LOOT_OPENED")
+
+		local items = byKind(ns.session.events).loot_item or {}
+		assert.equal(1, #items)
+		assert.equal(77001, items[1].data.sourceID)
+	end)
+
+	it("tags GameObject sources as object", function()
+		local ns = freshNS()
+		installLootEnv({
+			{ stype = 1, link = "L-mount", itemID = 1234, classID = 15, subclassID = 5, quality = 4,
+			  sources = { OBJECT, 1 } },
+		})
+		loadCollector(ns)
+		mock.fireEvent("LOOT_OPENED")
+
+		local items = byKind(ns.session.events).loot_item or {}
+		assert.equal(1, #items)
+		assert.equal("object", items[1].data.sourceType)
+		assert.equal(88001, items[1].data.sourceID)
+	end)
+end)

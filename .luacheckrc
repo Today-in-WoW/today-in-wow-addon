@@ -18,6 +18,8 @@ read_globals = {
 	"C_EventScheduler", "C_AreaPoiInfo",
 	"C_UIWidgetManager", "C_DateAndTime", "Enum",
 	"WorldMapFrame", "hooksecurefunc",
+	"C_Item", "C_ToyBox",
+	"GetNumLootItems", "GetLootSlotType", "GetLootSlotLink", "GetLootSlotInfo", "GetLootSourceInfo",
 }
 
 exclude_files = {

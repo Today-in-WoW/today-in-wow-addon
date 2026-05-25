@@ -24,6 +24,10 @@ function ns.Emit(kind, data)
 	s.session_tail = h
 	s.next_seq = seq + 1
 
+	-- Optional dev hook (NOT part of the wire contract): live record trace, set by
+	-- /tiw trace. Nil in normal play, so this costs a single nil-check.
+	if ns.OnEmit then ns.OnEmit(seq, kind, data, h) end
+
 	-- In-session cap: drop oldest. A single session can't realistically reach 50k
 	-- (§4); cross-session growth is handled by retention (§4.1).
 	if #s.events > ns.EVENT_CAP then
