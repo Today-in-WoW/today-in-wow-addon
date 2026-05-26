@@ -121,15 +121,31 @@ end
 -- coroutine and yields periodically — spread across frames, no FPS hitch (§4c).
 local WORLD_ROOT = 946   -- Cosmic map; allDescendants reaches every continent/zone
 
+-- POI data is not loaded at login — it streams in shortly after, signalled by
+-- AREA_POIS_UPDATED. So fullWorldScan is RE-ATTEMPTED on that signal until one
+-- attempt actually emits delves (fullScanOK), then we stop full-sweeping and let
+-- scanViewedMap handle incremental navigation. `scanning` guards against launching
+-- overlapping sweeps; per-delve `seen` dedup makes any overlap/repeat idempotent.
+local scanning, fullScanOK = false, false
+
 local function fullWorldScan()
+	if scanning or fullScanOK then return end
 	if not ns.session then return end
 	if not (C_Map and C_Map.GetMapChildrenInfo and ns.Schedule) then return end
+	scanning = true
 	ns.Schedule.Run(function()
 		local maps = C_Map.GetMapChildrenInfo(WORLD_ROOT, nil, true) or {}
+		local before = ns.session and ns.session.next_seq or 0
 		for i = 1, #maps do
 			scanMap(maps[i].mapID)
 			if i % 25 == 0 then coroutine.yield() end
 		end
+		scanning = false
+		-- Latch once an attempt actually produced delves; until then AREA_POIS_UPDATED
+		-- keeps retrying (POI data streams in after login). emitted counts this scan's
+		-- own rows; it over-counts if another collector emits concurrently, which is
+		-- harmless here — we only test > 0.
+		if (ns.session and ns.session.next_seq or 0) > before then fullScanOK = true end
 	end)
 end
 
@@ -147,17 +163,13 @@ end
 
 local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_ENTERING_WORLD")   -- WorldMapFrame exists by now
-f:RegisterEvent("AREA_POIS_UPDATED")
-local didFullScan = false
+f:RegisterEvent("AREA_POIS_UPDATED")       -- POI data ready/updated — the retry signal
 f:SetScript("OnEvent", function(_, event)
 	if event == "PLAYER_ENTERING_WORLD" then
 		installMapHook()
-		if not didFullScan then       -- once per session; PEW also fires on every loading screen
-			didFullScan = true
-			fullWorldScan()
-		end
-	else
-		scanViewedMap()
+		fullWorldScan()                       -- attempt now; retried on AREA_POIS_UPDATED until it lands
+	else                                      -- AREA_POIS_UPDATED
+		if fullScanOK then scanViewedMap() else fullWorldScan() end
 	end
 end)
 installMapHook()   -- in case the map frame already exists at load

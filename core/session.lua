@@ -20,6 +20,16 @@ local function mintSessionID(guid)
 	return string.format("%s-%d-%d", guid or "?", GetServerTime(), math.floor((GetTime() or 0) * 1000) % 1000000)
 end
 
+local function finishSession(rec, guid)
+	local bundle = ns.Snapshot.Capture({
+		session_id     = mintSessionID(guid),
+		char_guid      = guid,
+		schema_version = ns.SCHEMA_VERSION,
+	})
+	ns.session = bundle
+	rec.sessions[#rec.sessions + 1] = bundle
+end
+
 local function startSession()
 	local guid = UnitGUID("player")
 	local key = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
@@ -35,22 +45,16 @@ local function startSession()
 	ns.Drain.run(rec)
 	rec.sessions = ns.Retention.prune(rec.sessions, GetServerTime(), RETENTION_DAYS)
 
-	-- Establish the account checkpoint (first login only) BEFORE Capture, so the
-	-- snapshot's genesis binds to the real baseline_hash (§3.4/§7).
-	if ns.Collections then ns.Collections.establish() end
-
-	local bundle = ns.Snapshot.Capture({
-		session_id     = mintSessionID(guid),
-		char_guid      = guid,
-		schema_version = ns.SCHEMA_VERSION,
-	})
-
-	ns.session = bundle
-	rec.sessions[#rec.sessions + 1] = bundle
-
-	-- Reconcile collections AFTER the session exists, so any "gained while away"
-	-- collection_observed deltas land in this session's event log (§3.4).
-	if ns.Collections then ns.Collections.reconcile() end
+	-- Capture immediately so ns.session exists from the start of the session — the
+	-- delves/events collectors fire at PLAYER_ENTERING_WORLD and bail without it. The
+	-- collection scan then reconciles async on the coroutine runner so login never
+	-- hitches (§4/§5). On the first-ever login it establishes the checkpoint, and this
+	-- session's genesis binds to the as-yet-empty baseline_hash — once per account, and
+	-- correct (no checkpoint existed when the session began); the checkpoint ships
+	-- separately and the site can re-baseline (§3.4). We do NOT defer capture behind
+	-- the scan: that left ns.session nil for seconds, dropping the login's events.
+	finishSession(rec, guid)
+	if ns.Collections then ns.Collections.refresh() end
 end
 
 ns.StartSession = startSession   -- exposed for manual re-capture / debugging

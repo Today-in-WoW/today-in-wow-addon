@@ -498,7 +498,7 @@ describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", functio
 		_G.C_MountJournal, _G.C_PetJournal, _G.C_ToyBox, _G.PlayerHasToy = nil, nil, nil, nil
 	end)
 
-	it("establish() seeds the checkpoint (collected only) and freezes baseline_hash, with no events", function()
+	it("reconcile() on an empty account establishes the checkpoint (collected only), freezes baseline_hash, no events", function()
 		local ns = freshNS()
 		installJournals({
 			mountIDs = { 100, 200, 300 }, mounts = { [100] = true, [200] = false, [300] = true },
@@ -506,7 +506,7 @@ describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", functio
 			toyIndex = { 500, 600 }, toys = { [500] = true, [600] = false },
 		})
 		loadCollector(ns)
-		ns.Collections.establish()
+		ns.Collections.reconcile()   -- no checkpoint yet (col.h nil) → establishing pass
 
 		local col = ns.account.collections
 		assert.same({ 100, 300 }, sortedContents(col.mounts))   -- collected only
@@ -562,5 +562,23 @@ describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", functio
 		assert.equal(1, #(m.pet_added or {}))
 		assert.equal(99, m.pet_added[1].data.speciesID)
 		assert.same({ 100, 777 }, sortedContents(ns.account.collections.mounts))   -- delta appended to checkpoint
+	end)
+
+	it("refresh() runs the scan on the coroutine runner and establishes via pumped frames", function()
+		local ns = freshNS()
+		installJournals({
+			mountIDs = { 100, 200 }, mounts = { [100] = true, [200] = true },
+			pets = {}, toyIndex = {},
+		})
+		loadCollector(ns)
+
+		local done = false
+		ns.Collections.refresh(function() done = true end)
+		for _ = 1, 50 do if done then break end; mock.tick(0) end   -- pump OnUpdate frames
+
+		assert.is_true(done)
+		assert.same({ 100, 200 }, sortedContents(ns.account.collections.mounts))
+		assert.is_not_nil(ns.account.collections.h)
+		assert.equal(0, #ns.session.events)   -- establishing pass emits nothing
 	end)
 end)
