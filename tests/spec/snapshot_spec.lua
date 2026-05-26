@@ -27,7 +27,7 @@ end
 -- Sample state (mirrors tools/gen_vectors.py so the canonical forms are trusted).
 local basics = { level = 80, class = "MAGE", race = "Gnome", faction = "Alliance", sex = 2,
                  spec = 63, ilvl = 639, played_total = 1234567, played_level = 23456, current_covenant = 3 }
-local prof_c, prof_d = { 164, 165 }, { [164] = { rank = 100, maxRank = 100 }, [165] = { rank = 85, maxRank = 100 } }
+local prof_c, prof_d = { 164, 165 }, { [164] = { rank = 100 }, [165] = { rank = 85 } }
 local rep_c, rep_d = { 2503, 2510 }, { [2503] = { level = 0, value = 21000 }, [2510] = { level = 20, value = 8400 } }
 local cur_c, cur_d = { 3008, 3028 }, { [3008] = { quantity = 1450, max = 2000 }, [3028] = { quantity = 500, max = 1000 } }
 local vault = { { type = 1, index = 1, threshold = 2, progress = 2, level = 639 },
@@ -108,5 +108,44 @@ describe("§5/§7/§8 snapshot Capture", function()
 		assert.equal(1, bundle.schema_version)
 		assert.equal(baseline_hash, bundle.baseline_hash)
 		assert.equal(ns.Chain.genesis("S-abc123", "Player-1234-DEADBEEF", 1, baseline_hash), bundle.genesis)
+	end)
+
+	-- §3.7 readiness: professions data streams in after login, so the login snapshot
+	-- captures it empty. Recapture re-scans that one category and rebuilds the chain in
+	-- place — including re-chaining the events already emitted off the old snapshot tail.
+	it("Recapture re-folds a late category and re-chains the session's events", function()
+		local ns = freshSnapshot()
+		local C, Chain = ns.Canonical, ns.Chain
+		ns.account = { collections = CHECKPOINT }
+		local profReady = false
+		ns.Snapshot.Register("basics", function() return { contents = basics } end)
+		ns.Snapshot.Register("professions", function()
+			if profReady then return { contents = prof_c, data = prof_d } end
+			return { contents = {} }
+		end)
+
+		local bundle = ns.Snapshot.Capture(SESSION)
+		ns.session = bundle
+		assert.equal(0, #bundle.snapshot.professions.contents)   -- empty at login
+
+		-- two events emitted off the empty-professions snapshot tail
+		local function emit(seq, t, kind, data)
+			local h = Chain.step(bundle.session_tail, C.event(seq, t, kind, data))
+			bundle.events[#bundle.events + 1] = { seq = seq, t = t, kind = kind, data = data, h = h }
+			bundle.session_tail = h
+		end
+		emit(1, 100, "mount_added", { mountID = 1589 })
+		emit(2, 200, "level_up", { newLevel = 80 })
+
+		profReady = true
+		ns.Snapshot.Recapture("professions")
+
+		-- category filled, and the events now chain off the NEW snapshot tail
+		assert.same(prof_c, bundle.snapshot.professions.contents)
+		local h1 = Chain.step(bundle.snapshot.tail, C.event(1, 100, "mount_added", { mountID = 1589 }))
+		local h2 = Chain.step(h1, C.event(2, 200, "level_up", { newLevel = 80 }))
+		assert.equal(h1, bundle.events[1].h)
+		assert.equal(h2, bundle.events[2].h)
+		assert.equal(h2, bundle.session_tail)
 	end)
 end)

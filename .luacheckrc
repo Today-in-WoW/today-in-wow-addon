@@ -23,6 +23,11 @@ read_globals = {
 	"C_MountJournal", "PlayerHasToy",
 	"GetNumCompletedAchievements", "GetTotalAchievementPoints",
 	"C_TransmogCollection", "C_HousingCatalog",
+	"GetProfessions", "GetProfessionInfo", "C_TradeSkillUI",
+	"C_CurrencyInfo", "C_WeeklyRewards",
+	"C_Reputation", "C_MajorFactions", "C_GossipInfo",
+	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo",
+	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo",
 }
 
 exclude_files = {

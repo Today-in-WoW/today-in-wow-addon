@@ -17,7 +17,7 @@ Spec (frozen, schema_version 1):
   list sep  : ","   between ids and between category tuples
   pair sep  : ";"   between payload k=v pairs
   kv        : "="   payload key/value
-  tuple sep : ":"   inside category tuples (id:rank:maxRank, etc.)
+  tuple sep : ":"   inside category tuples (id:rank, id:level:value, etc.)
   numbers   : integers only, base-10, no separators. Fractionals (coords) are
               pre-scaled to ints at capture (round(coord*10000)).
   booleans  : "true" / "false"
@@ -60,8 +60,10 @@ def c_ids(ids) -> str:
 
 
 # --- composite category canonical forms -----------------------------------
+# contents = per-expansion trade-skill-line IDs; maxRank is a static, site-mappable
+# property of each line, so only rank ships/hashes (data_storage §3.7).
 def c_professions(contents, data) -> str:
-    return ",".join(f"{i}:{data[i]['rank']}:{data[i]['maxRank']}" for i in sorted(contents))
+    return ",".join(f"{i}:{data[i]['rank']}" for i in sorted(contents))
 
 
 def c_reputations(contents, data) -> str:
@@ -157,7 +159,7 @@ def build():
     # 5. per-category canonical forms
     basics = {"level": 80, "class": "MAGE", "race": "Gnome", "faction": "Alliance", "sex": 2,
               "spec": 63, "ilvl": 639, "played_total": 1234567, "played_level": 23456, "current_covenant": 3}
-    prof_c, prof_d = [164, 165], {164: {"rank": 100, "maxRank": 100}, 165: {"rank": 85, "maxRank": 100}}
+    prof_c, prof_d = [164, 165], {164: {"rank": 100}, 165: {"rank": 85}}
     rep_c, rep_d = [2503, 2510], {2503: {"level": 0, "value": 21000}, 2510: {"level": 20, "value": 8400}}
     cur_c, cur_d = [3008, 3028], {3008: {"quantity": 1450, "max": 2000}, 3028: {"quantity": 500, "max": 1000}}
     vault = [{"type": 1, "index": 1, "threshold": 2, "progress": 2, "level": 639},
@@ -196,7 +198,7 @@ def build():
     # 8. standalone chain steps
     v["chain_step"] = []
     prev = g_h
-    for canon in ["class=MAGE;level=80", "164:100:100,165:85:100"]:
+    for canon in ["class=MAGE;level=80", "164:100,165:85"]:
         h = step(prev, canon)
         v["chain_step"].append({"prev": prev, "canonical": canon, "expected": h})
         prev = h

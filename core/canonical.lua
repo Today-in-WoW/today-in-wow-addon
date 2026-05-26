@@ -60,11 +60,12 @@ function C.ids(arr)
 end
 
 -- composite categories: contents = sorted id array, data = id -> fields
+-- professions: contents = per-expansion trade-skill-line IDs; maxRank is a static,
+-- site-mappable property of each line, so only rank ships/hashes (§3.7).
 function C.professions(contents, data)
 	local c, parts = sortedCopy(contents), {}
 	for i = 1, #c do
-		local d = data[c[i]]
-		parts[i] = format("%d:%d:%d", c[i], d.rank, d.maxRank)
+		parts[i] = format("%d:%d", c[i], data[c[i]].rank)
 	end
 	return concat(parts, ",")
 end

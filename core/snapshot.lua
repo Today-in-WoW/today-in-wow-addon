@@ -79,4 +79,36 @@ function Snapshot.Capture(session)
 	return bundle
 end
 
+-- Re-scan ONE snapshot category whose data wasn't available at login (e.g. professions
+-- stream in after PLAYER_LOGIN, §3.7) and rebuild the chain in place: swap in the fresh
+-- scan, recompute the snapshot chain from genesis over the stored category results, then
+-- re-chain the session's events off the new snapshot tail. One synchronous pass — no Emit
+-- can interleave — so the bundle stays internally consistent (canonical recomputed from
+-- each event's seq/t/kind/data). The genesis (session_id/baseline_hash) is untouched.
+function Snapshot.Recapture(category)
+	local s = ns.session
+	if not s or not s.snapshot then return end
+	local C, Chain = ns.Canonical, ns.Chain
+
+	local fresh = scanners[category] and scanners[category]()
+	if fresh then s.snapshot[category] = fresh end
+
+	local running = s.genesis
+	for i = 1, #Snapshot.ORDER do
+		local cat = Snapshot.ORDER[i]
+		local result = s.snapshot[cat] or { contents = {} }
+		running = Chain.step(running, canonicalOf(cat, result, C))
+		result.h = running
+		s.snapshot[cat] = result
+	end
+	s.snapshot.tail = running
+
+	for i = 1, #s.events do
+		local e = s.events[i]
+		running = Chain.step(running, C.event(e.seq, e.t, e.kind, e.data))
+		e.h = running
+	end
+	s.session_tail = running
+end
+
 return ns

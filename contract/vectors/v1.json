@@ -200,16 +200,14 @@
         ],
         "data": {
           "164": {
-            "rank": 100,
-            "maxRank": 100
+            "rank": 100
           },
           "165": {
-            "rank": 85,
-            "maxRank": 100
+            "rank": 85
           }
         }
       },
-      "expected": "164:100:100,165:85:100"
+      "expected": "164:100,165:85"
     },
     "reputations": {
       "input": {
@@ -356,8 +354,8 @@
     },
     {
       "prev": "844a0bdf",
-      "canonical": "164:100:100,165:85:100",
-      "expected": "6e19f1b5"
+      "canonical": "164:100,165:85",
+      "expected": "2c0fd64f"
     }
   ],
   "session": {
@@ -374,36 +372,36 @@
       },
       {
         "category": "professions",
-        "canonical": "164:100:100,165:85:100",
-        "h": "22a3c618"
+        "canonical": "164:100,165:85",
+        "h": "81edca22"
       },
       {
         "category": "reputations",
         "canonical": "2503:0:21000,2510:20:8400",
-        "h": "7d690be0"
+        "h": "92c22e4e"
       },
       {
         "category": "currencies",
         "canonical": "3008:1450:2000,3028:500:1000",
-        "h": "700eb134"
+        "h": "37b1027f"
       },
       {
         "category": "greatvault",
         "canonical": "1:1:2:2:639,1:2:4:3:636",
-        "h": "13f4703c"
+        "h": "e67b5df2"
       },
       {
         "category": "instancelocks",
         "canonical": "2657:14:8,2657:16:6",
-        "h": "0a4cfa08"
+        "h": "e8c7abc0"
       },
       {
         "category": "quests",
         "canonical": "70123,70200,71000",
-        "h": "0c4a5152"
+        "h": "747706fa"
       }
     ],
-    "snapshot_tail": "0c4a5152",
+    "snapshot_tail": "747706fa",
     "event_chain": [
       {
         "seq": 1,
@@ -415,7 +413,7 @@
           "source": "turned_in"
         },
         "canonical": "1|1747776000|quest_completed|mapID=2248;questID=70123;source=turned_in",
-        "h": "80280a9f"
+        "h": "e26fb7dc"
       },
       {
         "seq": 2,
@@ -425,9 +423,9 @@
           "mountID": 1589
         },
         "canonical": "2|1747776050|mount_added|mountID=1589",
-        "h": "af04e3d5"
+        "h": "787d8c96"
       }
     ],
-    "session_tail": "af04e3d5"
+    "session_tail": "787d8c96"
   }
 }

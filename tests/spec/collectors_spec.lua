@@ -50,26 +50,185 @@ describe("collector wiring (pending until collectors are implemented)", function
 	it("npc_defeats §3.5 emits npc_defeated only for no-HQT whitelisted rares (dead+tap)", function()
 		pending("collector not implemented")
 	end)
-	it("professions §3.7 registers professions + emits profession_learned/unlearned/levelup", function()
-		pending("collector not implemented")
+	it("professions §3.7 emits profession_learned/unlearned/levelup (events)", function()
+		pending("change events not implemented (snapshot baseline is — see below)")
 	end)
 	it("prey_quests §3.10 emits prey_quest (daily-bucket dedup)", function()
 		pending("collector not implemented")
 	end)
-	it("reputations §3.11 registers reputations + emits reputation_changed (renown folded in)", function()
-		pending("collector not implemented")
+	it("reputations §3.11 emits reputation_changed (events; renown folded in)", function()
+		pending("change events not implemented (snapshot baseline is — see below)")
 	end)
-	it("currencies §3.12 registers currencies + emits currency_changed", function()
-		pending("collector not implemented")
+	it("currencies §3.12 emits currency_changed (events)", function()
+		pending("change events not implemented (snapshot baseline is — see below)")
 	end)
 	it("basics §3.13 registers basics + emits level_up", function()
 		pending("collector not implemented")
 	end)
-	it("instance_locks §3.14 registers instancelocks + emits encounter_defeated/lockout_changed", function()
-		pending("collector not implemented")
+	it("instance_locks §3.14 emits encounter_defeated/lockout_changed (events)", function()
+		pending("change events not implemented (snapshot baseline is — see below)")
 	end)
-	it("great_vault §3.15 registers greatvault + emits vault_progress", function()
-		pending("collector not implemented")
+	it("great_vault §3.15 emits vault_progress (events)", function()
+		pending("change events not implemented (snapshot baseline is — see below)")
+	end)
+end)
+
+describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
+	-- Each scanner Registers its frozen per-character snapshot category and returns
+	-- IDs + scalars only (§7). We assert via Snapshot.Capture so the test proves BOTH
+	-- the registration name (frozen chain order, §5/§7) AND the scanned shape that
+	-- feeds the already-vector-tested Canonical form. C_* surfaces are mocked inline
+	-- (collector glue, not unit-tested per the brief) and torn down in after_each.
+	local SESSION = { session_id = "S-snap", char_guid = "Player-1-CAFE", schema_version = 1 }
+
+	local function captureCat(file, cat)
+		local ns = freshNS()
+		assert(loadfile(file))("TiW", ns)
+		return ns.Snapshot.Capture(SESSION).snapshot[cat]
+	end
+	local function sortedContents(t)
+		local c = {}
+		for i = 1, #t do c[i] = t[i] end
+		table.sort(c)
+		return c
+	end
+
+	before_each(function() mock.now = 1747776000; mock.frames = {}; mock.timers = {} end)
+	after_each(function()
+		_G.GetProfessions, _G.GetProfessionInfo, _G.C_TradeSkillUI = nil, nil, nil
+		_G.C_CurrencyInfo, _G.C_WeeklyRewards = nil, nil
+		_G.C_Reputation, _G.C_MajorFactions, _G.C_GossipInfo = nil, nil, nil
+		_G.RequestRaidInfo, _G.GetNumSavedInstances, _G.GetSavedInstanceInfo = nil, nil, nil
+		_G.GetNumSavedWorldBosses, _G.GetSavedWorldBossInfo = nil, nil
+	end)
+
+	it("professions §3.7: base skillLine IDs at login (cold); skips nil slot holes", function()
+		-- Cold path: GetProfessions returns slot HANDLES (with a nil archaeology hole);
+		-- GetProfessionInfo maps a handle -> rank(3rd), maxRank(4th), skillLine(7th).
+		-- C_TradeSkillUI absent -> per-expansion contributes nothing at login.
+		_G.GetProfessions = function() return 1, 2, nil, 4, 5 end
+		local byHandle = { [1] = { 100, 171 }, [2] = { 85, 197 }, [4] = { 50, 356 }, [5] = { 75, 185 } }
+		_G.GetProfessionInfo = function(h)
+			local d = byHandle[h]; if not d then return end
+			return "n", "i", d[1], 100, 0, 0, d[2]
+		end
+		local r = captureCat("collectors/professions.lua", "professions")
+		assert.same({ 171, 185, 197, 356 }, sortedContents(r.contents))
+		assert.same({ rank = 100 }, r.data[171])
+		assert.same({ rank = 50 }, r.data[356])
+	end)
+
+	it("professions §3.7: backfills per-expansion lines on TRADE_SKILL_LIST_UPDATE, dropping the aggregate", function()
+		local ns = freshNS()
+		_G.GetProfessions = function() return 1 end
+		_G.GetProfessionInfo = function() return "Tailoring", "i", 100, 100, 0, 0, 197 end
+		local loaded = false   -- per-expansion ranks read 0 until the window opens
+		_G.C_TradeSkillUI = {
+			GetAllProfessionTradeSkillLines = function() return { 2918, 2883, 197 } end,
+			GetProfessionInfoBySkillLineID = function(id)
+				if not loaded then return { skillLevel = 0 } end
+				if id == 2918 then return { skillLevel = 100, parentProfessionID = 197 } end
+				if id == 2883 then return { skillLevel = 100, parentProfessionID = 197 } end
+				return { skillLevel = 300 }   -- base aggregate 197: no parentProfessionID
+			end,
+		}
+		assert(loadfile("collectors/professions.lua"))("TiW", ns)
+		ns.session = ns.Snapshot.Capture(SESSION)
+		assert.same({ 197 }, ns.session.snapshot.professions.contents)   -- aggregate at login
+
+		loaded = true                                  -- open the profession window
+		mock.fireEvent("TRADE_SKILL_LIST_UPDATE")
+
+		local r = ns.session.snapshot.professions
+		assert.same({ 2883, 2918 }, sortedContents(r.contents))   -- per-expansion; aggregate 197 dropped
+		assert.same({ rank = 100 }, r.data[2918])
+		assert.is_nil(r.data[197])
+	end)
+
+	it("currencies §3.12: id (from list link) -> { quantity, max }; skips headers + never-held", function()
+		_G.C_CurrencyInfo = {
+			GetCurrencyListSize = function() return 4 end,
+			GetCurrencyListInfo = function(i)
+				return ({ [1] = { isHeader = true },
+				          [2] = { quantity = 1450, maxQuantity = 2000 },
+				          [3] = { quantity = 0, maxQuantity = 1000 },   -- never held -> filtered
+				          [4] = { quantity = 500, maxQuantity = 0 } })[i]
+			end,
+			GetCurrencyListLink = function(i)
+				return ({ [2] = "currency:3008", [3] = "currency:3028", [4] = "currency:2245" })[i]
+			end,
+		}
+		local r = captureCat("collectors/currencies.lua", "currencies")
+		assert.same({ 2245, 3008 }, sortedContents(r.contents))
+		assert.same({ quantity = 1450, max = 2000 }, r.data[3008])
+		assert.same({ quantity = 500, max = 0 }, r.data[2245])
+		assert.is_nil(r.data[3028])
+	end)
+
+	it("great_vault §3.15: activities keep { type(enum#), index, threshold, progress, level }", function()
+		_G.C_WeeklyRewards = { GetActivities = function()
+			return { { type = 1, index = 1, threshold = 2, progress = 2, level = 639 },
+			         { type = 3, index = 1, threshold = 2, progress = 1, level = 600 } }
+		end }
+		local r = captureCat("collectors/great_vault.lua", "greatvault")
+		assert.equal(2, #r.activities)
+		assert.same({ type = 1, index = 1, threshold = 2, progress = 2, level = 639 }, r.activities[1])
+	end)
+
+	it("instance_locks §3.14: locked raids + world bosses; resetsAt absolute, world boss difficulty 0", function()
+		_G.RequestRaidInfo = function() end
+		_G.GetNumSavedInstances = function() return 2 end
+		_G.GetSavedInstanceInfo = function(i)
+			-- name, id, reset, difficulty, locked, _, _, isRaid, _, _, numEnc, encProgress, _, instanceID
+			local d = ({ [1] = { 3600, 16, true, 8, 6, 2657 },
+			             [2] = { 0, 14, false, 8, 0, 2657 } })[i]   -- not locked -> skipped
+			return "n", 123, d[1], d[2], d[3], false, false, true, 30, "M", d[4], d[5], false, d[6]
+		end
+		_G.GetNumSavedWorldBosses = function() return 1 end
+		_G.GetSavedWorldBossInfo = function() return "WB", 9000, 7200 end
+
+		local r = captureCat("collectors/instance_locks.lua", "instancelocks")
+		assert.equal(2, #r.locks)                       -- one locked raid + one world boss
+		local byID = {}
+		for _, l in ipairs(r.locks) do byID[l.instanceID] = l end
+		assert.same({ instanceID = 2657, difficultyID = 16, encountersDone = 6,
+		              encountersTotal = 8, resetsAt = mock.now + 3600 }, byID[2657])
+		assert.same({ instanceID = 9000, difficultyID = 0, encountersDone = 1,
+		              encountersTotal = 1, resetsAt = mock.now + 7200 }, byID[9000])
+	end)
+
+	it("reputations §3.11: normalizes standard/renown/friendship to {level,value}; skips headers + zero", function()
+		_G.C_Reputation = {
+			GetNumFactions = function() return 5 end,
+			GetFactionDataByIndex = function(i)
+				return ({ [1] = { factionID = 1, isHeader = true, isHeaderWithRep = false },   -- header skip
+				          [2] = { factionID = 1000, currentStanding = 21000 },                  -- standard
+				          [3] = { factionID = 2000, currentStanding = 0 },                       -- zero skip
+				          [4] = { factionID = 2503, currentStanding = 0 },                       -- renown
+				          [5] = { factionID = 3000, currentStanding = 0 } })[i]                  -- friendship
+			end,
+			IsMajorFaction = function(id) return id == 2503 end,
+			GetFactionParagonInfo = function() return nil end,
+		}
+		_G.C_MajorFactions = { GetMajorFactionData = function(id)
+			if id == 2503 then return { renownLevel = 20, renownReputationEarned = 8400 } end
+		end }
+		_G.C_GossipInfo = {
+			GetFriendshipReputation = function(id)
+				if id == 3000 then return { friendshipFactionID = 3000, standing = 4200 } end
+				return { friendshipFactionID = 0 }
+			end,
+			GetFriendshipReputationRanks = function(id)
+				if id == 3000 then return { currentLevel = 3, maxLevel = 6 } end
+			end,
+		}
+
+		local r = captureCat("collectors/reputations.lua", "reputations")
+		assert.same({ 1000, 2503, 3000 }, sortedContents(r.contents))
+		assert.same({ level = 0, value = 21000 }, r.data[1000])     -- standard: cumulative bar rep
+		assert.same({ level = 20, value = 8400 }, r.data[2503])     -- renown: level + rep toward next
+		assert.same({ level = 3, value = 4200 }, r.data[3000])      -- friendship: rank + standing
+		assert.is_nil(r.data[2000])                                 -- zero-standing filtered
 	end)
 end)
 
