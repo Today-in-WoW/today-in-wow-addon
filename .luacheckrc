@@ -8,13 +8,13 @@ globals = { "bit", "TiWDB", "SlashCmdList" }
 -- WoW API surface the addon reads (kept minimal; extend as collectors land).
 read_globals = {
 	"GetServerTime", "GetTime", "CreateFrame",
-	"UnitGUID", "UnitName", "GetRealmName",
+	"UnitGUID", "UnitName", "GetRealmName", "UnitIsDead", "UnitIsTapDenied", "UnitThreatSituation",
 	"UnitLevel", "UnitClass", "UnitRace", "UnitFactionGroup", "UnitSex",
 	"GetSpecialization", "GetSpecializationInfo", "GetAverageItemLevel",
 	"C_Covenants", "RequestTimePlayed",
 	"C_PetJournal",
 	"issecretvalue", "C_Secrets",
-	"C_Timer", "C_Map", "InCombatLockdown",
+	"C_Timer", "C_Map", "InCombatLockdown", "C_QuestLog",
 	"C_EventScheduler", "C_AreaPoiInfo",
 	"C_UIWidgetManager", "C_DateAndTime", "Enum",
 	"WorldMapFrame", "hooksecurefunc",

@@ -35,4 +35,18 @@ describe("§3.6/§6 whitelist resolution", function()
 		assert.equal(7, W.version)
 		assert.is_false(W.has(12345))     -- floor replaced, not merged
 	end)
+
+	it("loads the shipped floor file into the resolver", function()
+		_G.TiWCompanionDB = nil
+		local ns = { tables = {} }
+		assert(loadfile("tables/whitelist_rares.lua"))("TiW", ns)
+		assert(loadfile("core/whitelist.lua"))("TiW", ns)
+		ns.Whitelist.load()
+		assert.equal(1, ns.Whitelist.version)
+		assert.is_table(ns.tables.whitelist_rares)     -- placeholders present, all path-2 ({} = no questID)
+		for npcID, entry in pairs(ns.tables.whitelist_rares) do
+			assert.is_number(npcID)
+			assert.is_nil(entry.questID)
+		end
+	end)
 end)

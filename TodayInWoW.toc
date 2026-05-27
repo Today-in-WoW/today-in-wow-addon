@@ -20,6 +20,7 @@ core\drain.lua
 core\secrets.lua
 core\scheduler.lua
 core\mapcache.lua
+tables\whitelist_rares.lua
 core\whitelist.lua
 core\migrations.lua
 collectors\basics.lua
@@ -33,5 +34,7 @@ collectors\collections.lua
 collectors\events_schedule.lua
 collectors\delves.lua
 collectors\loot.lua
+collectors\quest_completion.lua
+collectors\npc_defeats.lua
 core\session.lua
 commands.lua

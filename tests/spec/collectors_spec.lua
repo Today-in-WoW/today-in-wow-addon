@@ -38,16 +38,10 @@ describe("collector wiring (pending until collectors are implemented)", function
 	it("quests_seen §3.2 emits quest_seen / quest_accepted (daily-bucket dedup)", function()
 		pending("collector not implemented")
 	end)
-	it("quest_completion §3.3 emits quest_completed / quest_unflagged (path A/B dedup)", function()
-		pending("collector not implemented")
-	end)
 	it("collections §3.4 emits appearance_added/decor_added/achievement_earned/criteria_earned (persist categories)", function()
 		pending("collector not implemented")
 	end)
 	it("collections §3.4/§5 persists appearances/achievements/decor baselines", function()
-		pending("collector not implemented")
-	end)
-	it("npc_defeats §3.5 emits npc_defeated only for no-HQT whitelisted rares (dead+tap)", function()
 		pending("collector not implemented")
 	end)
 	it("professions §3.7 emits profession_learned/unlearned/levelup (events)", function()
@@ -739,5 +733,304 @@ describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", functio
 		assert.same({ 100, 200 }, sortedContents(ns.account.collections.mounts))
 		assert.is_not_nil(ns.account.collections.h)
 		assert.equal(0, #ns.session.events)   -- establishing pass emits nothing
+	end)
+end)
+
+describe("quest_completion §3.3 collector", function()
+	-- C_QuestLog.GetAllCompletedQuestIDs returns a SORTED id array; mocked inline.
+	-- `completed` is reassigned per test to simulate the log changing.
+	local SESSION = { session_id = "S-q", char_guid = "Player-1-FEED", schema_version = 1 }
+	local completed
+
+	local function loadCollector(ns) assert(loadfile("collectors/quest_completion.lua"))("TiW", ns) end
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]; g[#g + 1] = e
+		end
+		return m
+	end
+	-- Fresh ns with the collector loaded and a captured session (the quests scanner runs
+	-- in Capture, seeding the diff baseline from `completed`).
+	local function setup()
+		local ns = freshNS()
+		loadCollector(ns)
+		ns.session = ns.Snapshot.Capture(SESSION)
+		return ns
+	end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.timers = {}; mock.inCombat = false
+		completed = { 100, 200, 300 }
+		_G.C_QuestLog = { GetAllCompletedQuestIDs = function() return { unpack(completed) } end }
+	end)
+	after_each(function() _G.C_QuestLog = nil end)
+
+	it("snapshot baseline: quests category = sorted completed quest IDs (joined string)", function()
+		local ns = freshNS()
+		completed = { 300, 100, 200 }
+		loadCollector(ns)
+		local r = ns.Snapshot.Capture(SESSION).snapshot.quests
+		assert.equal("100,200,300", r.contents)   -- stored pre-joined (== C.ids); storage trim
+	end)
+
+	it("path A: QUEST_TURNED_IN emits quest_completed{source=turned_in}", function()
+		local ns = setup()
+		mock.fireEvent("QUEST_TURNED_IN", 555)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_completed or {}))
+		assert.equal(555, m.quest_completed[1].data.questID)
+		assert.equal("turned_in", m.quest_completed[1].data.source)
+	end)
+
+	it("path B: deferred scan emits quest_completed{source=scan} for new HQTs, quest_unflagged for removed", function()
+		local ns = setup()                  -- baseline {100,200,300}
+		completed = { 100, 300, 700 }       -- 200 removed, 700 newly completed
+		mock.fireEvent("QUEST_LOG_UPDATE")  -- dirty -> arm 1s throttle
+		mock.advance(1)                     -- fire the deferred scan
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_completed or {}))
+		assert.equal(700, m.quest_completed[1].data.questID)
+		assert.equal("scan", m.quest_completed[1].data.source)
+		assert.equal(1, #(m.quest_unflagged or {}))
+		assert.equal(200, m.quest_unflagged[1].data.questID)
+	end)
+
+	it("dedup: a quest turned in via path A is not re-emitted by the path-B scan", function()
+		local ns = setup()
+		mock.fireEvent("QUEST_TURNED_IN", 700)   -- path A emits 700
+		completed = { 100, 200, 300, 700 }       -- now also completed in the log
+		mock.fireEvent("QUEST_LOG_UPDATE")
+		mock.advance(1)
+		assert.equal(1, #(byKind(ns.session.events).quest_completed or {}))   -- scan deduped
+	end)
+
+	it("out-of-combat gate: the scan defers in combat and runs on PLAYER_REGEN_ENABLED", function()
+		local ns = setup()
+		completed = { 100, 200, 300, 700 }
+		mock.inCombat = true
+		mock.fireEvent("QUEST_LOG_UPDATE")
+		mock.advance(1)                          -- throttle elapses, but in combat -> deferred
+		assert.equal(0, #ns.session.events)
+
+		mock.inCombat = false
+		mock.fireEvent("PLAYER_REGEN_ENABLED")   -- combat ends -> scan runs
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_completed or {}))
+		assert.equal(700, m.quest_completed[1].data.questID)
+	end)
+end)
+
+describe("npc_defeats §3.5 collector (dead+tap fallback, path 2)", function()
+	-- npcID = 6th GUID field; the trailing spawnUID decodes to spawnTime (same vector as
+	-- decode_spawn_spec: 00002CA000 @ mock.now -> 1747755008). 215080 is a no-HQT rare,
+	-- 300000 is HQT-flagged (path 1's job).
+	local RARE_GUID = "Creature-0-1-1-1-215080-00002CA000"
+	local HQT_GUID  = "Creature-0-1-1-1-300000-00002CA000"
+	local wl, units, dead, tapDenied, threat
+
+	local function loadCollector(ns) assert(loadfile("collectors/npc_defeats.lua"))("TiW", ns) end
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]; g[#g + 1] = e
+		end
+		return m
+	end
+	local function setup()
+		local ns = freshNS()
+		ns.Whitelist = { get = function(id) return wl[id] end, has = function(id) return wl[id] ~= nil end, load = function() end }
+		ns.MapCache = { Current = function() return 2437 end }
+		loadCollector(ns)
+		return ns
+	end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.secrets = {}
+		wl = { [215080] = {}, [300000] = { questID = 91073 } }   -- 215080 no-HQT, 300000 HQT-flagged
+		units, dead, tapDenied, threat = {}, {}, {}, {}
+		_G.UnitGUID = function(u) return units[u] end
+		_G.UnitIsDead = function(u) return dead[u] == true end
+		_G.UnitIsTapDenied = function(u) return tapDenied[u] == true end
+		-- non-nil threat == on the unit's threat table == personal participation (any who/unit)
+		_G.UnitThreatSituation = function(_, u) return threat[u] end
+	end)
+	after_each(function()
+		_G.UnitGUID, _G.UnitIsDead, _G.UnitIsTapDenied, _G.UnitThreatSituation = nil, nil, nil, nil
+		_G.GetNumLootItems, _G.GetLootSourceInfo = nil, nil
+	end)
+
+	it("emits npc_defeated for a no-HQT rare we engaged then killed, with decoded spawnTime + mapID", function()
+		local ns = setup()
+		units.target, threat.target = RARE_GUID, 3        -- alive, on its threat table (we're fighting it)
+		mock.fireEvent("PLAYER_TARGET_CHANGED")           -- records engagement, no emit
+		assert.equal(0, #ns.session.events)
+		dead.target = true
+		mock.fireEvent("UNIT_HEALTH", "target")           -- dies while engaged -> emit
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.npc_defeated or {}))
+		assert.equal(215080, m.npc_defeated[1].data.npcID)
+		assert.equal(1747755008, m.npc_defeated[1].data.spawnTime)
+		assert.equal(2437, m.npc_defeated[1].data.mapID)
+	end)
+
+	it("does NOT emit a bystander kill: dead, not tap-denied, but we never engaged it", function()
+		local ns = setup()
+		units.nameplate5 = RARE_GUID                      -- a shared-tap rare we SEE alive...
+		mock.fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate5")   -- ...but threat stays nil (we deal no damage)
+		dead.nameplate5 = true
+		mock.fireEvent("UNIT_HEALTH", "nameplate5")       -- someone else's kill nearby
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("treats a secret/restricted threat read as not-engaged (in-instance combat)", function()
+		local ns = setup()
+		local RESTRICTED = {}
+		mock.setSecret(RESTRICTED)
+		units.nameplate5, threat.nameplate5 = RARE_GUID, RESTRICTED   -- threat is secret here
+		mock.fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate5")         -- guarded -> nil -> not engaged
+		dead.nameplate5 = true
+		mock.fireEvent("UNIT_HEALTH", "nameplate5")
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("does NOT emit for an HQT-flagged rare (recorded via quest_completed, path 1)", function()
+		local ns = setup()
+		units.target, dead.target = HQT_GUID, true
+		mock.fireEvent("PLAYER_TARGET_CHANGED")
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("ignores a non-whitelisted dead mob", function()
+		local ns = setup()
+		units.target, dead.target = "Creature-0-1-1-1-999999-00002CA000", true
+		mock.fireEvent("PLAYER_TARGET_CHANGED")
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("does not emit a tap-denied kill (you didn't help)", function()
+		local ns = setup()
+		units.target, dead.target, tapDenied.target = RARE_GUID, true, true
+		mock.fireEvent("PLAYER_TARGET_CHANGED")
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("no emit while alive, emits once on death across repeated sightings of the same spawn", function()
+		local ns = setup()
+		units.mouseover, threat.mouseover = RARE_GUID, 2
+		mock.fireEvent("UPDATE_MOUSEOVER_UNIT")   -- alive (engaged) -> no emit
+		assert.equal(0, #ns.session.events)
+		dead.mouseover = true
+		mock.fireEvent("UPDATE_MOUSEOVER_UNIT")   -- dead -> emit
+		mock.fireEvent("UPDATE_MOUSEOVER_UNIT")   -- repeated corpse sighting (same GUID) -> deduped
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.npc_defeated or {}))
+		assert.equal(1747755008, m.npc_defeated[1].data.spawnTime)
+	end)
+
+	it("emits once per spawn: distinct GUIDs of the same npcID each count", function()
+		local ns = setup()
+		-- two spawns of npcID 215080 with different trailing spawnUIDs -> different GUIDs
+		threat.target = 3
+		units.target = "Creature-0-1-1-1-215080-00002CA000"
+		mock.fireEvent("PLAYER_TARGET_CHANGED")        -- engage spawn A
+		dead.target = true
+		mock.fireEvent("UNIT_HEALTH", "target")        -- kill A
+		dead.target = nil
+		units.target = "Creature-0-1-1-1-215080-00002CB111"
+		mock.fireEvent("PLAYER_TARGET_CHANGED")        -- engage spawn B
+		dead.target = true
+		mock.fireEvent("UNIT_HEALTH", "target")        -- kill B
+		assert.equal(2, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("catches a watched rare's death via UNIT_HEALTH (no fresh target/mouseover)", function()
+		local ns = setup()
+		units.nameplate5, threat.nameplate5 = RARE_GUID, 2    -- alive on a nameplate, engaged -> watched
+		mock.fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate5")
+		assert.equal(0, #ns.session.events)
+		dead.nameplate5 = true
+		mock.fireEvent("UNIT_HEALTH", "nameplate5")           -- death tick, still same token
+		assert.equal(1, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("stops watching a nameplate after NAME_PLATE_UNIT_REMOVED", function()
+		local ns = setup()
+		units.nameplate5, threat.nameplate5 = RARE_GUID, 2    -- engaged (so removal is the only reason it won't emit)
+		mock.fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate5")  -- watched
+		mock.fireEvent("NAME_PLATE_UNIT_REMOVED", "nameplate5")
+		dead.nameplate5 = true
+		mock.fireEvent("UNIT_HEALTH", "nameplate5")           -- no longer watched -> ignored
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("does not re-check UNIT_HEALTH for an unwatched unit", function()
+		local ns = setup()
+		units.nameplate5, dead.nameplate5 = RARE_GUID, true   -- dead, but never sighted alive
+		mock.fireEvent("UNIT_HEALTH", "nameplate5")           -- not in watch set -> ignored
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("emits on loot source GUID, bypassing the engagement gate (loot rights = participation)", function()
+		local ns = setup()
+		-- never targeted, never engaged (threat stays nil) — loot alone is proof enough
+		_G.GetNumLootItems = function() return 1 end
+		_G.GetLootSourceInfo = function() return RARE_GUID, 1 end   -- flat guid,quantity
+		mock.fireEvent("LOOT_OPENED")
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.npc_defeated or {}))
+		assert.equal(215080, m.npc_defeated[1].data.npcID)
+		assert.equal(1747755008, m.npc_defeated[1].data.spawnTime)
+	end)
+
+	it("does NOT emit on loot from an HQT-flagged rare (path 1's job)", function()
+		local ns = setup()
+		_G.GetNumLootItems = function() return 1 end
+		_G.GetLootSourceInfo = function() return HQT_GUID, 1 end
+		mock.fireEvent("LOOT_OPENED")
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("dedups across paths: engage+kill then loot the same corpse emits once", function()
+		local ns = setup()
+		units.target, threat.target = RARE_GUID, 3
+		mock.fireEvent("PLAYER_TARGET_CHANGED")               -- engage
+		dead.target = true
+		mock.fireEvent("UNIT_HEALTH", "target")               -- observation path emits
+		_G.GetNumLootItems = function() return 1 end
+		_G.GetLootSourceInfo = function() return RARE_GUID, 1 end
+		mock.fireEvent("LOOT_OPENED")                         -- same GUID -> deduped
+		assert.equal(1, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("ignores a GameObject loot source (chest / node — not a kill)", function()
+		local ns = setup()
+		-- same trailing npcID field as RARE_GUID, but a GameObject kind -> rejected
+		_G.GetNumLootItems = function() return 1 end
+		_G.GetLootSourceInfo = function() return "GameObject-0-1-1-1-215080-00002CA000", 1 end
+		mock.fireEvent("LOOT_OPENED")
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("does not count loot from a still-alive target (Pick Pocket)", function()
+		local ns = setup()
+		units.target = RARE_GUID          -- targeted and ALIVE (dead.target stays nil)
+		_G.GetNumLootItems = function() return 1 end
+		_G.GetLootSourceInfo = function() return RARE_GUID, 1 end   -- loot source is the live target
+		mock.fireEvent("LOOT_OPENED")
+		assert.equal(0, #(byKind(ns.session.events).npc_defeated or {}))
+	end)
+
+	it("drops a secret GUID (restricted instance)", function()
+		local ns = setup()
+		units.target, dead.target = RARE_GUID, true
+		mock.setSecret(RARE_GUID)
+		mock.fireEvent("PLAYER_TARGET_CHANGED")
+		assert.equal(0, #ns.session.events)
 	end)
 end)
