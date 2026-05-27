@@ -44,23 +44,11 @@ describe("collector wiring (pending until collectors are implemented)", function
 	it("collections §3.4/§5 persists appearances/achievements/decor baselines", function()
 		pending("collector not implemented")
 	end)
-	it("professions §3.7 emits profession_learned/unlearned/levelup (events)", function()
-		pending("change events not implemented (snapshot baseline is — see below)")
-	end)
 	it("prey_quests §3.10 emits prey_quest (daily-bucket dedup)", function()
 		pending("collector not implemented")
 	end)
-	it("reputations §3.11 emits reputation_changed (events; renown folded in)", function()
-		pending("change events not implemented (snapshot baseline is — see below)")
-	end)
-	it("currencies §3.12 emits currency_changed (events)", function()
-		pending("change events not implemented (snapshot baseline is — see below)")
-	end)
 	it("basics §3.13 registers basics + emits level_up", function()
 		pending("collector not implemented")
-	end)
-	it("great_vault §3.15 emits vault_progress (events)", function()
-		pending("change events not implemented (snapshot baseline is — see below)")
 	end)
 end)
 
@@ -129,6 +117,7 @@ describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
 
 		loaded = true                                  -- open the profession window
 		mock.fireEvent("TRADE_SKILL_LIST_UPDATE")
+		mock.advance(1)                                -- the backfill handler is debounced (§4)
 
 		local r = ns.session.snapshot.professions
 		assert.same({ 2883, 2918 }, sortedContents(r.contents))   -- per-expansion; aggregate 197 dropped
@@ -1189,5 +1178,287 @@ describe("lockout_changed §3.14 collector (change event, UPDATE_INSTANCE_INFO d
 		mock.fireEvent("ENCOUNTER_END", 1, "B", 2, 5, 1)  -- kill -> nudge
 		_G.RequestRaidInfo = nil
 		assert.equal(1, nudges)
+	end)
+end)
+
+-- A burst of the spammy trigger collapses to one scan a throttle window later (§4
+-- OnDirty), so each change-event test fires the event then advances the clock 1s.
+local function byKind(events)
+	local m = {}
+	for i = 1, #events do
+		local e = events[i]
+		m[e.kind] = m[e.kind] or {}
+		local g = m[e.kind]; g[#g + 1] = e
+	end
+	return m
+end
+
+describe("currency_changed §3.12 collector (change event, CURRENCY_DISPLAY_UPDATE diff)", function()
+	local list, links   -- index -> {quantity,maxQuantity} / "currency:ID"; mutated between scans
+	local function loadCollector(ns) assert(loadfile("collectors/currencies.lua"))("TiW", ns) end
+	local function setup()
+		local ns = freshNS()
+		_G.C_CurrencyInfo = {
+			GetCurrencyListSize = function() return #list end,
+			GetCurrencyListInfo = function(i) return list[i] end,
+			GetCurrencyListLink = function(i) return links[i] end,
+		}
+		loadCollector(ns)
+		return ns
+	end
+	local function fire() mock.fireEvent("CURRENCY_DISPLAY_UPDATE"); mock.advance(1) end
+
+	before_each(function() mock.now = 1747776000; mock.frames = {}; mock.timers = {}; list = {}; links = {} end)
+	after_each(function() _G.C_CurrencyInfo = nil end)
+
+	it("seeds silently, then emits currency_changed with a signed delta on a gain", function()
+		local ns = setup()
+		list = { { quantity = 100, maxQuantity = 2000 } }; links = { "currency:3008" }
+		fire()                                              -- seed at 100
+		list = { { quantity = 150, maxQuantity = 2000 } }
+		fire()                                              -- 100 -> 150
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.currency_changed or {}))
+		assert.same({ currencyID = 3008, newQuantity = 150, delta = 50 }, m.currency_changed[1].data)
+	end)
+
+	it("emits a negative delta when a currency is spent", function()
+		local ns = setup()
+		list = { { quantity = 150, maxQuantity = 2000 } }; links = { "currency:3008" }
+		fire()
+		list = { { quantity = 90, maxQuantity = 2000 } }
+		fire()
+		assert.equal(-60, byKind(ns.session.events).currency_changed[1].data.delta)
+	end)
+
+	it("treats a newly-held currency as a gain from zero", function()
+		local ns = setup()
+		fire()                                              -- seed: nothing held
+		list = { { quantity = 40, maxQuantity = 0 } }; links = { "currency:2245" }
+		fire()
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.currency_changed or {}))
+		assert.same({ currencyID = 2245, newQuantity = 40, delta = 40 }, m.currency_changed[1].data)
+	end)
+
+	it("does not emit when quantities are unchanged", function()
+		local ns = setup()
+		list = { { quantity = 100, maxQuantity = 2000 } }; links = { "currency:3008" }
+		fire(); fire(); fire()
+		assert.equal(0, #ns.session.events)
+	end)
+end)
+
+describe("reputation_changed §3.11 collector (change event; renown folded in)", function()
+	local factions, major, paragon   -- faction structs / major data / paragon; mutated between scans
+	local function loadCollector(ns) assert(loadfile("collectors/reputations.lua"))("TiW", ns) end
+	local function setup()
+		local ns = freshNS()
+		_G.C_Reputation = {
+			GetNumFactions = function() return #factions end,
+			GetFactionDataByIndex = function(i) return factions[i] end,
+			IsMajorFaction = function(id) return major[id] ~= nil end,
+			-- paragon[id] = number (live) or { value, tooLow = true } (not really at paragon).
+			GetFactionParagonInfo = function(id)
+				local p = paragon[id]
+				if not p then return nil end
+				if type(p) == "table" then return p[1], 10000, 0, false, p.tooLow end
+				return p, 10000, 0, false, false
+			end,
+		}
+		_G.C_MajorFactions = { GetMajorFactionData = function(id) return major[id] end }
+		_G.C_GossipInfo = { GetFriendshipReputation = function() return { friendshipFactionID = 0 } end }
+		loadCollector(ns)
+		return ns
+	end
+
+	before_each(function() mock.now = 1747776000; mock.frames = {}; mock.timers = {}; factions = {}; major = {}; paragon = {} end)
+	after_each(function() _G.C_Reputation, _G.C_MajorFactions, _G.C_GossipInfo = nil, nil, nil end)
+
+	it("seeds silently, then a standing rise emits reputation_changed {factionID, level, value}", function()
+		local ns = setup()
+		factions = { { factionID = 1000, currentStanding = 21000 } }
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed
+		factions = { { factionID = 1000, currentStanding = 21500 } }
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.same({ factionID = 1000, level = 0, value = 21500 }, m.reputation_changed[1].data)
+	end)
+
+	it("a renown level-up emits via MAJOR_FACTION_RENOWN_LEVEL_CHANGED (the same event; level rises)", function()
+		local ns = setup()
+		factions = { { factionID = 2503, currentStanding = 0 } }
+		major = { [2503] = { renownLevel = 20, renownReputationEarned = 8400 } }
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed at level 20
+		major[2503] = { renownLevel = 21, renownReputationEarned = 100 }
+		mock.fireEvent("MAJOR_FACTION_RENOWN_LEVEL_CHANGED"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.same({ factionID = 2503, level = 21, value = 100 }, m.reputation_changed[1].data)
+	end)
+
+	it("does not emit when standing is unchanged", function()
+		local ns = setup()
+		factions = { { factionID = 1000, currentStanding = 21000 } }
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("a maxed major faction (renown capped) emits on paragon currentValue rising", function()
+		-- The in-game bug: at renown 20 the renown bar freezes (renownReputationEarned 0)
+		-- and gains flow to paragon. value must track paragon currentValue or nothing fires.
+		local ns = setup()
+		factions = { { factionID = 2710, currentStanding = 0 } }
+		major = { [2710] = { renownLevel = 20, renownReputationEarned = 0 } }
+		paragon = { [2710] = 9404 }
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed at paragon 9404
+		paragon[2710] = 11404                                -- +2000 to paragon
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.same({ factionID = 2710, level = 20, value = 11404 }, m.reputation_changed[1].data)
+	end)
+
+	it("a major faction still climbing renown keeps renownReputationEarned (paragon tooLow ignored)", function()
+		local ns = setup()
+		factions = { { factionID = 2503, currentStanding = 0 } }
+		major = { [2503] = { renownLevel = 10, renownReputationEarned = 1200 } }
+		paragon = { [2503] = { 999, tooLow = true } }       -- not really at paragon yet
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed at renown value 1200, not 999
+		major[2503].renownReputationEarned = 1500
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.same({ factionID = 2503, level = 10, value = 1500 }, m.reputation_changed[1].data)
+	end)
+end)
+
+describe("vault_progress §3.15 collector (change event, WEEKLY_REWARDS_UPDATE diff)", function()
+	local acts   -- C_WeeklyRewards.GetActivities() return; mutated between scans
+	local function loadCollector(ns) assert(loadfile("collectors/great_vault.lua"))("TiW", ns) end
+	local function setup()
+		local ns = freshNS()
+		_G.C_WeeklyRewards = { GetActivities = function() return acts end }
+		loadCollector(ns)
+		return ns
+	end
+	local function fire() mock.fireEvent("WEEKLY_REWARDS_UPDATE"); mock.advance(1) end
+
+	before_each(function() mock.now = 1747776000; mock.frames = {}; mock.timers = {}; acts = {} end)
+	after_each(function() _G.C_WeeklyRewards = nil end)
+
+	it("seeds silently, then a progress increase emits vault_progress {type, index, newProgress, threshold}", function()
+		local ns = setup()
+		acts = { { type = 1, index = 1, threshold = 4, progress = 1, level = 600 } }
+		fire()                                              -- seed at 1
+		acts = { { type = 1, index = 1, threshold = 4, progress = 2, level = 610 } }
+		fire()
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.vault_progress or {}))
+		assert.same({ type = 1, index = 1, newProgress = 2, threshold = 4 }, m.vault_progress[1].data)
+	end)
+
+	it("does not emit on a decrease (weekly reset clears progress)", function()
+		local ns = setup()
+		acts = { { type = 1, index = 1, threshold = 4, progress = 3 } }
+		fire()                                              -- seed at 3
+		acts = { { type = 1, index = 1, threshold = 4, progress = 0 } }
+		fire()                                              -- reset to 0: no emit
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("emits when a slot newly appears", function()
+		local ns = setup()
+		fire()                                              -- seed: no slots
+		acts = { { type = 3, index = 1, threshold = 2, progress = 1 } }
+		fire()
+		assert.equal(1, #(byKind(ns.session.events).vault_progress or {}))
+	end)
+end)
+
+describe("profession change events §3.7 (levelup / learned / unlearned)", function()
+	local function loadCollector(ns) assert(loadfile("collectors/professions.lua"))("TiW", ns) end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.timers = {}
+		_G.C_TradeSkillUI = nil   -- per-expansion data absent unless a test installs it
+	end)
+	after_each(function() _G.GetProfessions, _G.GetProfessionInfo, _G.C_TradeSkillUI = nil, nil, nil end)
+
+	it("emits profession_levelup when an owned line's rank rises (maxRank rides along)", function()
+		local ns = freshNS()
+		local rank = 90
+		_G.GetProfessions = function() return 1 end
+		_G.GetProfessionInfo = function() return "Tailoring", "i", rank, 100, 0, 0, 197 end
+		loadCollector(ns)
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)   -- seed at 90
+		rank = 95
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.profession_levelup or {}))
+		assert.same({ professionID = 197, rank = 95, maxRank = 100 }, m.profession_levelup[1].data)
+	end)
+
+	it("emits profession_learned when a new base profession appears", function()
+		local ns = freshNS()
+		local has = false
+		_G.GetProfessions = function() return (has and 1) or nil end
+		_G.GetProfessionInfo = function() return "Enchanting", "i", 1, 100, 0, 0, 333 end
+		loadCollector(ns)
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)   -- seed: no professions
+		has = true
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.profession_learned or {}))
+		assert.equal(333, m.profession_learned[1].data.professionID)
+		assert.equal(0, #(m.profession_levelup or {}))
+	end)
+
+	it("emits profession_unlearned when a base profession is abandoned (GetProfessions shrinks)", function()
+		local ns = freshNS()
+		local has333 = true
+		_G.GetProfessions = function() return 1, (has333 and 2) or nil end
+		_G.GetProfessionInfo = function(h)
+			if h == 1 then return "Tailoring", "i", 100, 100, 0, 0, 197 end
+			if h == 2 then return "Enchanting", "i", 50, 100, 0, 0, 333 end
+		end
+		loadCollector(ns)
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)   -- seed: 197 + 333
+		has333 = false                                           -- abandoned 333
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.profession_unlearned or {}))
+		assert.equal(333, m.profession_unlearned[1].data.professionID)
+	end)
+
+	it("backfill (aggregate -> per-expansion) emits no learned/unlearned/levelup", function()
+		local SESSION = { session_id = "S-prof", char_guid = "Player-1-CAFE", schema_version = 1 }
+		local ns = freshNS()
+		local expansion = {}
+		_G.GetProfessions = function() return 1 end
+		_G.GetProfessionInfo = function() return "Tailoring", "i", 300, 300, 0, 0, 197 end
+		_G.C_TradeSkillUI = {
+			GetAllProfessionTradeSkillLines = function()
+				local ids = {}; for id in pairs(expansion) do ids[#ids + 1] = id end; return ids
+			end,
+			GetProfessionInfoBySkillLineID = function(id) return expansion[id] end,
+		}
+		loadCollector(ns)
+		ns.session = ns.Snapshot.Capture(SESSION)
+		mock.fireEvent("SKILL_LINES_CHANGED"); mock.advance(1)   -- seed change caches (197 only)
+		expansion = {
+			[2918] = { skillLevel = 100, maxSkillLevel = 100, parentProfessionID = 197 },
+			[2883] = { skillLevel = 50,  maxSkillLevel = 100, parentProfessionID = 197 },
+		}
+		mock.fireEvent("TRADE_SKILL_LIST_UPDATE"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(0, #(m.profession_learned or {}))
+		assert.equal(0, #(m.profession_unlearned or {}))
+		assert.equal(0, #(m.profession_levelup or {}))
+		local c = ns.session.snapshot.professions.contents
+		table.sort(c)
+		assert.same({ 2883, 2918 }, c)                          -- the snapshot was backfilled
 	end)
 end)

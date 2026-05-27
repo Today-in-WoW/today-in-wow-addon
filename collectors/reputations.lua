@@ -7,7 +7,7 @@ local _, ns = ...
 -- the character has, normalized to a { level, value } pair so renown-bar and
 -- reputation-bar factions share one shape (§3.8). contents = sorted factionIDs,
 -- data = factionID -> { level, value }. Only integers ship — no localized standing
--- strings (§7). The reputation_changed event is a later addition, not in this baseline.
+-- strings (§7). The reputation_changed change event (diff vs the pair) is folded in below.
 --
 -- Normalization (one pair per faction type, grounded in ATT Classes/Factions.lua):
 --   standard    level = 0,          value = currentStanding (cumulative raw rep)
@@ -21,10 +21,22 @@ local _, ns = ...
 -- Resolve a faction's (level, value) by type. id = factionID; standing = the struct's
 -- currentStanding (cumulative raw rep) for the standard case.
 local function repPair(id, standing)
-	-- Major (renown) faction — renown level + rep earned toward the next level.
+	-- Major (renown) faction — renown level + rep earned toward the next level. At MAX
+	-- renown the renown bar freezes (verified in-game: renownLevel 20 / maxLevel 20 →
+	-- renownReputationEarned 0) and further rep flows to PARAGON, whose currentValue is
+	-- the only number still moving. So once paragon is live (cur present and not
+	-- tooLowLevelForParagon), value tracks the paragon currentValue — otherwise change
+	-- events never fire for a maxed faction (§3.11). Below max renown there's no paragon,
+	-- so value stays renownReputationEarned.
 	if C_Reputation.IsMajorFaction and C_Reputation.IsMajorFaction(id) then
 		local d = C_MajorFactions and C_MajorFactions.GetMajorFactionData and C_MajorFactions.GetMajorFactionData(id)
-		if d then return d.renownLevel or 0, d.renownReputationEarned or 0 end
+		local level = (d and d.renownLevel) or 0
+		local value = (d and d.renownReputationEarned) or 0
+		if C_Reputation.GetFactionParagonInfo then
+			local cur, _, _, _, tooLow = C_Reputation.GetFactionParagonInfo(id)
+			if cur and not tooLow then value = cur end
+		end
+		return level, value
 	end
 
 	-- Friendship faction — friendshipFactionID ~= 0 marks it; rank is its "level".
@@ -65,4 +77,34 @@ local function scan()
 end
 
 ns.Snapshot.Register("reputations", scan)
-ns.collectors.reputations = { rescan = scan }
+
+-- --- change events (§3.11, incl. §3.8 renown) ------------------------------
+-- Diff each faction's (level, value) pair against the last-known set on UPDATE_FACTION
+-- and MAJOR_FACTION_RENOWN_LEVEL_CHANGED (both spammy — debounced flag-and-scan, §4).
+-- One event covers both reputation gains and renown level-ups (a level-up is just
+-- `level` rising); the site derives standing/renown transitions from the pair. The
+-- first scan seeds silently (same negligible login→first-event window as §3.14).
+local lastRep   -- factionID -> "level:value"; nil until the first scan seeds it
+
+local function emitChanges()
+	if not ns.session then return end
+	local cur = scan().data
+	if not lastRep then
+		lastRep = {}
+		for id, d in pairs(cur) do lastRep[id] = d.level .. ":" .. d.value end
+		return
+	end
+	for id, d in pairs(cur) do
+		local key = d.level .. ":" .. d.value
+		if lastRep[id] ~= key then
+			ns.Emit("reputation_changed", { factionID = id, level = d.level, value = d.value })
+		end
+		lastRep[id] = key
+	end
+	for id in pairs(lastRep) do if cur[id] == nil then lastRep[id] = nil end end
+end
+
+if ns.Schedule then
+	ns.Schedule.OnDirty({ "UPDATE_FACTION", "MAJOR_FACTION_RENOWN_LEVEL_CHANGED" }, emitChanges)
+end
+ns.collectors.reputations = { rescan = scan, emitChanges = emitChanges }
