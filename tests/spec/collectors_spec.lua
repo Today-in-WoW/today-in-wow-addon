@@ -59,9 +59,6 @@ describe("collector wiring (pending until collectors are implemented)", function
 	it("basics §3.13 registers basics + emits level_up", function()
 		pending("collector not implemented")
 	end)
-	it("instance_locks §3.14 emits encounter_defeated/lockout_changed (events)", function()
-		pending("change events not implemented (snapshot baseline is — see below)")
-	end)
 	it("great_vault §3.15 emits vault_progress (events)", function()
 		pending("change events not implemented (snapshot baseline is — see below)")
 	end)
@@ -1032,5 +1029,165 @@ describe("npc_defeats §3.5 collector (dead+tap fallback, path 2)", function()
 		mock.setSecret(RARE_GUID)
 		mock.fireEvent("PLAYER_TARGET_CHANGED")
 		assert.equal(0, #ns.session.events)
+	end)
+end)
+
+describe("encounter_defeated §3.14 collector (path 3, ENCOUNTER_END + BOSS_KILL)", function()
+	local function loadCollector(ns) assert(loadfile("collectors/encounter_defeated.lua"))("TiW", ns) end
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]; g[#g + 1] = e
+		end
+		return m
+	end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}
+		-- GetInstanceInfo: name, instanceType, difficultyID, difficultyName, maxPlayers, ...
+		_G.GetInstanceInfo = function() return "Test Dungeon", "party", 23, "Mythic", 5 end
+	end)
+	after_each(function() _G.GetInstanceInfo = nil end)
+
+	it("emits encounter_defeated on ENCOUNTER_END success with encounterID/difficultyID/groupSize", function()
+		local ns = freshNS(); loadCollector(ns)
+		-- ENCOUNTER_END(encounterID, name, difficultyID, groupSize, success)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.encounter_defeated or {}))
+		assert.equal(2820, m.encounter_defeated[1].data.encounterID)
+		assert.equal(16, m.encounter_defeated[1].data.difficultyID)
+		assert.equal(20, m.encounter_defeated[1].data.groupSize)
+	end)
+
+	it("does NOT emit on a wipe (success == 0)", function()
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 0)
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("emits on BOSS_KILL, backfilling difficulty/groupSize from GetInstanceInfo", function()
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("BOSS_KILL", 2733, "Another Boss")   -- no difficulty/size in the event
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.encounter_defeated or {}))
+		assert.equal(2733, m.encounter_defeated[1].data.encounterID)
+		assert.equal(23, m.encounter_defeated[1].data.difficultyID)   -- from GetInstanceInfo
+		assert.equal(5, m.encounter_defeated[1].data.groupSize)
+	end)
+
+	it("dedups the ENCOUNTER_END + BOSS_KILL pair for one kill (either order)", function()
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		mock.fireEvent("BOSS_KILL", 2820, "Some Boss")      -- same encounterID, within window
+		assert.equal(1, #(byKind(ns.session.events).encounter_defeated or {}))
+
+		local ns2 = freshNS(); loadCollector(ns2)
+		mock.fireEvent("BOSS_KILL", 2820, "Some Boss")      -- BK first this time
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		assert.equal(1, #(byKind(ns2.session.events).encounter_defeated or {}))
+	end)
+
+	it("counts a legitimate re-kill of the same encounter once the dedup window passes", function()
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		mock.now = mock.now + 10                            -- a fresh run, well past DEDUP_WINDOW
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		assert.equal(2, #(byKind(ns.session.events).encounter_defeated or {}))
+	end)
+
+	it("does nothing before a session exists", function()
+		local ns = { collectors = {} }
+		assert(loadfile("core/eventlog.lua"))("TiW", ns)    -- Emit present, but ns.session nil
+		loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		assert.is_nil(ns.session)                           -- no crash, nothing recorded
+	end)
+end)
+
+describe("lockout_changed §3.14 collector (change event, UPDATE_INSTANCE_INFO diff)", function()
+	local locks   -- the fixture ns.InstanceLocks.read() returns; mutated between reads
+	local function loadCollector(ns) assert(loadfile("collectors/lockout_changed.lua"))("TiW", ns) end
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]; g[#g + 1] = e
+		end
+		return m
+	end
+	-- A session with the shared read-only lock scan stubbed (instance_locks' own parsing
+	-- is covered by its baseline test; here we drive the diff/seed/emit logic directly).
+	local function setup()
+		local ns = freshNS()
+		ns.InstanceLocks = { read = function() return locks end }
+		loadCollector(ns)
+		return ns
+	end
+
+	before_each(function() mock.now = 1747776000; mock.frames = {}; locks = {} end)
+
+	it("first UPDATE_INSTANCE_INFO seeds the baseline silently (no emit for pre-existing locks)", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1, encountersTotal = 4 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("emits lockout_changed when an encounter count rises", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed at 1
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 2 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- 1 -> 2
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.lockout_changed or {}))
+		assert.equal(1234, m.lockout_changed[1].data.instanceID)
+		assert.equal(2, m.lockout_changed[1].data.difficultyID)
+		assert.equal(2, m.lockout_changed[1].data.encountersDone)
+	end)
+
+	it("emits for a brand-new lockout (first kill in a fresh instance)", function()
+		local ns = setup()
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed: nothing saved yet
+		locks = { { instanceID = 5678, difficultyID = 1, encountersDone = 1 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.lockout_changed or {}))
+		assert.equal(5678, m.lockout_changed[1].data.instanceID)
+	end)
+
+	it("does not emit when nothing changed (idempotent across repeated UPDATE_INSTANCE_INFO)", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 2 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- same data
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("does not emit on a decrease/reset; a later re-kill re-emits as new", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 3 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed at 3
+		locks = {}                                        -- weekly reset: lockout gone
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- pruned, no emit
+		assert.equal(0, #ns.session.events)
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- fresh lock -> emit as new
+		assert.equal(1, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	it("nudges RequestRaidInfo on ENCOUNTER_END success only", function()
+		setup()   -- loads the collector / registers the frame; ns not needed here
+		local nudges = 0
+		_G.RequestRaidInfo = function() nudges = nudges + 1 end
+		mock.fireEvent("ENCOUNTER_END", 1, "B", 2, 5, 0)  -- wipe -> no nudge
+		mock.fireEvent("ENCOUNTER_END", 1, "B", 2, 5, 1)  -- kill -> nudge
+		_G.RequestRaidInfo = nil
+		assert.equal(1, nudges)
 	end)
 end)

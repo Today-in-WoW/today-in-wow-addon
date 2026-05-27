@@ -17,10 +17,12 @@ local _, ns = ...
 -- addition, not in this baseline.
 -- ===========================================================================
 
-local function scan()
+-- Read-only scan of the saved-instance/world-boss state. Does NOT call RequestRaidInfo,
+-- so it's safe to run inside an UPDATE_INSTANCE_INFO handler (the lockout_changed change
+-- event, §3.14) without re-triggering that event in a loop. Field offsets live here only.
+local function readLocks()
 	local locks = {}
 	local now = (GetServerTime and GetServerTime()) or 0
-	if RequestRaidInfo then RequestRaidInfo() end   -- nudge for the next read; async
 
 	if GetNumSavedInstances and GetSavedInstanceInfo then
 		for i = 1, GetNumSavedInstances() do
@@ -56,8 +58,18 @@ local function scan()
 		end
 	end
 
-	return { locks = locks }
+	return locks
 end
+
+-- Baseline scan: nudge the server (async; result arrives via UPDATE_INSTANCE_INFO) then
+-- read whatever's currently cached. At login the saved data is normally already cached.
+local function scan()
+	if RequestRaidInfo then RequestRaidInfo() end
+	return { locks = readLocks() }
+end
+
+ns.InstanceLocks = ns.InstanceLocks or {}
+ns.InstanceLocks.read = readLocks   -- shared read-only scan for the lockout_changed event (§3.14)
 
 ns.Snapshot.Register("instancelocks", scan)
 ns.collectors.instance_locks = { rescan = scan }

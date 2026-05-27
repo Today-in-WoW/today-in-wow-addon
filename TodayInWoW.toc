@@ -36,5 +36,7 @@ collectors\delves.lua
 collectors\loot.lua
 collectors\quest_completion.lua
 collectors\npc_defeats.lua
+collectors\encounter_defeated.lua
+collectors\lockout_changed.lua
 core\session.lua
 commands.lua

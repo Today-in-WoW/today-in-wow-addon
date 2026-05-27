@@ -27,7 +27,7 @@ read_globals = {
 	"C_CurrencyInfo", "C_WeeklyRewards",
 	"C_Reputation", "C_MajorFactions", "C_GossipInfo",
 	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo",
-	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo",
+	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo", "GetInstanceInfo",
 }
 
 exclude_files = {
