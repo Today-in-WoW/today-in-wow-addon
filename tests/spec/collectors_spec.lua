@@ -35,19 +35,10 @@ describe("collector wiring (pending until collectors are implemented)", function
 	it("world_quests §3.1 emits wq_offered (expiresAt absolute epoch)", function()
 		pending("collector not implemented")
 	end)
-	it("quests_seen §3.2 emits quest_seen / quest_accepted (daily-bucket dedup)", function()
-		pending("collector not implemented")
-	end)
 	it("collections §3.4 emits appearance_added/decor_added/achievement_earned/criteria_earned (persist categories)", function()
 		pending("collector not implemented")
 	end)
 	it("collections §3.4/§5 persists appearances/achievements/decor baselines", function()
-		pending("collector not implemented")
-	end)
-	it("prey_quests §3.10 emits prey_quest (daily-bucket dedup)", function()
-		pending("collector not implemented")
-	end)
-	it("basics §3.13 registers basics + emits level_up", function()
 		pending("collector not implemented")
 	end)
 end)
@@ -1460,5 +1451,172 @@ describe("profession change events §3.7 (levelup / learned / unlearned)", funct
 		local c = ns.session.snapshot.professions.contents
 		table.sort(c)
 		assert.same({ 2883, 2918 }, c)                          -- the snapshot was backfilled
+	end)
+end)
+
+describe("quests_seen §3.2 collector (quest_seen / quest_accepted, daily dedup)", function()
+	local avail, active, detailID, npcGUID   -- gossip lists / open detail / "npc" GUID; mutated per test
+	local function loadCollector(ns) assert(loadfile("collectors/quests_seen.lua"))("TiW", ns) end
+	local function setup()
+		local ns = freshNS()
+		ns.char = {}                                  -- per-character dedup store (bound at login in-game)
+		ns.MapCache = { Current = function() return 2248 end }
+		_G.C_GossipInfo = {
+			GetAvailableQuests = function() return avail end,
+			GetActiveQuests    = function() return active end,
+		}
+		_G.UnitGUID  = function(u) return (u == "npc") and npcGUID or nil end
+		_G.GetQuestID = function() return detailID end
+		loadCollector(ns)
+		return ns
+	end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.timers = {}
+		avail, active, detailID = {}, {}, nil
+		npcGUID = "Creature-0-1-1-1-12345-aaaa"
+	end)
+	after_each(function() _G.C_GossipInfo, _G.UnitGUID, _G.GetQuestID = nil, nil, nil end)
+
+	it("GOSSIP_SHOW emits quest_seen once per quest/day with npcID + mapID; re-show dedups", function()
+		local ns = setup()
+		avail = { { questID = 70123 } }
+		mock.fireEvent("GOSSIP_SHOW")
+		mock.fireEvent("GOSSIP_SHOW")   -- same quest, same day -> suppressed
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_seen or {}))
+		assert.same({ questID = 70123, source = "gossip", npcID = 12345, mapID = 2248, accepted = false },
+			m.quest_seen[1].data)
+	end)
+
+	it("active gossip quests are seen as accepted=true", function()
+		local ns = setup()
+		active = { { questID = 70200 } }
+		mock.fireEvent("GOSSIP_SHOW")
+		local d = byKind(ns.session.events).quest_seen[1].data
+		assert.equal(70200, d.questID)
+		assert.is_true(d.accepted)
+	end)
+
+	it("a quest seen-then-accepted emits a quest_accepted follow-up, not a second quest_seen", function()
+		local ns = setup()
+		avail = { { questID = 70123 } }
+		mock.fireEvent("GOSSIP_SHOW")                 -- quest_seen accepted=false
+		mock.fireEvent("QUEST_ACCEPTED", 70123)       -- accept flip -> follow-up
+		mock.fireEvent("QUEST_ACCEPTED", 70123)       -- already accepted today -> nothing
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_seen or {}))
+		assert.equal(1, #(m.quest_accepted or {}))
+		assert.equal(70123, m.quest_accepted[1].data.questID)
+	end)
+
+	it("QUEST_ACCEPTED for a quest unseen today is a first sight (source=accepted, accepted=true)", function()
+		local ns = setup()
+		mock.fireEvent("QUEST_ACCEPTED", 88888)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_seen or {}))
+		assert.equal(0, #(m.quest_accepted or {}))
+		assert.same({ questID = 88888, source = "accepted", npcID = 12345, mapID = 2248, accepted = true },
+			m.quest_seen[1].data)
+	end)
+
+	it("QUEST_DETAIL emits quest_seen source=detail", function()
+		local ns = setup()
+		detailID = 55555
+		mock.fireEvent("QUEST_DETAIL")
+		local d = byKind(ns.session.events).quest_seen[1].data
+		assert.equal(55555, d.questID)
+		assert.equal("detail", d.source)
+	end)
+
+	it("npcID is 0 when no npc unit GUID is readable", function()
+		local ns = setup()
+		npcGUID = nil
+		avail = { { questID = 70123 } }
+		mock.fireEvent("GOSSIP_SHOW")
+		assert.equal(0, byKind(ns.session.events).quest_seen[1].data.npcID)
+	end)
+end)
+
+describe("prey_quests §3.10 collector (prey_quest, daily dedup)", function()
+	local function loadCollector(ns)
+		assert(loadfile("tables/prey_quests.lua"))("TiW", ns)
+		assert(loadfile("collectors/prey_quests.lua"))("TiW", ns)
+	end
+	local function setup()
+		local ns = freshNS()
+		ns.char = {}
+		loadCollector(ns)
+		return ns
+	end
+
+	before_each(function() mock.now = 1747776000; mock.frames = {}; mock.timers = {} end)
+	after_each(function() _G.TiWCompanionDB = nil end)
+
+	it("emits prey_quest with tier + criteriaID for a known quest, once per day", function()
+		local ns = setup()
+		local observe = ns.collectors.prey_quests.observePrey
+		observe(91095)   -- tier 1, criteria 105912 (from the shipped floor)
+		observe(91095)   -- same day -> dedup
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.prey_quest or {}))
+		assert.same({ questID = 91095, difficultyTier = 1, achievementCriteriaID = 105912 },
+			m.prey_quest[1].data)
+	end)
+
+	it("ignores a questID that is not a prey quest", function()
+		local ns = setup()
+		ns.collectors.prey_quests.observePrey(70123)   -- a normal quest, not in the table
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("a companion payload replaces the shipped floor", function()
+		local ns = setup()
+		_G.TiWCompanionDB = { prey_payload = { [80000] = { 3, 999 } } }
+		ns.collectors.prey_quests.observePrey(91095)   -- in floor but NOT the payload -> ignored
+		ns.collectors.prey_quests.observePrey(80000)   -- payload entry
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.prey_quest or {}))
+		assert.same({ questID = 80000, difficultyTier = 3, achievementCriteriaID = 999 },
+			m.prey_quest[1].data)
+	end)
+end)
+
+describe("basics §3.13 (registers basics + emits level_up)", function()
+	before_each(function() mock.now = 1747776000; mock.frames = {}; mock.timers = {} end)
+	after_each(function()
+		_G.UnitClass, _G.UnitRace, _G.UnitFactionGroup, _G.UnitSex, _G.UnitLevel = nil, nil, nil, nil, nil
+		_G.GetSpecialization, _G.GetSpecializationInfo, _G.GetAverageItemLevel, _G.C_Covenants = nil, nil, nil, nil
+	end)
+
+	it("basics scans locale-invariant identity fields", function()
+		local ns = freshNS()
+		_G.UnitClass        = function() return "Mage", "MAGE" end
+		_G.UnitRace         = function() return "Gnome", "Gnome" end
+		_G.UnitFactionGroup = function() return "Alliance" end
+		_G.UnitSex          = function() return 2 end
+		_G.UnitLevel        = function() return 70 end
+		_G.GetSpecialization     = function() return 1 end
+		_G.GetSpecializationInfo = function() return 62 end
+		_G.GetAverageItemLevel   = function() return 600, 595 end
+		_G.C_Covenants = { GetActiveCovenantID = function() return 3 end }
+		assert(loadfile("collectors/basics.lua"))("TiW", ns)
+
+		local r = ns.collectors.basics.rescan()
+		assert.equal(70, r.contents.level)
+		assert.equal("MAGE", r.contents.class)
+		assert.equal("Gnome", r.contents.race)
+		assert.equal("Alliance", r.contents.faction)
+		assert.equal(62, r.contents.spec)
+		assert.equal(595, r.contents.ilvl)
+	end)
+
+	it("level_up emits on PLAYER_LEVEL_UP carrying the new level", function()
+		local ns = freshNS()
+		assert(loadfile("collectors/level_up.lua"))("TiW", ns)
+		mock.fireEvent("PLAYER_LEVEL_UP", 71)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.level_up or {}))
+		assert.equal(71, m.level_up[1].data.newLevel)
 	end)
 end)

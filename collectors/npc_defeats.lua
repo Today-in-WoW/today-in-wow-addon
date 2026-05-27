@@ -69,15 +69,10 @@ local engaged  = {}     -- GUID -> true; confirmed personal participation (on th
                         -- threat table while alive). Gates the two observation emits so a
                         -- bystander kill never counts. Loot bypasses this (see header).
 
--- npcID = 6th dash-field of a Creature/Vehicle GUID (Creature-0-srv-inst-zone-NPCID-spawn).
--- Only Creature/Vehicle GUIDs are kills — reject GameObject (chests/herb/mining nodes) and
--- any other kind, which can surface as loot sources but are never an npc_defeated.
-local function npcIDFromGUID(guid)
-	if not guid then return nil end
-	local kind, id = guid:match("^(%a+)%-%d+%-%d+%-%d+%-%d+%-(%d+)%-")
-	if kind ~= "Creature" and kind ~= "Vehicle" then return nil end
-	return tonumber(id)
-end
+-- npcID = 6th dash-field of a Creature/Vehicle GUID (Creature-0-srv-inst-zone-NPCID-spawn);
+-- rejects GameObject (chests/herb/mining nodes) and other kinds, which surface as loot
+-- sources but are never an npc_defeated. Shared pure helper (§3.2/§3.5).
+local npcIDFromGUID = ns.Util.npcIDFromGUID
 
 -- Record a confirmed path-2 defeat for `guid` (dedup'd per spawn). spawnTime decodes from
 -- the GUID, which the corpse keeps, so it's valid whether the unit was seen alive or dead.

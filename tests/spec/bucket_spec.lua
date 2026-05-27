@@ -47,3 +47,33 @@ describe("§3.2 Bucket.daily", function()
 		assert.equal(1, Bucket.daily(86400, 0))
 	end)
 end)
+
+local function freshDedup()
+	local ns = {}
+	assert(loadfile("core/util.lua"))("TiW", ns)
+	return ns.DailyDedup
+end
+
+describe("§3.2 DailyDedup.today", function()
+	-- reuses the file-level OFFSET (54000) and R (exact reset boundary -> bucket 20227)
+
+	it("self-initializes an empty store and preserves membership within a day", function()
+		local D = freshDedup()
+		local store = {}
+		local set = D.today(store, R, OFFSET)
+		assert.is_nil(set[42])
+		set[42] = true
+		local set2 = D.today(store, R + 3600, OFFSET)   -- 1h later, same reset-day
+		assert.is_true(set2[42])
+		assert.equal(set, set2)                          -- the same set, not re-created
+	end)
+
+	it("wipes the set when the daily bucket flips at reset", function()
+		local D = freshDedup()
+		local store = {}
+		D.today(store, R, OFFSET)[42] = true
+		local fresh = D.today(store, R + 86400, OFFSET)  -- next reset-day
+		assert.is_nil(fresh[42])
+		assert.equal(20228, store.bucket)
+	end)
+end)

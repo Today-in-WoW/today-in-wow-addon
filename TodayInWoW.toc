@@ -21,6 +21,7 @@ core\secrets.lua
 core\scheduler.lua
 core\mapcache.lua
 tables\whitelist_rares.lua
+tables\prey_quests.lua
 core\whitelist.lua
 core\migrations.lua
 collectors\basics.lua
@@ -35,6 +36,8 @@ collectors\events_schedule.lua
 collectors\delves.lua
 collectors\loot.lua
 collectors\quest_completion.lua
+collectors\quests_seen.lua
+collectors\prey_quests.lua
 collectors\npc_defeats.lua
 collectors\encounter_defeated.lua
 collectors\lockout_changed.lua

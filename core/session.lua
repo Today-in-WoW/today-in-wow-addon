@@ -40,6 +40,7 @@ local function startSession()
 		TiWDB.characters[key] = rec
 	end
 	rec.char_guid = guid
+	ns.char = rec   -- per-character persisted store (daily-dedup state, §3.2/§3.10)
 
 	-- Bound stored growth before adding today's bundle.
 	ns.Drain.run(rec)

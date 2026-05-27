@@ -7,6 +7,7 @@ mock.install()
 
 local function freshDecode()
 	local ns = {}
+	assert(loadfile("core/util.lua"))("TiW", ns)   -- npc_defeats uses ns.Util.npcIDFromGUID (§3.5)
 	assert(loadfile("collectors/npc_defeats.lua"))("TiW", ns)
 	return ns.Decode
 end
