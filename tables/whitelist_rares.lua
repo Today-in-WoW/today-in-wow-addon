@@ -34,7 +34,7 @@ ns.tables.whitelist_rares = {
 	-- no-questID entries (path 2). They will simply never match in the wild as-is.
 	[999990] = {},
 	[999991] = {},
-	[254534] = {},  -- example real common (npcID) with no hidden quest ({}), so it uses path 2
+	--[254534] = {},  -- example real common (npcID) with no hidden quest ({}), so it uses path 2
 }
 
 return ns
