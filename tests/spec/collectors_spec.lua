@@ -32,9 +32,6 @@ local function freshNS()
 end
 
 describe("collector wiring (pending until collectors are implemented)", function()
-	it("world_quests §3.1 emits wq_offered (expiresAt absolute epoch)", function()
-		pending("collector not implemented")
-	end)
 	it("collections §3.4 emits appearance_added/decor_added/achievement_earned/criteria_earned (persist categories)", function()
 		pending("collector not implemented")
 	end)
@@ -1618,5 +1615,236 @@ describe("basics §3.13 (registers basics + emits level_up)", function()
 		local m = byKind(ns.session.events)
 		assert.equal(1, #(m.level_up or {}))
 		assert.equal(71, m.level_up[1].data.newLevel)
+	end)
+end)
+
+describe("world_quests §3.1 collector (wq_offered, edge-triggered + reward-defer)", function()
+	-- per-questID controls, mutated per test
+	local rewardReady, timeLeft, tags, preloaded, money, item, currencies, factionOf
+	local wqFaction, awardsRep, firstBonus
+	local function loadCollector(ns) assert(loadfile("collectors/world_quests.lua"))("TiW", ns) end
+	local function setup()
+		local ns = freshNS()
+		ns.char = {}                                  -- per-character persisted dedup store (§3.1)
+		_G.HaveQuestRewardData = function(id) return rewardReady[id] == true end
+		_G.C_TaskQuest = {
+			-- timed by default (120 min) so a WQ emits on scan 1; a test sets 0 for "untimed".
+			GetQuestTimeLeftMinutes  = function(id) local m = timeLeft[id]; return m == nil and 120 or m end,
+			RequestPreloadRewardData = function(id) preloaded[id] = (preloaded[id] or 0) + 1 end,
+			GetQuestsOnMap           = function() return {} end,
+			GetQuestInfoByQuestID    = function(id) return nil, wqFaction[id] end,   -- (title, factionID)
+		}
+		_G.C_QuestLog = {
+			GetQuestTagInfo          = function(id) return tags[id] end,
+			GetQuestRewardCurrencies = function(id) return currencies[id] or {} end,   -- modern API
+			DoesQuestAwardReputationWithFaction = function(id) return awardsRep[id] == true end,
+			QuestContainsFirstTimeRepBonusForPlayer = function(id) return firstBonus[id] == true end,
+		}
+		_G.C_CurrencyInfo = { GetFactionGrantedByCurrency = function(cid) return factionOf[cid] end }
+		_G.GetQuestLogRewardMoney = function(id) return money[id] or 0 end
+		_G.GetNumQuestLogRewards  = function(id) return item[id] and 1 or 0 end
+		_G.GetQuestLogRewardInfo  = function(_, id) return "Item", "tex", 1, 2, true, item[id] end
+		loadCollector(ns)
+		return ns
+	end
+	local function process(ns, list) ns.collectors.world_quests.processVisible(list) end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.timers = {}
+		rewardReady, timeLeft, tags, preloaded = {}, {}, {}, {}
+		money, item, currencies, factionOf = {}, {}, {}, {}
+		wqFaction, awardsRep, firstBonus = {}, {}, {}
+	end)
+	after_each(function()
+		_G.HaveQuestRewardData, _G.C_TaskQuest, _G.C_QuestLog, _G.C_CurrencyInfo = nil, nil, nil, nil
+		_G.GetQuestLogRewardMoney, _G.GetNumQuestLogRewards, _G.GetQuestLogRewardInfo = nil, nil, nil
+	end)
+
+	it("emits wq_offered with scaled coords, absolute expiresAt, and tag enrichment", function()
+		local ns = setup()
+		rewardReady[70001] = true
+		timeLeft[70001] = 120                                       -- minutes
+		tags[70001] = { worldQuestType = 5, tradeskillLineID = 202, isElite = true, quality = 3 }
+		process(ns, { { questID = 70001, x = 0.5, y = 0.25, mapID = 2248 } })
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.wq_offered or {}))
+		local d = m.wq_offered[1].data
+		assert.equal(70001, d.questID)
+		assert.equal(2248, d.mapID)
+		assert.equal(5000, d.x)                                     -- 0.5 -> scaleCoord int (§3.6)
+		assert.equal(2500, d.y)
+		assert.equal(mock.now + 120 * 60, d.expiresAt)              -- absolute epoch
+		assert.equal(5, d.worldQuestType)
+		assert.equal(202, d.tradeskillLineID)
+		assert.is_true(d.isElite)
+		assert.equal(3, d.rarity)
+	end)
+
+	it("defers emit until reward data is ready, requesting a preload meanwhile", function()
+		local ns = setup()
+		timeLeft[70002] = 60
+		process(ns, { { questID = 70002, x = 0, y = 0, mapID = 1 } })   -- reward not ready
+		assert.equal(0, #ns.session.events)
+		assert.equal(1, preloaded[70002])
+		rewardReady[70002] = true
+		process(ns, { { questID = 70002, x = 0, y = 0, mapID = 1 } })
+		assert.equal(1, #ns.session.events)
+	end)
+
+	it("emits once per visible window (re-scan dedups)", function()
+		local ns = setup()
+		rewardReady[70003] = true
+		local list = { { questID = 70003, x = 0, y = 0, mapID = 1 } }
+		process(ns, list); process(ns, list)
+		assert.equal(1, #ns.session.events)
+	end)
+
+	it("re-emits only when the window rolls over (a new expiresAt)", function()
+		local ns = setup()
+		rewardReady[70004] = true
+		timeLeft[70004] = 120
+		local list = { { questID = 70004, x = 0, y = 0, mapID = 1 } }
+		process(ns, list)
+		process(ns, {})          -- vanished — but same window, must NOT re-emit on return
+		process(ns, list)
+		assert.equal(1, #ns.session.events)
+		timeLeft[70004] = 4320   -- genuinely new window (days apart, beyond WINDOW_TOL)
+		process(ns, list)
+		assert.equal(2, #ns.session.events)
+	end)
+
+	it("treats a small expiresAt jitter as the same window (no re-emit)", function()
+		local ns = setup()
+		rewardReady[70013] = true
+		timeLeft[70013] = 120
+		local list = { { questID = 70013, x = 0, y = 0, mapID = 1 } }
+		process(ns, list)
+		mock.now = mock.now + 30   -- minute-granular expiry drifts <= WINDOW_TOL between scans
+		process(ns, list)
+		assert.equal(1, #ns.session.events)
+	end)
+
+	it("persists dedup across a reload (same character store, fresh module)", function()
+		local ns = setup()
+		rewardReady[70011] = true
+		timeLeft[70011] = 120
+		local list = { { questID = 70011, x = 0, y = 0, mapID = 1 } }
+		process(ns, list)
+		assert.equal(1, #ns.session.events)
+		loadCollector(ns)          -- simulate /reload: fresh module, ns.char (wq_seen) persists
+		ns.collectors.world_quests.processVisible(list)
+		assert.equal(1, #ns.session.events)   -- same window already shipped — not re-emitted
+	end)
+
+	it("emits an untimed task quest (no expiresAt) only after the defer cap", function()
+		local ns = setup()
+		rewardReady[70005] = true
+		timeLeft[70005] = 0                                        -- untimed (no expiry ever loads)
+		local list = { { questID = 70005, x = 0, y = 0, mapID = 1 } }
+		for _ = 1, 5 do process(ns, list) end                      -- gated on expiry; defers to the cap
+		assert.equal(0, #ns.session.events)
+		process(ns, list)
+		assert.equal(1, #ns.session.events)
+		assert.is_nil(byKind(ns.session.events).wq_offered[1].data.expiresAt)
+	end)
+
+	it("emits a bonus objective (no WQ tag) with no worldQuestType", function()
+		local ns = setup()
+		rewardReady[70006] = true                                   -- tags[70006] nil
+		process(ns, { { questID = 70006, x = 0, y = 0, mapID = 1 } })
+		local d = byKind(ns.session.events).wq_offered[1].data
+		assert.equal(70006, d.questID)
+		assert.is_nil(d.worldQuestType)
+	end)
+
+	it("emits best-effort after REWARD_WAIT cycles when reward data never arrives", function()
+		local ns = setup()
+		timeLeft[70007] = 30
+		local list = { { questID = 70007, x = 0, y = 0, mapID = 1 } }
+		for _ = 1, 5 do process(ns, list) end                       -- REWARD_WAIT deferrals, never ready
+		assert.equal(0, #ns.session.events)
+		process(ns, list)                                           -- waited >= REWARD_WAIT -> emit
+		assert.equal(1, #ns.session.events)
+	end)
+
+	it("captures gold, item, plain currencies, and faction reputation rewards", function()
+		local ns = setup()
+		rewardReady[70008] = true
+		timeLeft[70008] = 60
+		money[70008] = 9980068                                      -- copper
+		item[70008]  = 12345
+		currencies[70008] = {
+			{ currencyID = 3316, totalRewardAmount = 150 },         -- Voidlight Marl (plain currency)
+			{ currencyID = 2906, totalRewardAmount = 75 },          -- a reputation currency...
+		}
+		factionOf[2906] = 2710                                      -- ...granting Silvermoon Court rep
+		process(ns, { { questID = 70008, x = 0, y = 0, mapID = 1 } })
+		local d = byKind(ns.session.events).wq_offered[1].data
+		assert.equal(9980068, d.rewardGold)
+		assert.equal(12345, d.rewardItemID)
+		assert.equal("3316:150", d.rewardCurrencies)                -- non-faction currency
+		assert.equal("2710:75", d.rewardReputations)               -- faction resolved from the currency
+	end)
+
+	it("captures multiple faction reputations, sorted by factionID", function()
+		local ns = setup()
+		rewardReady[70009] = true
+		currencies[70009] = {
+			{ currencyID = 2906, totalRewardAmount = 150 },
+			{ currencyID = 2905, totalRewardAmount = 75 },
+		}
+		factionOf[2906], factionOf[2905] = 2710, 2503
+		process(ns, { { questID = 70009, x = 0, y = 0, mapID = 1 } })
+		local d = byKind(ns.session.events).wq_offered[1].data
+		assert.equal("2503:75,2710:150", d.rewardReputations)       -- sorted by factionID
+		assert.is_nil(d.rewardCurrencies)
+	end)
+
+	it("captures reward spells (the Warband rep bonus ships as a sorted spellID string)", function()
+		local ns = setup()
+		rewardReady[70010] = true
+		_G.C_QuestInfoSystem = {
+			HasQuestRewardSpells = function() return true end,
+			GetQuestRewardSpells = function() return { 456789, 123456 } end,
+		}
+		process(ns, { { questID = 70010, x = 0, y = 0, mapID = 1 } })
+		assert.equal("123456,456789", byKind(ns.session.events).wq_offered[1].data.rewardSpells)
+		_G.C_QuestInfoSystem = nil
+	end)
+
+	it("captures the WQ faction (clean API) as factionID:0 when the amount isn't exposed", function()
+		local ns = setup()
+		rewardReady[70014] = true
+		wqFaction[70014] = 2710          -- GetQuestInfoByQuestID -> Silvermoon Court
+		awardsRep[70014] = true          -- DoesQuestAwardReputationWithFaction
+		process(ns, { { questID = 70014, x = 0, y = 0, mapID = 1 } })
+		assert.equal("2710:0", byKind(ns.session.events).wq_offered[1].data.rewardReputations)
+	end)
+
+	it("ignores a WQ faction that does not award reputation", function()
+		local ns = setup()
+		rewardReady[70017] = true
+		wqFaction[70017] = 2710
+		awardsRep[70017] = false
+		process(ns, { { questID = 70017, x = 0, y = 0, mapID = 1 } })
+		assert.is_nil(byKind(ns.session.events).wq_offered[1].data.rewardReputations)
+	end)
+
+	it("flags the one-time Warband reputation bonus", function()
+		local ns = setup()
+		rewardReady[70015] = true
+		firstBonus[70015] = true
+		process(ns, { { questID = 70015, x = 0, y = 0, mapID = 1 } })
+		assert.is_true(byKind(ns.session.events).wq_offered[1].data.firstTimeRepBonus)
+	end)
+
+	it("merges currency-granted rep (exact amount) with the WQ faction (amount 0)", function()
+		local ns = setup()
+		rewardReady[70016] = true
+		currencies[70016] = { { currencyID = 2906, totalRewardAmount = 75 } }
+		factionOf[2906] = 2503
+		wqFaction[70016], awardsRep[70016] = 2710, true
+		process(ns, { { questID = 70016, x = 0, y = 0, mapID = 1 } })
+		assert.equal("2503:75,2710:0", byKind(ns.session.events).wq_offered[1].data.rewardReputations)
 	end)
 end)

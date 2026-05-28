@@ -38,6 +38,7 @@ collectors\loot.lua
 collectors\quest_completion.lua
 collectors\quests_seen.lua
 collectors\prey_quests.lua
+collectors\world_quests.lua
 collectors\npc_defeats.lua
 collectors\encounter_defeated.lua
 collectors\lockout_changed.lua

@@ -199,6 +199,54 @@ local function logReport(arg)
 	end
 end
 
+-- /tiw wq: what the world-quest collector would scan right now (data_storage §3.1).
+-- Shows the resolved map set and how many task quests each map returns — the direct
+-- "is enumeration finding the continent, and is far-zone WQ data loaded?" check. For
+-- one sample quest it also dumps reward readiness + the reward strings, so a blank
+-- reward in a row can be traced to "data not loaded yet" vs "API returned nothing".
+local function wqReport()
+	local wq = ns.collectors and ns.collectors.world_quests
+	if not (wq and wq.mapsToScan) then out("world_quests not loaded"); return end
+	local maps = wq.mapsToScan()
+	out("wq  ·  scanning " .. #maps .. " maps")
+	local total, sample = 0, nil
+	for _, mapID in ipairs(maps) do
+		local q = (C_TaskQuest and C_TaskQuest.GetQuestsOnMap and C_TaskQuest.GetQuestsOnMap(mapID)) or {}
+		if #q > 0 then
+			local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+			out(string.format("  map %-5d %-22s quests=%d", mapID, (info and info.name) or "?", #q))
+			sample = sample or q[1]
+		end
+		total = total + #q
+	end
+	out("  total task quests = " .. total)
+	if sample then
+		local id = sample.questID or sample.questId
+		local data = wq.buildRow and wq.buildRow({ questID = id, x = sample.x, y = sample.y, mapID = 0 })
+		out(string.format("  sample q=%d  haveData=%s  haveReward=%s", id,
+			tostring(HaveQuestData and HaveQuestData(id)),
+			tostring(HaveQuestRewardData and HaveQuestRewardData(id))))
+		if data then out("  sample reward  " .. ns.Canonical.payload(data)) end
+
+		-- Raw reward APIs, to trace where a faction/rep reward actually lives (currency
+		-- with a granted faction, or a reward spell). questRewardContextFlags marks
+		-- account-wide (Warband) currencies.
+		local curs = C_QuestLog and C_QuestLog.GetQuestRewardCurrencies and C_QuestLog.GetQuestRewardCurrencies(id)
+		if curs then
+			for _, c in ipairs(curs) do
+				local f = C_CurrencyInfo and C_CurrencyInfo.GetFactionGrantedByCurrency
+					and C_CurrencyInfo.GetFactionGrantedByCurrency(c.currencyID)
+				out(string.format("    cur %d x%s  faction=%s  ctxFlags=%s", c.currencyID,
+					tostring(c.totalRewardAmount), tostring(f), tostring(c.questRewardContextFlags)))
+			end
+		end
+		local S = C_QuestInfoSystem
+		if S and S.GetQuestRewardSpells and S.HasQuestRewardSpells and S.HasQuestRewardSpells(id) then
+			for _, sp in ipairs(S.GetQuestRewardSpells(id) or {}) do out("    spell " .. tostring(sp)) end
+		end
+	end
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	msg = (msg or ""):lower():gsub("^%s*(.-)%s*$", "%1")
@@ -211,6 +259,8 @@ SlashCmdList["TIW"] = function(msg)
 		collectionsReport()
 	elseif cmd == "log" then
 		logReport(arg)
+	elseif msg == "wq" then
+		wqReport()
 	elseif msg == "trace" then
 		if ns.OnEmit then
 			ns.OnEmit = nil
@@ -222,7 +272,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload; suppressed in restricted content)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw log  ·  /tiw trace")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw wq  ·  /tiw log  ·  /tiw trace")
 	end
 end
 
