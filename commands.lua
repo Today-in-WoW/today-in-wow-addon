@@ -51,7 +51,8 @@ local function debugReport()
 		.. "  next_seq=" .. tostring(s and s.next_seq or 0)
 		.. "  collectors=" .. count(ns.collectors)
 		.. "  trace=" .. (ns.OnEmit and "|cff40ff40armed|r" or "idle")
-		.. ((TiWDB and TiWDB.trace) and " |cff808080(persisted)|r" or ""))
+		.. ((TiWDB and TiWDB.trace) and " |cff808080(persisted)|r" or "")
+		.. "  restrictions=" .. tostring(ns.Secrets and ns.Secrets.HasRestrictions and ns.Secrets.HasRestrictions()))
 	if s then
 		out("  chain     snap=" .. tostring(s.snapshot and s.snapshot.tail)
 			.. "  session_tail=" .. tostring(s.session_tail or (s.snapshot and s.snapshot.tail))
@@ -114,11 +115,12 @@ local function debugReport()
 	out("  pending   " .. table.concat(parts, "  "))
 end
 
--- Live record trace (toggled by /tiw trace): one line per Emit. Suppressed in
--- restricted instanced content (raids/M+/rated PvP) where chat output is unsafe —
--- records are still captured there, just not printed.
+-- Live record trace (toggled by /tiw trace): one line per Emit. No restricted-content
+-- gate — emitted data is already secret-guarded by the collectors (ns.Secrets.guard),
+-- so printing it is safe, and C_Secrets' restriction state reads true in normal Midnight
+-- play, which silently killed the trace. eventlog pcall's this hook, so a stray format
+-- error here can never break collection.
 local function trace(seq, kind, data, h)
-	if ns.Secrets and ns.Secrets.HasRestrictions and ns.Secrets.HasRestrictions() then return end
 	out("|cff40ff40+" .. seq .. "|r " .. tostring(kind) .. "  "
 		.. ns.Canonical.payload(data) .. "  |cff808080" .. tostring(h) .. "|r")
 end
@@ -164,7 +166,7 @@ local function collectionsReport()
 	local col = (ns.account and ns.account.collections) or {}
 	out("collections  ·  checkpoint hash=" .. tostring(col.h)
 		.. (col.captured_at and ("  @" .. col.captured_at) or "  |cffff5050(no checkpoint)|r"))
-	if not (ns.Collections and ns.Collections.diff) then
+	if not (ns.Collections and ns.Collections.diffAsync) then
 		out("  diff unavailable (Collections not loaded)"); return
 	end
 	local function sample(ids)
@@ -172,13 +174,17 @@ local function collectionsReport()
 		for i = 1, n do parts[i] = ids[i] end
 		return table.concat(parts, ",") .. (#ids > n and ",…" or "")
 	end
-	for _, r in ipairs(ns.Collections.diff()) do
-		local line = string.format("  %-6s stored=%d  live=%d  new=%d  removed=%d",
-			r.cat, r.stored, r.live, #r.newIds, #r.removedIds)
-		out(line)
-		if #r.newIds > 0 then out("    new→observe: " .. sample(r.newIds)) end
-		if #r.removedIds > 0 then out("    removed:     " .. sample(r.removedIds)) end
-	end
+	-- Async: the appearance scan alone is ~40k entries, so run it on the coroutine
+	-- runner and print when it lands (a sync diff froze the client).
+	out("  scanning… (results follow)")
+	ns.Collections.diffAsync(function(rows)
+		for _, r in ipairs(rows) do
+			out(string.format("  %-6s stored=%d  live=%d  new=%d  removed=%d",
+				r.cat, r.stored, r.live, #r.newIds, #r.removedIds))
+			if #r.newIds > 0 then out("    new→observe: " .. sample(r.newIds)) end
+			if #r.removedIds > 0 then out("    removed:     " .. sample(r.removedIds) .. "  (add-only — likely a wardrobe filter was active during the scan)") end
+		end
+	end)
 end
 
 -- /tiw collect: manual re-baseline. Forces a full re-scan of every collection
@@ -272,6 +278,90 @@ local function wqReport()
 	end
 end
 
+-- /tiw export: copy-paste the whole SavedVariables as one import string for site
+-- users without the companion (§8). Opens a popup with the string pre-selected
+-- (Ctrl+C to copy). "Mark exported — free space" records delivery via
+-- Export.markExported(), which Drain drops next login; `/tiw export clear` does the
+-- same headlessly. Marking is a deliberate post-paste act — generating the string
+-- never prunes, since a copy isn't proof the site received it.
+local exportFrame
+local function showExport(str)
+	if not exportFrame then
+		local f = CreateFrame("Frame", "TiWExportFrame", UIParent, "BackdropTemplate")
+		f:SetSize(560, 200)
+		f:SetPoint("CENTER")
+		f:SetFrameStrata("DIALOG")
+		f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+		f:SetScript("OnDragStart", f.StartMoving)
+		f:SetScript("OnDragStop", f.StopMovingOrSizing)
+		if f.SetBackdrop then
+			f:SetBackdrop({
+				bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+				edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+				tile = true, tileSize = 32, edgeSize = 32,
+				insets = { left = 8, right = 8, top = 8, bottom = 8 },
+			})
+		end
+
+		local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		title:SetPoint("TOP", 0, -14)
+		title:SetText("Today in WoW — export  (Ctrl+C to copy)")
+
+		local scroll = CreateFrame("ScrollFrame", "TiWExportScroll", f, "UIPanelScrollFrameTemplate")
+		scroll:SetPoint("TOPLEFT", 16, -36)
+		scroll:SetPoint("BOTTOMRIGHT", -34, 44)
+
+		local edit = CreateFrame("EditBox", nil, scroll)
+		edit:SetMultiLine(true)
+		edit:SetFontObject("ChatFontNormal")
+		edit:SetWidth(500)
+		edit:SetAutoFocus(false)
+		edit:SetScript("OnEscapePressed", function() f:Hide() end)
+		scroll:SetScrollChild(edit)
+		f.edit = edit
+
+		local markBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		markBtn:SetSize(230, 22)
+		markBtn:SetPoint("BOTTOMLEFT", 16, 14)
+		markBtn:SetText("Close and Mark Exported")
+		markBtn:SetScript("OnClick", function()
+			local n = (ns.Export and ns.Export.markExported()) or 0
+			out("marked " .. n .. " session(s) as exported — freed on next login")
+			f:Hide()
+		end)
+
+		local close = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		close:SetSize(100, 22)
+		close:SetPoint("BOTTOMRIGHT", -16, 14)
+		close:SetText("Close")
+		close:SetScript("OnClick", function() f:Hide() end)
+
+		table.insert(UISpecialFrames, "TiWExportFrame")   -- Escape closes it
+		exportFrame = f
+	end
+	exportFrame.edit:SetText(str)
+	exportFrame.edit:HighlightText()
+	exportFrame.edit:SetFocus()
+	exportFrame:Show()
+end
+
+local function exportCmd(arg)
+	if arg == "clear" then
+		local n = (ns.Export and ns.Export.markExported()) or 0
+		out("marked " .. n .. " session(s) as exported — freed on next login")
+		return
+	end
+	if not (ns.Export and ns.Export.stringAsync) then
+		out("export unavailable (Export not loaded)"); return
+	end
+	out("preparing to export data… (the window opens when it's ready)")
+	ns.Export.stringAsync(function(str, err)
+		if not str then out("export failed: " .. tostring(err)); return end
+		out("export ready — " .. #str .. " chars. Copy from the window (Ctrl+C), then click \"Close and Mark Exported\" once it's imported.")
+		showExport(str)
+	end)
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	msg = (msg or ""):lower():gsub("^%s*(.-)%s*$", "%1")
@@ -284,6 +374,8 @@ SlashCmdList["TIW"] = function(msg)
 		collectionsReport()
 	elseif msg == "collect" then
 		collectCmd()
+	elseif cmd == "export" then
+		exportCmd(arg)
 	elseif cmd == "log" then
 		logReport(arg)
 	elseif msg == "wq" then
@@ -296,10 +388,10 @@ SlashCmdList["TIW"] = function(msg)
 		else
 			ns.OnEmit = trace
 			if TiWDB then TiWDB.trace = true end
-			out("trace on — one line per new record (persists across /reload; suppressed in restricted content)")
+			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw wq  ·  /tiw log  ·  /tiw trace")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace")
 	end
 end
 

@@ -17,6 +17,10 @@ ns = ns or {}
 --   (0 = no request). Read-only — the companion owns the value; the addon records
 --   the timestamp it satisfied (collections.rebaseline_ack) so it re-baselines once
 --   per request, not every login. A relog before the scan finishes retries (§6).
+--
+--   A session is dropped if EITHER the companion shipped it (shipped_sessions) OR
+--   the user marked it delivered via copy-paste export (TiWDB.exported_sessions,
+--   §8). Drained exported ids are cleared from that set so it stays bounded.
 -- ===========================================================================
 
 local Drain = {}
@@ -27,13 +31,17 @@ function Drain.run(charRecord)
 	local db = _G.TiWCompanionDB
 	local rebaselineAt = tonumber(db and db.rebaseline_requested) or 0
 	local shipped = db and db.shipped_sessions
-	if not shipped then return sessions, rebaselineAt end   -- no companion -> nothing confirmed
+	local exported = _G.TiWDB and _G.TiWDB.exported_sessions
+	if not shipped and not exported then return sessions, rebaselineAt end
 
-	-- Compact in place, preserving order: keep bundles the companion hasn't shipped.
+	-- Compact in place, preserving order: keep bundles neither shipped nor exported.
 	local w = 0
 	for r = 1, #sessions do
 		local s = sessions[r]
-		if not shipped[s.session_id] then
+		local drop = (shipped and shipped[s.session_id]) or (exported and exported[s.session_id])
+		if drop then
+			if exported then exported[s.session_id] = nil end   -- gone now; don't keep the marker
+		else
 			w = w + 1
 			sessions[w] = s
 		end

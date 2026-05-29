@@ -240,14 +240,30 @@ local function passCategory(cat, col, establishing, tick)
 		end
 	end
 	owned[cat] = set
-	if liveCount ~= nil then
+
+	-- Persist the UNION (stored ∪ fresh), never `fresh` alone. Collections are
+	-- add-only (§3.4), so a scan must never SHRINK the checkpoint. This matters
+	-- because C_TransmogCollection.GetCategoryAppearances honors the player's active
+	-- wardrobe filter: a scan run with the Appearances journal filtered returns a
+	-- subset, which would otherwise drop sources from the checkpoint and re-observe
+	-- them next login. A normal (unfiltered) scan is a superset, so union == fresh.
+	local merged = {}
+	for id in pairs(set) do merged[#merged + 1] = id end
+	table.sort(merged)
+
+	-- Advance the gate count only when the scan was NOT partial (didn't return fewer
+	-- than we already had). A filtered/partial scan leaves the old (lower) count so
+	-- the next full scan re-fires the gate and captures whatever the filter hid —
+	-- without this, storing the true (filter-independent) liveCount would skip that
+	-- rescan and permanently miss the hidden gains.
+	if liveCount ~= nil and #fresh >= storedCt then
 		col.counts = col.counts or {}
 		col.counts[cat] = liveCount
 	end
 	-- Tell the caller to bump baseline_hash if THIS category was silently
 	-- rebuilt outside the all-establishing pass (h needs to reflect the new
 	-- contents — without that, the site has no way to learn about them).
-	return fresh, (not establishing and silent and newCount > 0)
+	return merged, (not establishing and silent and newCount > 0)
 end
 
 -- The login pass: scan, diff vs the checkpoint, emit observed deltas, update the set.
@@ -398,14 +414,16 @@ end
 -- checkpoint but no longer owned in-game (collections are add-only, so these are
 -- never un-shipped — usually a manual SV edit or a Blizzard removal).
 -- Decor is omitted (its scan is async; not safe to invoke from a sync diagnostic).
-local function diff()
+-- `tick` threads into the scanners so diffAsync can spread the (heavy: ~40k
+-- appearances) walk across frames; nil = run straight through (tests).
+local function diff(tick)
 	local col = (ns.account and ns.account.collections) or {}
 	local rows = {}
 	for i = 1, #SCAN_ORDER do
 		local cat = SCAN_ORDER[i]
 		local stored, storedSet = col[cat] or {}, {}
 		for k = 1, #stored do storedSet[stored[k]] = true end
-		local live, liveSet, newIds = cats[cat].scan(nil), {}, {}
+		local live, liveSet, newIds = cats[cat].scan(tick), {}, {}
 		for k = 1, #live do
 			liveSet[live[k]] = true
 			if not storedSet[live[k]] then newIds[#newIds + 1] = live[k] end
@@ -419,7 +437,21 @@ local function diff()
 	return rows
 end
 
-ns.Collections = { refresh = refresh, reconcile = reconcile, rebaseline = rebaseline, diff = diff }
+-- Async diff for /tiw collections: same scan as diff(), but on the coroutine runner
+-- yielding every SCAN_CHUNK so the ~40k-appearance walk never freezes the client.
+-- onDone(rows) fires when the scan completes.
+local function diffAsync(onDone)
+	ns.Schedule.Run(function()
+		local n = 0
+		local rows = diff(function()
+			n = n + 1
+			if n >= SCAN_CHUNK then n = 0; coroutine.yield() end
+		end)
+		if onDone then onDone(rows) end
+	end)
+end
+
+ns.Collections = { refresh = refresh, reconcile = reconcile, rebaseline = rebaseline, diff = diff, diffAsync = diffAsync }
 ns.collectors.collections = { reconcile = reconcile }
 
 -- ---- live deltas (precise time, deduped, persisted to the checkpoint) --------

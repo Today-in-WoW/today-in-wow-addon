@@ -33,11 +33,13 @@ read_globals = {
 	"C_Reputation", "C_MajorFactions", "C_GossipInfo",
 	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo",
 	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo", "GetInstanceInfo",
+	"LibStub", "UIParent", "UISpecialFrames",   -- export §8: embedded libs + copy-paste popup
 }
 
 exclude_files = {
 	"tools/",      -- dev tooling, not shipped
 	"contract/",
+	"Libs/",       -- vendored third-party libraries (export §8)
 }
 
 ignore = {

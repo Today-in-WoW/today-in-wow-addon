@@ -6,6 +6,12 @@
 ## SavedVariables: TiWDB
 ## X-Category: Data
 
+# Embedded libraries (export pipeline §8). LibStub first; LibDeflate registers into
+# it; AceSerializer needs it. Only core\export.lua consumes them.
+Libs\LibStub\LibStub.lua
+Libs\LibDeflate\LibDeflate.lua
+Libs\AceSerializer-3.0\AceSerializer-3.0.lua
+
 # Load order: bootstrap → frozen contract core → log/snapshot → collectors → login.
 core\namespace.lua
 core\util.lua
@@ -24,6 +30,7 @@ tables\whitelist_rares.lua
 tables\prey_quests.lua
 core\whitelist.lua
 core\migrations.lua
+core\export.lua
 collectors\basics.lua
 collectors\level_up.lua
 collectors\professions.lua

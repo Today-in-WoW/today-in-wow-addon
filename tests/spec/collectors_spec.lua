@@ -958,9 +958,11 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 	it("massive-jump guardrail: newCount > 1000 AND > 10× stored → silent rebuild + re-freeze h", function()
 		-- Returning player on a new PC, no SV transfer — scan returns 5000 sources
 		-- when only 10 were stored. Silently rebuild rather than flooding the log.
+		-- The 10 stored are the first 10 of the live set (a real full scan is a
+		-- superset of what's stored — add-only), so the persisted union is 5000.
 		local ns = freshNS()
 		local stored = {}
-		for i = 1, 10 do stored[i] = i end
+		for i = 1, 10 do stored[i] = 100000 + i end
 		ns.account.collections = {
 			mounts = {}, pets = {}, toys = {},
 			appearances = stored, achievements = {}, decor = {},
@@ -1027,6 +1029,37 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 
 		assert.equal(100, #ns.session.events)                           -- 100 newIds → 100 observed
 		assert.equal("oldhash", ns.account.collections.h)               -- normal reconcile keeps h frozen
+	end)
+
+	it("a partial (wardrobe-filtered) appearance scan never shrinks the checkpoint or advances the gate", function()
+		-- GetCategoryAppearances honors the active wardrobe filter, so a scan run with
+		-- the journal filtered returns a SUBSET. The gate moved (3→5, filter-independent
+		-- count) so the scan runs, but it only sees {10,20}. The checkpoint must keep all
+		-- three stored sources (add-only union), emit nothing, and must NOT store the new
+		-- gate count — so the next unfiltered scan re-fires and captures what was hidden.
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 10, 20, 30 }, achievements = {}, decor = {},
+			counts = { appearances = 3, achievements = 0, decor = 0 },
+			h = "oldhash",
+		}
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 1 }, { visualID = 2 } } },   -- filtered: only 2 visible
+			sources = { [1] = { 10 }, [2] = { 20 } },
+			collectedSrc = { [10] = true, [20] = true },
+			catCount = { [1] = 5 },                                            -- gate moved 3 → 5 (true count)
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.same({ 10, 20, 30 }, sortedContents(ns.account.collections.appearances))  -- union: 30 retained
+		assert.equal(3, ns.account.collections.counts.appearances)         -- gate NOT advanced (scan was partial)
+		assert.equal(0, #ns.session.events)                               -- nothing observed
+		assert.equal("oldhash", ns.account.collections.h)
 	end)
 
 	it("reconcile(force) re-baselines: same moderate gain stays silent and re-freezes h (/tiw collect, rebaseline_requested §6)", function()

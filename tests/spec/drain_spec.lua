@@ -23,7 +23,7 @@ local function idsOf(charRecord)
 end
 
 describe("§6 drain", function()
-	after_each(function() _G.TiWCompanionDB = nil end)
+	after_each(function() _G.TiWCompanionDB = nil; _G.TiWDB = nil end)
 
 	it("drops only the shipped sessions", function()
 		local Drain = freshDrain()
@@ -47,6 +47,24 @@ describe("§6 drain", function()
 		local rec = charWith("s1", "s2")
 		Drain.run(rec)
 		assert.same({ "s1", "s2" }, idsOf(rec))
+	end)
+
+	it("also drops sessions the user marked exported (§8), and clears their markers", function()
+		local Drain = freshDrain()
+		_G.TiWDB = { exported_sessions = { s2 = true } }       -- no companion, copy-paste export
+		local rec = charWith("s1", "s2", "s3")
+		Drain.run(rec)
+		assert.same({ "s1", "s3" }, idsOf(rec))
+		assert.is_nil(_G.TiWDB.exported_sessions.s2)            -- marker cleared (session is gone)
+	end)
+
+	it("drops the union of shipped and exported sessions", function()
+		local Drain = freshDrain()
+		_G.TiWCompanionDB = { shipped_sessions = { s1 = true } }
+		_G.TiWDB = { exported_sessions = { s3 = true } }
+		local rec = charWith("s1", "s2", "s3")
+		Drain.run(rec)
+		assert.same({ "s2" }, idsOf(rec))
 	end)
 
 	it("surfaces rebaseline_requested timestamp as the second return (§6), defaulting 0", function()
