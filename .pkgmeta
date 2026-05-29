@@ -1,0 +1,39 @@
+# .pkgmeta — BigWigs packager manifest  (https://github.com/BigWigsMods/packager)
+# Drives .github/workflows/release.yml: on a version tag it assembles the addon zip,
+# substitutes @project-version@ (and friends) in TodayInWoW.toc, attaches the zip to a
+# GitHub release, and — once the storefront secrets/IDs exist — uploads to CurseForge.
+
+# The packaged top-level folder. MUST match the .toc base name (TodayInWoW.toc) so WoW
+# loads it.
+package-as: TodayInWoW
+
+# We commit the libraries under Libs/ (see the externals note at the bottom), so they
+# package as-is and a lib-less ("-nolib") zip would be meaningless.
+enable-nolib-creation: no
+
+# Dev-only files that must NOT ship to users. (Libs/ is intentionally NOT ignored —
+# the vendored libraries are part of the package. The packager already drops .git and
+# strips .pkgmeta itself.)
+ignore:
+  - .busted
+  - .luacheckrc
+  - .github
+  - tests
+  - tools
+  - contract
+
+# --- Optional: fetch the libraries at package time instead of vendoring them ---------
+# The common convention is to NOT commit libs and let the packager pull them fresh
+# (leaner repo, libs stay current). To switch: delete the committed Libs/ folder, then
+# uncomment the block below. (Trade-off: a local working copy then has no libs until you
+# run the packager, so in-game dev-testing from the repo would break — which is why we
+# vendor for now.)
+#
+# externals:
+#   Libs/LibStub: https://repos.curseforge.com/wow/libstub/trunk
+#   Libs/LibDeflate: https://github.com/SafeteeWoW/LibDeflate
+#   Libs/AceSerializer-3.0:
+#     url: https://repos.wowace.com/wow/ace3/trunk/AceSerializer-3.0
+#     tag: latest
+#
+# (and set enable-nolib-creation: yes above if you also want a lib-less zip)
