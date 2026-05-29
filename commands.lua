@@ -209,7 +209,7 @@ local function collectCmd()
 		col = col or {}
 		out("re-baseline complete  ·  hash=" .. tostring(col.h)
 			.. (col.captured_at and ("  @" .. col.captured_at) or ""))
-	end)
+	end, true)   -- fast = true: elective, user is waiting → big scan chunk
 end
 
 -- /tiw log: dump the persisted breadcrumb timeline (ns.dbg, §namespace). Survives

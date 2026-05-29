@@ -30,9 +30,22 @@ local function finishSession(rec, guid)
 	rec.sessions[#rec.sessions + 1] = bundle
 end
 
+-- Breadcrumbs for /tiw log (ns.dbg, §namespace). The login pipeline is the one
+-- sequence worth tracing after the fact (timing, which collection path ran, final
+-- checkpoint counts); collectors stay un-instrumented. No-op if ns.dbg is absent.
+local function dbg(m) if ns.dbg then ns.dbg(m) end end
+
+local function logScanDone(label)
+	local c = (ns.account and ns.account.collections) or {}
+	dbg(string.format("%s done — mounts=%d pets=%d toys=%d appearances=%d achievements=%d h=%s",
+		label, #(c.mounts or {}), #(c.pets or {}), #(c.toys or {}), #(c.appearances or {}),
+		#(c.achievements or {}), tostring(c.h)))
+end
+
 local function startSession()
 	local guid = UnitGUID("player")
 	local key = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+	dbg("login: " .. key)
 
 	local rec = TiWDB.characters[key]
 	if not rec then
@@ -46,7 +59,9 @@ local function startSession()
 	-- site's rebaseline_requested timestamp (§6) — a gap it detected that a forced
 	-- re-baseline this login repairs.
 	local _, rebaselineAt = ns.Drain.run(rec)
+	dbg(string.format("drain → %d kept  rebaseline_at=%s", #rec.sessions, tostring(rebaselineAt)))
 	rec.sessions = ns.Retention.prune(rec.sessions, GetServerTime(), RETENTION_DAYS)
+	dbg(string.format("prune → %d retained", #rec.sessions))
 
 	-- Capture immediately so ns.session exists from the start of the session — the
 	-- delves/events collectors fire at PLAYER_ENTERING_WORLD and bail without it. The
@@ -57,6 +72,7 @@ local function startSession()
 	-- separately and the site can re-baseline (§3.4). We do NOT defer capture behind
 	-- the scan: that left ns.session nil for seconds, dropping the login's events.
 	finishSession(rec, guid)
+	dbg("session minted " .. tostring(ns.session and ns.session.session_id))
 	if ns.Collections then
 		-- Re-baseline only for a request NEWER than the one we last satisfied
 		-- (rebaseline_ack stores the request timestamp verbatim — clock-agnostic, no
@@ -64,9 +80,14 @@ local function startSession()
 		-- a relog before the async scan finishes re-tries; a relog after it is a no-op.
 		local col = ns.account and ns.account.collections
 		if rebaselineAt > (col and col.rebaseline_ack or 0) then
-			ns.Collections.rebaseline(function() if col then col.rebaseline_ack = rebaselineAt end end)
+			dbg("collections: forced rebaseline (rebaseline_requested)")
+			ns.Collections.rebaseline(function()
+				if col then col.rebaseline_ack = rebaselineAt end
+				logScanDone("rebaseline")
+			end)
 		else
-			ns.Collections.refresh()
+			dbg("collections: gated refresh")
+			ns.Collections.refresh(function() logScanDone("refresh") end)
 		end
 	end
 end

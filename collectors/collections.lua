@@ -35,8 +35,22 @@ local _, ns = ...
 -- ===========================================================================
 
 local owned = {}       -- cat -> { id = true }; dedup, seeded from the checkpoint
-local SCAN_CHUNK = 25  -- journal entries per frame slice on the coroutine runner (matches
-                       -- the delve world-scan cadence, validated invisible in-game)
+local SCAN_CHUNK = 25  -- entries/frame for the LOGIN scan: small, so the background
+                       -- reconcile stays invisible (delve world-scan cadence, validated).
+local ELECTIVE_CHUNK = 2000  -- entries/frame for USER-INVOKED full scans (/tiw collections,
+                       -- /tiw collect): far fewer frame-boundary waits, so a ~48k-entry walk
+                       -- finishes in seconds, not minutes. Costs some FPS — fine for an
+                       -- elective action (the per-frame compute is cheap; it was the
+                       -- once-per-frame yield that made the timid login cadence crawl).
+
+-- A `tick` that yields on the coroutine runner every `chunk` calls (see scanners).
+local function pacedTick(chunk)
+	local n = 0
+	return function()
+		n = n + 1
+		if n >= chunk then n = 0; coroutine.yield() end
+	end
+end
 
 -- ---- scanners: current owned set as a sorted id array -----------------------
 -- `tick` is called once per journal entry; in-game it yields every SCAN_CHUNK
@@ -380,11 +394,7 @@ local function refresh(onComplete)
 	local col = ns.account and ns.account.collections
 	if col then seedOwned(col) end
 	ns.Schedule.Run(function()
-		local n = 0
-		runPass(function()
-			n = n + 1
-			if n >= SCAN_CHUNK then n = 0; coroutine.yield() end
-		end)
+		runPass(pacedTick(SCAN_CHUNK))
 		decorScan()   -- kicks off; its callback completes independently
 		if onComplete then onComplete() end
 	end)
@@ -393,16 +403,14 @@ end
 -- Forced re-baseline (the site's rebaseline_requested at login, §6; /tiw collect).
 -- Same async coroutine machinery as refresh so a full appearance scan never freezes
 -- the client, but `force` makes every category scan unconditionally, silently, and
--- re-freezes baseline_hash — re-shipping the checkpoint wholesale.
-local function rebaseline(onComplete)
+-- re-freezes baseline_hash — re-shipping the checkpoint wholesale. `fast` (a manual
+-- /tiw collect — elective, user is waiting) uses the big chunk; the login-triggered
+-- rebaseline_requested path omits it to stay gentle on login.
+local function rebaseline(onComplete, fast)
 	local col = ns.account and ns.account.collections
 	if col then seedOwned(col) end
 	ns.Schedule.Run(function()
-		local n = 0
-		runPass(function()
-			n = n + 1
-			if n >= SCAN_CHUNK then n = 0; coroutine.yield() end
-		end, true)
+		runPass(pacedTick(fast and ELECTIVE_CHUNK or SCAN_CHUNK), true)
 		decorScan(true)
 		if onComplete then onComplete() end
 	end)
@@ -442,11 +450,7 @@ end
 -- onDone(rows) fires when the scan completes.
 local function diffAsync(onDone)
 	ns.Schedule.Run(function()
-		local n = 0
-		local rows = diff(function()
-			n = n + 1
-			if n >= SCAN_CHUNK then n = 0; coroutine.yield() end
-		end)
+		local rows = diff(pacedTick(ELECTIVE_CHUNK))
 		if onDone then onDone(rows) end
 	end)
 end
