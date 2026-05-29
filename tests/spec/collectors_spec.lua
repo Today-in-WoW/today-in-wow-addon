@@ -1989,6 +1989,7 @@ describe("basics §3.13 (registers basics + emits level_up)", function()
 	after_each(function()
 		_G.UnitClass, _G.UnitRace, _G.UnitFactionGroup, _G.UnitSex, _G.UnitLevel = nil, nil, nil, nil, nil
 		_G.GetSpecialization, _G.GetSpecializationInfo, _G.GetAverageItemLevel, _G.C_Covenants = nil, nil, nil, nil
+		_G.RequestTimePlayed = nil
 	end)
 
 	it("basics scans locale-invariant identity fields", function()
@@ -2011,6 +2012,33 @@ describe("basics §3.13 (registers basics + emits level_up)", function()
 		assert.equal("Alliance", r.contents.faction)
 		assert.equal(62, r.contents.spec)
 		assert.equal(595, r.contents.ilvl)
+	end)
+
+	it("played_total/played_level fill async via TIME_PLAYED_MSG and Recapture re-folds basics into the chain (§3.13)", function()
+		local ns = freshNS()
+		_G.UnitClass        = function() return "Mage", "MAGE" end
+		_G.UnitRace         = function() return "Gnome", "Gnome" end
+		_G.UnitFactionGroup = function() return "Alliance" end
+		_G.UnitSex          = function() return 2 end
+		_G.UnitLevel        = function() return 70 end
+		_G.GetAverageItemLevel = function() return 600, 595 end
+		local requested = 0
+		_G.RequestTimePlayed = function() requested = requested + 1 end
+		assert(loadfile("collectors/basics.lua"))("TiW", ns)
+
+		-- A real captured session so the chain + snapshot.basics exist for Recapture.
+		ns.session = ns.Snapshot.Capture({ session_id = "S-played", char_guid = "Player-1-CAFE", schema_version = 1 })
+		assert.equal(0, ns.session.snapshot.basics.contents.played_total)   -- 0 until the reply
+		local hBefore = ns.session.snapshot.basics.h
+
+		mock.fireEvent("PLAYER_LOGIN")
+		assert.equal(1, requested)                                          -- requested /played early at login
+
+		mock.fireEvent("TIME_PLAYED_MSG", 1234567, 23456)
+		assert.equal(1234567, ns.session.snapshot.basics.contents.played_total)
+		assert.equal(23456, ns.session.snapshot.basics.contents.played_level)
+		assert.not_equal(hBefore, ns.session.snapshot.basics.h)             -- basics re-hashed in place
+		assert.equal(ns.session.snapshot.tail, ns.session.session_tail)     -- no events → tails equal post-recapture
 	end)
 
 	it("level_up emits on PLAYER_LEVEL_UP carrying the new level", function()
