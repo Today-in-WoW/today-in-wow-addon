@@ -42,8 +42,10 @@ local function startSession()
 	rec.char_guid = guid
 	ns.char = rec   -- per-character persisted store (daily-dedup state, §3.2/§3.10)
 
-	-- Bound stored growth before adding today's bundle.
-	ns.Drain.run(rec)
+	-- Bound stored growth before adding today's bundle. Drain also surfaces the
+	-- site's rebaseline_requested timestamp (§6) — a gap it detected that a forced
+	-- re-baseline this login repairs.
+	local _, rebaselineAt = ns.Drain.run(rec)
 	rec.sessions = ns.Retention.prune(rec.sessions, GetServerTime(), RETENTION_DAYS)
 
 	-- Capture immediately so ns.session exists from the start of the session — the
@@ -55,7 +57,18 @@ local function startSession()
 	-- separately and the site can re-baseline (§3.4). We do NOT defer capture behind
 	-- the scan: that left ns.session nil for seconds, dropping the login's events.
 	finishSession(rec, guid)
-	if ns.Collections then ns.Collections.refresh() end
+	if ns.Collections then
+		-- Re-baseline only for a request NEWER than the one we last satisfied
+		-- (rebaseline_ack stores the request timestamp verbatim — clock-agnostic, no
+		-- server-vs-companion-clock comparison). The ack is recorded in onComplete, so
+		-- a relog before the async scan finishes re-tries; a relog after it is a no-op.
+		local col = ns.account and ns.account.collections
+		if rebaselineAt > (col and col.rebaseline_ack or 0) then
+			ns.Collections.rebaseline(function() if col then col.rebaseline_ack = rebaselineAt end end)
+		else
+			ns.Collections.refresh()
+		end
+	end
 end
 
 ns.StartSession = startSession   -- exposed for manual re-capture / debugging

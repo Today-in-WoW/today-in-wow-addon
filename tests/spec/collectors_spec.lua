@@ -31,15 +31,6 @@ local function freshNS()
 	return ns
 end
 
-describe("collector wiring (pending until collectors are implemented)", function()
-	it("collections §3.4 emits appearance_added/decor_added/achievement_earned/criteria_earned (persist categories)", function()
-		pending("collector not implemented")
-	end)
-	it("collections §3.4/§5 persists appearances/achievements/decor baselines", function()
-		pending("collector not implemented")
-	end)
-end)
-
 describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
 	-- Each scanner Registers its frozen per-character snapshot category and returns
 	-- IDs + scalars only (§7). We assert via Snapshot.Capture so the test proves BOTH
@@ -707,6 +698,420 @@ describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", functio
 		assert.same({ 100, 200 }, sortedContents(ns.account.collections.mounts))
 		assert.is_not_nil(ns.account.collections.h)
 		assert.equal(0, #ns.session.events)   -- establishing pass emits nothing
+	end)
+end)
+
+describe("collections §3.4 (heavy categories: appearances / achievements / decor)", function()
+	-- The heavy-category surface, mocked inline. Appearances/achievements both have
+	-- a synchronous gateCount that decides whether to scan; decor is async via the
+	-- catalog searcher (its callback is invoked synchronously by the mock for test
+	-- determinism). Live deltas dispatch through the same OnEvent frame as the
+	-- cheap categories — same dedup, same checkpoint append.
+	--
+	-- Mock surface:
+	--   appearances: Enum.TransmogCollectionTypeMeta + per-category appearances → visualID,
+	--                per-visual sources → sourceID, PlayerHasTransmogItemModifiedAppearance.
+	--   achievements: GetCategoryList + GetCategoryNumAchievements + GetAchievementInfo.
+	--                 GetAchievementNumCriteria + GetAchievementCriteriaInfo for CRITERIA_EARNED.
+	--   decor: a searcher object with the four spec methods; results are pushed at RunSearch().
+	local function installHeavy(cfg)
+		_G.Enum = _G.Enum or {}
+		_G.Enum.TransmogCollectionTypeMeta = { MinValue = 1, MaxValue = (cfg.transmogCategories or 2) }
+		_G.Enum.HousingCatalogEntryType = { Decor = 1 }
+
+		local appearances = cfg.appearances or {}   -- catID -> { {visualID=...}, ... }
+		local sources     = cfg.sources or {}       -- visualID -> { sourceID, ... }
+		local collectedSrc = cfg.collectedSrc or {} -- sourceID -> true
+		_G.C_TransmogCollection = {
+			GetCategoryAppearances = function(cat) return appearances[cat] end,
+			GetAllAppearanceSources = function(visualID) return sources[visualID] end,
+			PlayerHasTransmogItemModifiedAppearance = function(sourceID) return collectedSrc[sourceID] == true end,
+			GetCategoryCollectedCount = function(cat) return (cfg.catCount or {})[cat] or 0 end,
+		}
+
+		_G.GetCategoryList = function() return cfg.achCategories or {} end
+		_G.GetCategoryNumAchievements = function(catID) return (cfg.achPerCat or {})[catID] or 0 end
+		_G.GetAchievementInfo = function(catID, i)
+			local row = ((cfg.achievements or {})[catID] or {})[i]
+			if not row then return nil end
+			-- GetAchievementInfo(category, index) -> id, name, points, completed, ...
+			return row.id, "name", 0, row.completed
+		end
+		_G.GetNumCompletedAchievements = function() return cfg.achCountTotal or 0, cfg.achCountChar or 0 end
+		_G.GetAchievementNumCriteria = function(achievementID) return #((cfg.criteria or {})[achievementID] or {}) end
+		_G.GetAchievementCriteriaInfo = function(achievementID, i)
+			local row = ((cfg.criteria or {})[achievementID] or {})[i]
+			if not row then return nil end
+			-- criteriaID is the 10th return per WoW API.
+			return row.desc, nil, nil, nil, nil, nil, nil, nil, nil, row.criteriaID
+		end
+
+		_G.C_HousingCatalog = {
+			GetDecorTotalOwnedCount = function() return cfg.decorCount or 0 end,
+			CreateCatalogSearcher = function()
+				return {
+					SetCollected   = function(self) end,
+					SetUncollected = function(self) end,
+					SetResultsUpdatedCallback = function(self, cb) self._cb = cb end,
+					RunSearch      = function(self) if self._cb then self._cb() end end,
+					GetCatalogSearchResults = function() return cfg.decorResults or {} end,
+				}
+			end,
+		}
+	end
+
+	local function loadCollector(ns) assert(loadfile("collectors/collections.lua"))("TiW", ns) end
+
+	local function byKind(events)
+		local m = {}
+		for i = 1, #events do
+			local e = events[i]
+			m[e.kind] = m[e.kind] or {}
+			local g = m[e.kind]
+			g[#g + 1] = e
+		end
+		return m
+	end
+	local function sortedContents(t)
+		local c = {}
+		for i = 1, #t do c[i] = t[i] end
+		table.sort(c)
+		return c
+	end
+
+	after_each(function()
+		_G.C_TransmogCollection = nil
+		_G.C_HousingCatalog = nil
+		_G.GetCategoryList, _G.GetCategoryNumAchievements, _G.GetAchievementInfo = nil, nil, nil
+		_G.GetAchievementNumCriteria, _G.GetAchievementCriteriaInfo = nil, nil
+		_G.GetNumCompletedAchievements = nil
+		_G.Enum.TransmogCollectionTypeMeta, _G.Enum.HousingCatalogEntryType = nil, nil
+	end)
+
+	it("reconcile() on an empty account establishes appearances/achievements/decor + count gates", function()
+		local ns = freshNS()
+		installHeavy({
+			transmogCategories = 2,
+			appearances = { [1] = { { visualID = 10 } }, [2] = { { visualID = 20 }, { visualID = 21 } } },
+			sources = { [10] = { 1001, 1002 }, [20] = { 2001 }, [21] = { 2101, 2102 } },
+			collectedSrc = { [1001] = true, [2001] = true, [2101] = true },   -- 1002, 2102 uncollected
+			catCount = { [1] = 1, [2] = 2 },                                   -- gate sum = 3
+			achCategories = { 92, 93 },
+			achPerCat = { [92] = 2, [93] = 1 },
+			achievements = {
+				[92] = { { id = 555, completed = true }, { id = 556, completed = false } },
+				[93] = { { id = 700, completed = true } },
+			},
+			achCountChar = 2,
+			decorResults = { { entryType = 1, recordID = 9001 }, { entryType = 1, recordID = 9002 }, { entryType = 2, recordID = 8 } },
+			decorCount = 2,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		local col = ns.account.collections
+		assert.same({ 1001, 2001, 2101 }, sortedContents(col.appearances))
+		assert.same({ 555, 700 }, sortedContents(col.achievements))
+		assert.same({ 9001, 9002 }, sortedContents(col.decor))   -- entryType filter drops the 8
+		assert.is_not_nil(col.h)
+		assert.equal(3, col.counts.appearances)
+		assert.equal(2, col.counts.achievements)
+		assert.equal(2, col.counts.decor)
+		assert.equal(0, #ns.session.events)                       -- establishing pass emits nothing
+	end)
+
+	it("reconcile() with unchanged gate count skips the appearance scan entirely", function()
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 9999 }, achievements = { 1 }, decor = {},
+			counts = { appearances = 1, achievements = 1, decor = 0 },
+			h = "frozenhash",
+		}
+		local scanned = false
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 1 } } },
+			sources = { [1] = { 7777 } },
+			collectedSrc = { [7777] = true },
+			catCount = { [1] = 1 },           -- same as stored counts.appearances
+			achCategories = {},               -- gate matches → no scan; achievements stays { 1 }
+			achPerCat = {}, achievements = {},
+			achCountChar = 1,
+			decorResults = {}, decorCount = 0,
+		})
+		_G.C_TransmogCollection.GetCategoryAppearances = function(_)
+			scanned = true; return { { visualID = 1 } }
+		end
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.is_false(scanned)                                        -- gate held; scan never ran
+		assert.same({ 9999 }, ns.account.collections.appearances)       -- stored data unchanged
+		assert.equal("frozenhash", ns.account.collections.h)
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("reconcile() with bumped gate count rescans and emits collection_observed for the new IDs", function()
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 1001 }, achievements = { 555 }, decor = { 9001 },
+			counts = { appearances = 1, achievements = 1, decor = 1 },
+			h = "frozenhash",
+		}
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 10 }, { visualID = 20 } } },
+			sources = { [10] = { 1001 }, [20] = { 2002 } },               -- 2002 is new
+			collectedSrc = { [1001] = true, [2002] = true },
+			catCount = { [1] = 2 },                                       -- gate moved 1 → 2
+			achCategories = { 92 },
+			achPerCat = { [92] = 2 },
+			achievements = { [92] = { { id = 555, completed = true }, { id = 700, completed = true } } },
+			achCountChar = 2,                                             -- gate moved 1 → 2
+			decorResults = { { entryType = 1, recordID = 9001 }, { entryType = 1, recordID = 9002 } },
+			decorCount = 2,                                               -- gate moved 1 → 2
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		local m = byKind(ns.session.events)
+		local observed = m.collection_observed or {}
+		local seen = {}
+		for i = 1, #observed do seen[observed[i].data.cat .. ":" .. observed[i].data.id] = true end
+		assert.is_true(seen["appearance:2002"])
+		assert.is_true(seen["achievement:700"])
+		assert.is_true(seen["decor:9002"])
+		assert.equal(3, #observed)                                        -- exactly the new IDs
+		assert.equal("frozenhash", ns.account.collections.h)              -- baseline_hash frozen across reconcile
+		assert.equal(2, ns.account.collections.counts.appearances)        -- stored gate counts updated
+		assert.equal(2, ns.account.collections.counts.achievements)
+		assert.equal(2, ns.account.collections.counts.decor)
+	end)
+
+	it("live TRANSMOG_COLLECTION_SOURCE_ADDED / ACHIEVEMENT_EARNED / HOUSE_DECOR_ADDED_TO_CHEST emit *_added, deduped", function()
+		local ns = freshNS()
+		installHeavy({
+			transmogCategories = 1,
+			appearances = {}, sources = {}, collectedSrc = {}, catCount = { [1] = 0 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()                          -- empty establish, no events
+		assert.equal(0, #ns.session.events)
+
+		mock.fireEvent("TRANSMOG_COLLECTION_SOURCE_ADDED", 5001)
+		mock.fireEvent("TRANSMOG_COLLECTION_SOURCE_ADDED", 5001)   -- dup, suppressed
+		mock.fireEvent("ACHIEVEMENT_EARNED", 8001)
+		mock.fireEvent("ACHIEVEMENT_EARNED", 8001)                 -- dup, suppressed
+		mock.fireEvent("HOUSE_DECOR_ADDED_TO_CHEST", "uid-1", 9501)
+		mock.fireEvent("HOUSE_DECOR_ADDED_TO_CHEST", "uid-2", 9501) -- different uid, same decorID → dup
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.appearance_added or {}));  assert.equal(5001, m.appearance_added[1].data.sourceID)
+		assert.equal(1, #(m.achievement_earned or {})); assert.equal(8001, m.achievement_earned[1].data.achievementID)
+		assert.equal(1, #(m.decor_added or {}));        assert.equal(9501, m.decor_added[1].data.decorID)
+		assert.same({ 5001 }, ns.account.collections.appearances)   -- appended to checkpoint
+		assert.same({ 8001 }, ns.account.collections.achievements)
+		assert.same({ 9501 }, ns.account.collections.decor)
+	end)
+
+	it("schema-migration guardrail: counts[cat] nil with checkpoint already set → silent first-scan + re-freeze h", function()
+		-- The May 2026 regression: a checkpoint existed from the old cheap-only
+		-- codebase (col.h set, col.counts.appearances nil). The new code rolling
+		-- out shouldn't dump 44k collection_observed events into the log just
+		-- because appearances hadn't been gated before. Silent establish + h
+		-- bumps to signal the site to re-baseline.
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = {}, achievements = {}, decor = {},
+			counts = nil,                   -- no counts ever recorded (pre-heavy-categories SV)
+			h = "oldhash",
+		}
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 1 }, { visualID = 2 } } },
+			sources = { [1] = { 5000, 5001 }, [2] = { 5002 } },
+			collectedSrc = { [5000] = true, [5001] = true, [5002] = true },
+			catCount = { [1] = 3 },
+			achCategories = { 92 },
+			achPerCat = { [92] = 2 },
+			achievements = { [92] = { { id = 800, completed = true }, { id = 801, completed = true } } },
+			achCountChar = 2,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.equal(0, #ns.session.events)                             -- silent first-scan, no flood
+		assert.same({ 5000, 5001, 5002 }, sortedContents(ns.account.collections.appearances))
+		assert.same({ 800, 801 }, sortedContents(ns.account.collections.achievements))
+		assert.equal(3, ns.account.collections.counts.appearances)      -- counts now seeded
+		assert.equal(2, ns.account.collections.counts.achievements)
+		assert.is_not_nil(ns.account.collections.h)
+		assert.not_equal("oldhash", ns.account.collections.h)           -- h re-frozen → re-baseline signal
+	end)
+
+	it("massive-jump guardrail: newCount > 1000 AND > 10× stored → silent rebuild + re-freeze h", function()
+		-- Returning player on a new PC, no SV transfer — scan returns 5000 sources
+		-- when only 10 were stored. Silently rebuild rather than flooding the log.
+		local ns = freshNS()
+		local stored = {}
+		for i = 1, 10 do stored[i] = i end
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = stored, achievements = {}, decor = {},
+			counts = { appearances = 10, achievements = 0, decor = 0 },
+			h = "oldhash",
+		}
+
+		local visuals, sources, collected = {}, {}, {}
+		for i = 1, 5000 do
+			visuals[i] = { visualID = i }
+			sources[i] = { 100000 + i }
+			collected[100000 + i] = true
+		end
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = visuals },
+			sources = sources,
+			collectedSrc = collected,
+			catCount = { [1] = 5000 },                                  -- gate moved 10 → 5000
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.equal(0, #ns.session.events)                             -- massive jump → silent rebuild
+		assert.equal(5000, #ns.account.collections.appearances)
+		assert.equal(5000, ns.account.collections.counts.appearances)
+		assert.not_equal("oldhash", ns.account.collections.h)           -- re-baseline signal
+	end)
+
+	it("moderate reconcile below threshold still emits collection_observed (guardrail doesn't smother normal play)", function()
+		-- Returning player who genuinely gained 100 sources. 100 < 1000 absolute
+		-- AND 100 < 10× stored (500) — neither leg of the massive guardrail trips,
+		-- so events emit normally. This is the load-bearing "normal reconcile"
+		-- case the guardrails MUST not eat.
+		local ns = freshNS()
+		local stored = {}
+		for i = 1, 500 do stored[i] = i end
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = stored, achievements = {}, decor = {},
+			counts = { appearances = 500, achievements = 0, decor = 0 },
+			h = "oldhash",
+		}
+
+		local visuals, sources, collected = {}, {}, {}
+		for i = 1, 600 do                                               -- 500 old + 100 new
+			visuals[i] = { visualID = i }
+			sources[i] = { i }
+			collected[i] = true
+		end
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = visuals },
+			sources = sources,
+			collectedSrc = collected,
+			catCount = { [1] = 600 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.equal(100, #ns.session.events)                           -- 100 newIds → 100 observed
+		assert.equal("oldhash", ns.account.collections.h)               -- normal reconcile keeps h frozen
+	end)
+
+	it("reconcile(force) re-baselines: same moderate gain stays silent and re-freezes h (/tiw collect, rebaseline_requested §6)", function()
+		-- Exact same 500→600 gain as the moderate-reconcile test above — but forced.
+		-- A re-baseline re-ships the checkpoint wholesale with a fresh hash, so it emits
+		-- NO observed deltas (would be redundant + risk the §7 learn-rate reject) and
+		-- bumps h. This is what /tiw collect and the site's rebaseline_requested run.
+		local ns = freshNS()
+		local stored = {}
+		for i = 1, 500 do stored[i] = i end
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = stored, achievements = {}, decor = {},
+			counts = { appearances = 500, achievements = 0, decor = 0 },
+			h = "oldhash",
+		}
+
+		local visuals, sources, collected = {}, {}, {}
+		for i = 1, 600 do
+			visuals[i] = { visualID = i }
+			sources[i] = { i }
+			collected[i] = true
+		end
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = visuals },
+			sources = sources,
+			collectedSrc = collected,
+			catCount = { [1] = 600 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile(true)                                  -- forced re-baseline
+
+		assert.equal(0, #ns.session.events)                            -- silent: checkpoint re-ships, no deltas
+		assert.equal(600, #ns.account.collections.appearances)         -- full scan applied
+		assert.equal(600, ns.account.collections.counts.appearances)
+		assert.not_equal("oldhash", ns.account.collections.h)          -- h re-frozen → site refetches checkpoint
+	end)
+
+	it("reconcile(force) also re-baselines decor silently and bypasses the gate (caught what the count can't see)", function()
+		-- Decor gate unchanged (count 1 == stored 1) so a normal reconcile would skip
+		-- it AND a normal gated pass wouldn't see a new recordID under the same count.
+		-- Forced, decor force-scans, picks up 9002, but stays silent (re-ship wholesale).
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = {}, achievements = {}, decor = { 9001 },
+			counts = { appearances = 0, achievements = 0, decor = 1 },
+			h = "oldhash",
+		}
+		installHeavy({
+			transmogCategories = 1,
+			appearances = {}, sources = {}, collectedSrc = {}, catCount = { [1] = 0 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = { { entryType = 1, recordID = 9001 }, { entryType = 1, recordID = 9002 } },
+			decorCount = 1,                                             -- gate unchanged
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile(true)
+
+		assert.equal(0, #ns.session.events)                            -- silent
+		assert.same({ 9001, 9002 }, sortedContents(ns.account.collections.decor))
+	end)
+
+	it("CRITERIA_EARNED maps description → criteriaID via GetAchievementCriteriaInfo; misses are dropped (no localized payload)", function()
+		local ns = freshNS()
+		installHeavy({
+			transmogCategories = 1,
+			appearances = {}, sources = {}, collectedSrc = {}, catCount = { [1] = 0 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+			criteria = { [42] = { { desc = "Slay the dragon", criteriaID = 999 }, { desc = "Eat a sandwich", criteriaID = 1000 } } },
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		mock.fireEvent("CRITERIA_EARNED", 42, "Slay the dragon")
+		mock.fireEvent("CRITERIA_EARNED", 42, "Unknown localized text")   -- description miss → drop
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.criteria_earned or {}))
+		assert.equal(42, m.criteria_earned[1].data.achievementID)
+		assert.equal(999, m.criteria_earned[1].data.criteriaID)
 	end)
 end)
 

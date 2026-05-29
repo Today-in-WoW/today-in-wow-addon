@@ -48,4 +48,20 @@ describe("§6 drain", function()
 		Drain.run(rec)
 		assert.same({ "s1", "s2" }, idsOf(rec))
 	end)
+
+	it("surfaces rebaseline_requested timestamp as the second return (§6), defaulting 0", function()
+		local Drain = freshDrain()
+
+		_G.TiWCompanionDB = { shipped_sessions = { s1 = true }, rebaseline_requested = 1748000000 }
+		local _, at = Drain.run(charWith("s1", "s2"))
+		assert.equal(1748000000, at)
+
+		_G.TiWCompanionDB = { shipped_sessions = {} }            -- no request stamped
+		local _, none = Drain.run(charWith("s1"))
+		assert.equal(0, none)
+
+		_G.TiWCompanionDB = nil                                  -- no companion at all
+		local _, nilDb = Drain.run(charWith("s1"))
+		assert.equal(0, nilDb)
+	end)
 end)

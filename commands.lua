@@ -181,6 +181,31 @@ local function collectionsReport()
 	end
 end
 
+-- /tiw collect: manual re-baseline. Forces a full re-scan of every collection
+-- category (bypassing the count-gate, so it catches what the gate can't see — a new
+-- source of an already-collected visual, a pet release+regain), re-freezes
+-- baseline_hash, and re-ships the checkpoint. Runs async on the coroutine runner so it
+-- never freezes the client; prints when the scan completes.
+local function collectCmd()
+	if not (ns.Collections and ns.Collections.rebaseline) then
+		out("collect unavailable (Collections not loaded)"); return
+	end
+	out("re-baselining collections… (scanning in the background)")
+	ns.Collections.rebaseline(function()
+		local col = ns.account and ns.account.collections
+		-- A manual collect re-ships the checkpoint, so it also satisfies any pending
+		-- companion re-baseline request (§6): record its timestamp so the next login
+		-- doesn't redo the scan it just did.
+		if col then
+			local pending = tonumber(_G.TiWCompanionDB and _G.TiWCompanionDB.rebaseline_requested) or 0
+			if pending > (col.rebaseline_ack or 0) then col.rebaseline_ack = pending end
+		end
+		col = col or {}
+		out("re-baseline complete  ·  hash=" .. tostring(col.h)
+			.. (col.captured_at and ("  @" .. col.captured_at) or ""))
+	end)
+end
+
 -- /tiw log: dump the persisted breadcrumb timeline (ns.dbg, §namespace). Survives
 -- reloads, so the full login sequence — branch taken, session creation, each
 -- collector firing or bailing, scan counts — is readable after the fact. The ms
@@ -257,6 +282,8 @@ SlashCmdList["TIW"] = function(msg)
 		probe()
 	elseif msg == "collections" or msg == "col" then
 		collectionsReport()
+	elseif msg == "collect" then
+		collectCmd()
 	elseif cmd == "log" then
 		logReport(arg)
 	elseif msg == "wq" then
@@ -272,7 +299,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload; suppressed in restricted content)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw wq  ·  /tiw log  ·  /tiw trace")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw wq  ·  /tiw log  ·  /tiw trace")
 	end
 end
 

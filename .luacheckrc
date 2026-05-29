@@ -25,6 +25,8 @@ read_globals = {
 	"GetNumLootItems", "GetLootSlotType", "GetLootSlotLink", "GetLootSlotInfo", "GetLootSourceInfo",
 	"C_MountJournal", "PlayerHasToy",
 	"GetNumCompletedAchievements", "GetTotalAchievementPoints",
+	"GetCategoryList", "GetCategoryNumAchievements", "GetAchievementInfo",
+	"GetAchievementNumCriteria", "GetAchievementCriteriaInfo",
 	"C_TransmogCollection", "C_HousingCatalog",
 	"GetProfessions", "GetProfessionInfo", "C_TradeSkillUI",
 	"C_CurrencyInfo", "C_WeeklyRewards",
