@@ -16,6 +16,7 @@ ns.Goals.Registry.register("achievement", {
 		if not GetAchievementInfo then return { done = false, stale = true } end
 		local completed = select(4, GetAchievementInfo(params.achievement))
 		local num = GetAchievementNumCriteria and GetAchievementNumCriteria(params.achievement) or 0
+		if num > 0 and not GetAchievementCriteriaInfo then return { done = false, stale = true } end
 		local doneCount = 0
 		for i = 1, num do
 			if select(3, GetAchievementCriteriaInfo(params.achievement, i)) then
