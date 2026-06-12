@@ -174,17 +174,19 @@ describe("flag.evaluate — API-absent paths", function()
 		assert.is_true(r.stale)
 	end)
 
-	it("IsQuestFlaggedCompleted missing → { done = false }, no error", function()
+	it("IsQuestFlaggedCompleted missing → { done = false, stale = true }", function()
 		local ev = makeHarness()
 		_G.C_QuestLog = {}
 		local r = ev.evaluate({ quest = 1 })
 		assert.is_false(r.done)
+		assert.is_true(r.stale)
 	end)
 
-	it("flag.account: IsQuestFlaggedCompletedOnAccount missing → { done = false }, no error", function()
+	it("account API missing must NOT fall back to per-char → stale, not a wrong answer", function()
 		local ev = makeHarness()
-		_G.C_QuestLog = {}
+		_G.C_QuestLog = { IsQuestFlaggedCompleted = function() return true end }
 		local r = ev.evaluate({ quest = 1, account = true })
 		assert.is_false(r.done)
+		assert.is_true(r.stale)
 	end)
 end)

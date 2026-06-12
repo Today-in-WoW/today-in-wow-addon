@@ -16,15 +16,20 @@ ns.Goals.Registry.register("flag", {
 			optional = { account = "boolean" },
 		})
 	end,
+	-- Unreadable answer (namespace OR the specific function absent) → stale=true
+	-- (§5 result contract). Deliberately NO fallback from the account API to the
+	-- per-char API: silently answering the wrong question is worse than "unknown".
 	evaluate = function(params)
 		local QL = C_QuestLog
-		if not QL then return { done = false, stale = true } end
-		local done
-		if params.account then
-			done = QL.IsQuestFlaggedCompletedOnAccount and QL.IsQuestFlaggedCompletedOnAccount(params.quest)
-		else
-			done = QL.IsQuestFlaggedCompleted and QL.IsQuestFlaggedCompleted(params.quest)
+		local fn
+		if QL then
+			if params.account then
+				fn = QL.IsQuestFlaggedCompletedOnAccount
+			else
+				fn = QL.IsQuestFlaggedCompleted
+			end
 		end
-		return { done = done == true }
+		if not fn then return { done = false, stale = true } end
+		return { done = fn(params.quest) == true }
 	end,
 })

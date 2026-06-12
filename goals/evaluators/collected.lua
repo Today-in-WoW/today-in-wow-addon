@@ -23,28 +23,39 @@ ns.Goals.Registry.register("collected", {
 			},
 		})
 	end,
+	-- Unreadable answer (API absent, checkpoint not yet scanned) → stale=true,
+	-- never a confident un-done (§5 result contract).
 	evaluate = function(params)
-		local done = false
-		if params.mount and C_MountJournal then
-			done = select(11, C_MountJournal.GetMountInfoByID(params.mount)) == true
-		elseif params.pet and C_PetJournal then
-			done = (C_PetJournal.GetNumCollectedInfo(params.pet) or 0) > 0
-		elseif params.toy then
-			done = PlayerHasToy and PlayerHasToy(params.toy) == true
-		elseif params.source and C_TransmogCollection then
-			done = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(params.source) == true
-		elseif params.appearance and C_TransmogCollection then
+		if params.mount then
+			if not C_MountJournal then return { done = false, stale = true } end
+			return { done = select(11, C_MountJournal.GetMountInfoByID(params.mount)) == true }
+		end
+		if params.pet then
+			if not C_PetJournal then return { done = false, stale = true } end
+			return { done = (C_PetJournal.GetNumCollectedInfo(params.pet) or 0) > 0 }
+		end
+		if params.toy then
+			if not PlayerHasToy then return { done = false, stale = true } end
+			return { done = PlayerHasToy(params.toy) == true }
+		end
+		if params.source then
+			if not C_TransmogCollection then return { done = false, stale = true } end
+			return { done = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(params.source) == true }
+		end
+		if params.appearance then
+			if not C_TransmogCollection then return { done = false, stale = true } end
 			local sources = C_TransmogCollection.GetAllAppearanceSources(params.appearance)
 			for i = 1, sources and #sources or 0 do
 				if C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(sources[i]) then
-					done = true
-					break
+					return { done = true }
 				end
 			end
-		elseif params.decor then
-			local coll = ns.account and ns.account.collections
-			done = coll and coll.decor and coll.decor[params.decor] == true or false
+			return { done = false }
 		end
-		return { done = done }
+		-- decor: local checkpoint read (catalog API is async). No checkpoint yet
+		-- = unknown, not un-owned.
+		local coll = ns.account and ns.account.collections
+		if not (coll and coll.decor) then return { done = false, stale = true } end
+		return { done = coll.decor[params.decor] == true }
 	end,
 })
