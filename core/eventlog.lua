@@ -14,6 +14,12 @@ ns = ns or {}
 ns.EVENT_CAP = 50000   -- frozen in-session ceiling (data_storage §4)
 
 function ns.Emit(kind, data)
+	-- Consent gate (core/consent.lua): drop kinds the current state forbids BEFORE
+	-- assigning seq, so a dropped event consumes no sequence number and the kept
+	-- stream stays contiguous + chain-valid. `ns.Consent and` keeps Emit ungated
+	-- when the module isn't loaded (the .toc always loads it in game).
+	if ns.Consent and not ns.Consent.allows(kind) then return end
+
 	local s = ns.session
 	local prevTail = s.session_tail or s.snapshot.tail
 	local seq = s.next_seq

@@ -20,14 +20,20 @@ local function mintSessionID(guid)
 	return string.format("%s-%d-%d", guid or "?", GetServerTime(), math.floor((GetTime() or 0) * 1000) % 1000000)
 end
 
-local function finishSession(rec, guid)
+-- Mint the bundle and make it the active log. `rec` is the record it persists to,
+-- `opts` is forwarded to Capture (anonymous shape under "generic"). When consent is
+-- "none" the bundle is an in-memory sink only — collectors still find ns.session, so
+-- they never nil-error, but nothing is appended to any record (egress is off).
+local function finishSession(rec, guid, opts, consent)
 	local bundle = ns.Snapshot.Capture({
 		session_id     = mintSessionID(guid),
 		char_guid      = guid,
 		schema_version = ns.SCHEMA_VERSION,
-	})
+	}, opts)
 	ns.session = bundle
-	rec.sessions[#rec.sessions + 1] = bundle
+	if consent ~= "none" then
+		rec.sessions[#rec.sessions + 1] = bundle
+	end
 end
 
 -- Breadcrumbs for /tiw log (ns.dbg, §namespace). The login pipeline is the one
@@ -53,15 +59,35 @@ local function startSession()
 		TiWDB.characters[key] = rec
 	end
 	rec.char_guid = guid
-	ns.char = rec   -- per-character persisted store (daily-dedup state, §3.2/§3.10)
+	ns.char = rec   -- per-character persisted store (daily-dedup state, §3.2/§3.10).
+	                -- Binds in EVERY consent state: local dedup is never gated.
+
+	-- Consent (core/consent.lua) decides WHERE the bundle lands. "everything" is
+	-- today's path (real record, real guid). "generic" routes the bundle to an
+	-- ANONYMOUS record keyed by the zeroed guid (backend realm detection survives,
+	-- identity doesn't) and captures the empty-baseline shape. "none" persists
+	-- nothing (finishSession makes ns.session an in-memory sink). Drain/prune run
+	-- against whichever record the bundle persists to.
+	local consent = (ns.Consent and ns.Consent.get()) or "everything"
+	local target, bundleGuid, opts = rec, guid, nil
+	if consent == "generic" then
+		bundleGuid = ns.Consent.anonymousGUID(guid)
+		target = TiWDB.characters[bundleGuid]
+		if not target then
+			target = { char_guid = bundleGuid, sessions = {} }
+			TiWDB.characters[bundleGuid] = target
+		end
+		target.char_guid = bundleGuid
+		opts = { generic = true }
+	end
 
 	-- Bound stored growth before adding today's bundle. Drain also surfaces the
 	-- site's rebaseline_requested timestamp (§6) — a gap it detected that a forced
 	-- re-baseline this login repairs.
-	local _, rebaselineAt = ns.Drain.run(rec)
-	dbg(string.format("drain → %d kept  rebaseline_at=%s", #rec.sessions, tostring(rebaselineAt)))
-	rec.sessions = ns.Retention.prune(rec.sessions, GetServerTime(), RETENTION_DAYS)
-	dbg(string.format("prune → %d retained", #rec.sessions))
+	local _, rebaselineAt = ns.Drain.run(target)
+	dbg(string.format("drain → %d kept  rebaseline_at=%s", #target.sessions, tostring(rebaselineAt)))
+	target.sessions = ns.Retention.prune(target.sessions, GetServerTime(), RETENTION_DAYS)
+	dbg(string.format("prune → %d retained", #target.sessions))
 
 	-- Capture immediately so ns.session exists from the start of the session — the
 	-- delves/events collectors fire at PLAYER_ENTERING_WORLD and bail without it. The
@@ -71,7 +97,7 @@ local function startSession()
 	-- correct (no checkpoint existed when the session began); the checkpoint ships
 	-- separately and the site can re-baseline (§3.4). We do NOT defer capture behind
 	-- the scan: that left ns.session nil for seconds, dropping the login's events.
-	finishSession(rec, guid)
+	finishSession(target, bundleGuid, opts, consent)
 	dbg("session minted " .. tostring(ns.session and ns.session.session_id))
 	if ns.Collections then
 		-- Re-baseline only for a request NEWER than the one we last satisfied

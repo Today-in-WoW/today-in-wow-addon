@@ -86,21 +86,37 @@ end
 -- per-character state (daily-dedup, §3.2/§3.10) is dropped. `v` is the data schema;
 -- transient SV fields (trace, …) are excluded. We reference the live bundles (never
 -- mutate them — the running session still needs them); serialize only reads.
+-- Consent gating (core/consent.lua): empty-session records are skipped so their
+-- name-realm keys never leak, and the account checkpoint ships ONLY under
+-- "everything" (otherwise an empty table keeps the wire shape). Gated on the
+-- module being present so the bare-export tests (no consent loaded) keep today's
+-- "everything" behavior — the .toc always loads consent in game.
 function Export.buildPayload()
 	local db = TiWDB or {}
+	local gated = ns.Consent ~= nil
 	local characters = {}
 	for key, rec in pairs(db.characters or {}) do
-		characters[key] = { char_guid = rec.char_guid, sessions = rec.sessions or {} }
+		local sessions = rec.sessions or {}
+		if not gated or #sessions > 0 then
+			characters[key] = { char_guid = rec.char_guid, sessions = sessions }
+		end
 	end
+	local account = db.account or {}
+	if gated and ns.Consent.get() ~= "everything" then account = {} end
 	return {
 		v          = ns.SCHEMA_VERSION,
-		account    = db.account or {},
+		account    = account,
 		characters = characters,
 	}
 end
 
 -- Convenience: the export string for the whole SV (nil, err on lib miss).
+-- Consent "none" refuses FIRST — before resolving libs — since there is nothing
+-- to export when data collection is off (core/consent.lua).
 function Export.string()
+	if ns.Consent and ns.Consent.get() == "none" then
+		return nil, "data collection is off"
+	end
 	return Export.encode(Export.buildPayload())
 end
 
@@ -111,6 +127,9 @@ end
 -- print feedback first. onReady(str) on success, onReady(nil, err) on failure.
 -- With no runner (tests) it falls back to the synchronous string().
 function Export.stringAsync(onReady)
+	if ns.Consent and ns.Consent.get() == "none" then
+		return onReady(nil, "data collection is off")
+	end
 	local AceSerializer, LibDeflate = libs()
 	if not (AceSerializer and LibDeflate) then return onReady(nil, "export libs unavailable") end
 	if not (ns.Schedule and ns.Schedule.Run) then return onReady(Export.string()) end

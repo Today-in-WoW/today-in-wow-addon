@@ -30,6 +30,7 @@ tables\whitelist_rares.lua
 tables\prey_quests.lua
 core\whitelist.lua
 core\migrations.lua
+core\consent.lua
 core\export.lua
 goals\registry.lua
 goals\codec.lua

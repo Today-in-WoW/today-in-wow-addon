@@ -44,13 +44,20 @@ local function canonicalOf(cat, r, C)
 	return C.ids(r.contents or {})   -- mounts/toys/pets/appearances/decor/achievements/quests
 end
 
-function Snapshot.Capture(session)
+-- opts.generic == true produces the ANONYMOUS bundle shape (consent = "generic",
+-- core/consent.lua): the genesis binds the EMPTY baseline hash (not the account
+-- fingerprint) and every category scanner is skipped (categories serialize empty
+-- via canonicalOf's defaults). No opts → byte-identical to the original behavior.
+function Snapshot.Capture(session, opts)
 	local C, Chain = ns.Canonical, ns.Chain
+	local generic = opts and opts.generic == true
 	local collections = (ns.account and ns.account.collections) or {}
 	-- The checkpoint's baseline_hash anchors this session's genesis. Reconcile sets
 	-- collections.h at login (before Capture); fall back to computing it so Capture
-	-- is self-contained (tests, or a session before any reconcile ran).
-	local baseline_hash = collections.h or ns.Baseline.hash(collections)
+	-- is self-contained (tests, or a session before any reconcile ran). Anonymous
+	-- bundles bind the empty baseline so no account identity rides the genesis.
+	local baseline_hash = generic and ns.Baseline.hash({})
+		or collections.h or ns.Baseline.hash(collections)
 
 	local bundle = {
 		session_id     = session.session_id,
@@ -65,7 +72,7 @@ function Snapshot.Capture(session)
 	local running = bundle.genesis
 	for i = 1, #Snapshot.ORDER do
 		local cat = Snapshot.ORDER[i]
-		local scan = scanners[cat]
+		local scan = not generic and scanners[cat]
 		local result = (scan and scan()) or { contents = {} }
 		running = Chain.step(running, canonicalOf(cat, result, C))
 		result.h = running
