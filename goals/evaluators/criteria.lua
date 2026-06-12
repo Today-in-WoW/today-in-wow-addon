@@ -10,9 +10,14 @@ local _, ns = ...
 ns.Goals.Registry.register("criteria", {
 	events = { "CRITERIA_UPDATE", "ACHIEVEMENT_EARNED" },
 	validate = function(params)
-		return nil, "not implemented"
+		return ns.Goals.Registry.checkParams(params, {
+			required = { achievement = "number", criteria = "number" },
+		})
 	end,
-	evaluate = function(params, charKey)
-		return nil, "not implemented"
+	evaluate = function(params)
+		if not GetAchievementCriteriaInfoByID then return { done = false, stale = true } end
+		local _, _, completed, quantity, reqQuantity =
+			GetAchievementCriteriaInfoByID(params.achievement, params.criteria)
+		return { done = completed == true, progress = quantity, max = reqQuantity }
 	end,
 })

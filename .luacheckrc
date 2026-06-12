@@ -26,7 +26,7 @@ read_globals = {
 	"C_MountJournal", "PlayerHasToy",
 	"GetNumCompletedAchievements", "GetTotalAchievementPoints",
 	"GetCategoryList", "GetCategoryNumAchievements", "GetAchievementInfo",
-	"GetAchievementNumCriteria", "GetAchievementCriteriaInfo",
+	"GetAchievementNumCriteria", "GetAchievementCriteriaInfo", "GetAchievementCriteriaInfoByID",
 	"C_TransmogCollection", "C_HousingCatalog",
 	"GetProfessions", "GetProfessionInfo", "C_TradeSkillUI",
 	"C_CurrencyInfo", "C_WeeklyRewards",

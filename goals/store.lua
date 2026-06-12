@@ -42,36 +42,82 @@ end
 -- (default "all"). Returns "installed" | "updated" | "unchanged", or nil, err.
 -- Marks unsupported step indices into state[id].unsupported via the Registry.
 function Store.install(goal, opts)
-	return nil, "not implemented"
+	local db = ns.Goals.db
+	local id = goal.id
+	local existing = db.installed[id]
+
+	if existing then
+		if goal.rev <= existing.rev then return "unchanged" end
+		-- update: replace the goal, KEEP activation/assignment state (§2).
+		db.installed[id] = goal
+		db.state[id].unsupported = ns.Goals.Registry.unsupportedSteps(goal)
+		return "updated"
+	end
+
+	db.installed[id] = goal
+	db.state[id] = {
+		active      = true,
+		pinned      = false,
+		chars       = (opts and opts.chars ~= nil) and opts.chars or "all",
+		unsupported = ns.Goals.Registry.unsupportedSteps(goal),
+	}
+	return "installed"
 end
 
 -- Remove an installed goal (goal + state + per-character progress).
 -- true when removed, false when the id wasn't installed.
 function Store.remove(id)
-	return nil, "not implemented"
+	local db = ns.Goals.db
+	if not db.installed[id] then return false end
+	db.installed[id] = nil
+	db.state[id] = nil
+	for _, byGoal in pairs(db.progress) do
+		byGoal[id] = nil
+	end
+	return true
 end
 
 -- { goal = installed[id], state = state[id] } or nil.
 function Store.get(id)
-	return nil, "not implemented"
+	local db = ns.Goals.db
+	local goal = db.installed[id]
+	if not goal then return nil end
+	return { goal = goal, state = db.state[id] }
 end
 
 -- Array of { id, goal, state }, sorted by id (stable display order for v1).
 function Store.list()
-	return nil, "not implemented"
+	local db = ns.Goals.db
+	local ids = {}
+	for id in pairs(db.installed) do ids[#ids + 1] = id end
+	table.sort(ids)
+	local out = {}
+	for _, id in ipairs(ids) do
+		out[#out + 1] = { id = id, goal = db.installed[id], state = db.state[id] }
+	end
+	return out
 end
 
 function Store.setActive(id, on)
-	return nil, "not implemented"
+	local st = ns.Goals.db.state[id]
+	if not st then return nil, "not installed" end
+	st.active = on and true or false
+	return true
 end
 
 function Store.setPinned(id, on)
-	return nil, "not implemented"
+	local st = ns.Goals.db.state[id]
+	if not st then return nil, "not installed" end
+	st.pinned = on and true or false
+	return true
 end
 
 -- chars = "all" | { [charKey] = true }  (§6a assignment, editable post-import)
 function Store.setChars(id, chars)
-	return nil, "not implemented"
+	local st = ns.Goals.db.state[id]
+	if not st then return nil, "not installed" end
+	st.chars = chars
+	return true
 end
 
 local f = CreateFrame("Frame")

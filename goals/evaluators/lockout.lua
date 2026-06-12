@@ -10,9 +10,20 @@ local _, ns = ...
 ns.Goals.Registry.register("lockout", {
 	events = { "UPDATE_INSTANCE_INFO", "BOSS_KILL" },
 	validate = function(params)
-		return nil, "not implemented"
+		return ns.Goals.Registry.checkParams(params, {
+			required = { instance = "number", difficulty = "number" },
+			optional = { encounter = "number" },
+		})
 	end,
-	evaluate = function(params, charKey)
-		return nil, "not implemented"
+	evaluate = function(params)
+		if not GetNumSavedInstances then return { done = false, stale = true } end
+		for i = 1, GetNumSavedInstances() do
+			local _, _, _, difficulty, locked, _, _, _, _, _, _, _, _, instanceID =
+				GetSavedInstanceInfo(i)
+			if locked and instanceID == params.instance and difficulty == params.difficulty then
+				return { done = true }
+			end
+		end
+		return { done = false }
 	end,
 })

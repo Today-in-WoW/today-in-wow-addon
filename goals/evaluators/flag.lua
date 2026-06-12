@@ -11,9 +11,20 @@ local _, ns = ...
 ns.Goals.Registry.register("flag", {
 	events = { "QUEST_TURNED_IN" },
 	validate = function(params)
-		return nil, "not implemented"
+		return ns.Goals.Registry.checkParams(params, {
+			required = { quest = "number" },
+			optional = { account = "boolean" },
+		})
 	end,
-	evaluate = function(params, charKey)
-		return nil, "not implemented"
+	evaluate = function(params)
+		local QL = C_QuestLog
+		if not QL then return { done = false, stale = true } end
+		local done
+		if params.account then
+			done = QL.IsQuestFlaggedCompletedOnAccount and QL.IsQuestFlaggedCompletedOnAccount(params.quest)
+		else
+			done = QL.IsQuestFlaggedCompleted and QL.IsQuestFlaggedCompleted(params.quest)
+		end
+		return { done = done == true }
 	end,
 })

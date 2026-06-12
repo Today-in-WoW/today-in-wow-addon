@@ -51,7 +51,9 @@ end
 -- Validate `params` for evaluator `name`. true on success; nil, err when the
 -- name is unknown (the graceful-degradation path) or the params fail.
 function Registry.validate(name, params)
-	return nil, "not implemented"
+	local def = evaluators[name]
+	if not def then return nil, "unknown evaluator: " .. tostring(name) end
+	return def.validate(params)
 end
 
 -- The SHARED strict-params helper every evaluator validate composes.
@@ -63,13 +65,60 @@ end
 -- STRICT: any key in params that is not in the spec fails (format §4 rule).
 -- Returns true, or nil, err.
 function Registry.checkParams(params, spec)
-	return nil, "not implemented"
+	if type(params) ~= "table" then return nil, "params must be a table" end
+
+	if spec.required then
+		for key, ty in pairs(spec.required) do
+			local v = params[key]
+			if v == nil then return nil, "missing required param: " .. key end
+			if type(v) ~= ty then return nil, "param '" .. key .. "' must be " .. ty end
+		end
+	end
+
+	if spec.optional then
+		for key, ty in pairs(spec.optional) do
+			local v = params[key]
+			if v ~= nil and type(v) ~= ty then
+				return nil, "param '" .. key .. "' must be " .. ty
+			end
+		end
+	end
+
+	if spec.oneOf then
+		local count = 0
+		for key, ty in pairs(spec.oneOf) do
+			local v = params[key]
+			if v ~= nil then
+				if type(v) ~= ty then return nil, "param '" .. key .. "' must be " .. ty end
+				count = count + 1
+			end
+		end
+		if count ~= 1 then return nil, "exactly one of the oneOf params is required" end
+	end
+
+	-- STRICT: reject any key the spec doesn't declare (§4 forward-compat rule).
+	for key in pairs(params) do
+		local known = (spec.required and spec.required[key] ~= nil)
+			or (spec.optional and spec.optional[key] ~= nil)
+			or (spec.oneOf and spec.oneOf[key] ~= nil)
+		if not known then return nil, "unknown param: " .. tostring(key) end
+	end
+
+	return true
 end
 
 -- Capability check for a decoded goal: array of step indices whose evaluator
 -- is unknown or whose params fail validate. {} when fully supported.
 function Registry.unsupportedSteps(goal)
-	return nil, "not implemented"
+	local bad = {}
+	local steps = goal.steps or {}
+	for i = 1, #steps do
+		local step = steps[i]
+		if not Registry.validate(step.evaluator, step.params) then
+			bad[#bad + 1] = i
+		end
+	end
+	return bad
 end
 
 return ns

@@ -9,9 +9,20 @@ local _, ns = ...
 ns.Goals.Registry.register("currency", {
 	events = { "CURRENCY_DISPLAY_UPDATE" },
 	validate = function(params)
-		return nil, "not implemented"
+		return ns.Goals.Registry.checkParams(params, {
+			required = { currency = "number" },
+			oneOf    = { amount = "number", cap = "boolean" },
+		})
 	end,
-	evaluate = function(params, charKey)
-		return nil, "not implemented"
+	evaluate = function(params)
+		local CI = C_CurrencyInfo
+		local info = CI and CI.GetCurrencyInfo and CI.GetCurrencyInfo(params.currency)
+		if not info then return { done = false, stale = true } end
+		local q = info.quantity or 0
+		if params.cap then
+			local m = info.maxQuantity or 0
+			return { done = m > 0 and q >= m, progress = q, max = m }
+		end
+		return { done = q >= params.amount, progress = q, max = params.amount }
 	end,
 })

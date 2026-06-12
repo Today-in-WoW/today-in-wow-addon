@@ -8,13 +8,19 @@ local function loadRegistry()
 	return ns.Goals.Registry
 end
 
+-- REMOVE sentinel: `{ events = nil }` stores nothing in a Lua constructor, so
+-- deleting a field through the override table needs an explicit marker.
+local REMOVE = {}
+
 local function fakeDef(over)
 	local def = {
 		events = { "FAKE_EVENT" },
 		validate = function() return true end,
 		evaluate = function() return { done = false } end,
 	}
-	for k, v in pairs(over or {}) do def[k] = v end
+	for k, v in pairs(over or {}) do
+		if v == REMOVE then def[k] = nil else def[k] = v end
+	end
 	return def
 end
 
@@ -35,9 +41,9 @@ describe("registry §5 registration", function()
 
 	it("rejects definitions missing events/validate/evaluate", function()
 		local R = loadRegistry()
-		assert.has_error(function() R.register("a", fakeDef({ events = nil })) end)
-		assert.has_error(function() R.register("b", fakeDef({ validate = nil })) end)
-		assert.has_error(function() R.register("c", fakeDef({ evaluate = nil })) end)
+		assert.has_error(function() R.register("a", fakeDef({ events = REMOVE })) end)
+		assert.has_error(function() R.register("b", fakeDef({ validate = REMOVE })) end)
+		assert.has_error(function() R.register("c", fakeDef({ evaluate = REMOVE })) end)
 	end)
 
 	it("names() lists registered evaluators sorted", function()

@@ -9,9 +9,14 @@ local _, ns = ...
 ns.Goals.Registry.register("renown", {
 	events = { "MAJOR_FACTION_RENOWN_LEVEL_CHANGED" },
 	validate = function(params)
-		return nil, "not implemented"
+		return ns.Goals.Registry.checkParams(params, {
+			required = { faction = "number", level = "number" },
+		})
 	end,
-	evaluate = function(params, charKey)
-		return nil, "not implemented"
+	evaluate = function(params)
+		local MF = C_MajorFactions
+		if not (MF and MF.GetCurrentRenownLevel) then return { done = false, stale = true } end
+		local cur = MF.GetCurrentRenownLevel(params.faction) or 0
+		return { done = cur >= params.level, progress = cur, max = params.level }
 	end,
 })

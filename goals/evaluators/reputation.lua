@@ -9,9 +9,15 @@ local _, ns = ...
 ns.Goals.Registry.register("reputation", {
 	events = { "UPDATE_FACTION" },
 	validate = function(params)
-		return nil, "not implemented"
+		return ns.Goals.Registry.checkParams(params, {
+			required = { faction = "number", standing = "number" },
+		})
 	end,
-	evaluate = function(params, charKey)
-		return nil, "not implemented"
+	evaluate = function(params)
+		local CR = C_Reputation
+		if not (CR and CR.GetFactionDataByID) then return { done = false, stale = true } end
+		local data = CR.GetFactionDataByID(params.faction)
+		local standing = data and data.reaction or 0
+		return { done = standing >= params.standing, progress = standing, max = params.standing }
 	end,
 })
