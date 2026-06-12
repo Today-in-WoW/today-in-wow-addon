@@ -362,9 +362,152 @@ local function exportCmd(arg)
 	end)
 end
 
+-- ---------------------------------------------------------------------------
+-- /tiw goal — dev smoke bridge for the goals layer (Phase 1). Chat-print
+-- renderer on the Engine's render seam; the real display module is Phase 2.
+-- ---------------------------------------------------------------------------
+
+-- One line per step, grouped by goal id. The view-model is the §6 render
+-- contract: { id, index, label, result } rows; result follows the §5 result
+-- conventions (stale renders as "can't track", never as a confident un-done).
+local function renderChat(vm)
+	out("goals  ·  " .. #vm .. " step(s)")
+	local lastId
+	for _, row in ipairs(vm) do
+		if row.id ~= lastId then
+			out("  |cffffd100" .. row.id .. "|r")
+			lastId = row.id
+		end
+		local r = row.result
+		local box = "[ ]"
+		if r and r.stale then box = "|cffffcc00[?]|r"
+		elseif r and r.done then box = "|cff40ff40[x]|r" end
+		local prog = (r and r.progress) and ("  " .. r.progress .. "/" .. tostring(r.max or "?")) or ""
+		local note = (r and r.stale) and "  |cff808080(can't track this right now)|r" or ""
+		out("    " .. box .. " " .. tostring(row.label) .. prog .. note)
+	end
+end
+
+local function startEngine()
+	ns.Goals.Engine.SetRender(renderChat)
+	ns.Goals.Engine.Start()
+end
+
+-- "k=v k=v …" -> params table. Numbers and true/false are converted; anything
+-- else stays a string (validates will reject what doesn't fit).
+local function parseParams(s)
+	local params = {}
+	for k, v in s:gmatch("([%w_]+)=(%S+)") do
+		if v == "true" then params[k] = true
+		elseif v == "false" then params[k] = false
+		else params[k] = tonumber(v) or v end
+	end
+	return params
+end
+
+-- /tiw goal check <evaluator> k=v …  — ad-hoc live probe of one evaluator:
+-- validate, then evaluate, print the result table. THE tool for verifying each
+-- evaluator's read path against the live client (IDs, API availability).
+local function goalCheck(rest)
+	local name, kv = rest:match("^(%S+)%s*(.-)$")
+	if not name then out("usage: /tiw goal check <evaluator> k=v …"); return end
+	local def = ns.Goals.Registry.get(name)
+	if not def then
+		out("unknown evaluator '" .. name .. "'  (have: " .. table.concat(ns.Goals.Registry.names(), ", ") .. ")")
+		return
+	end
+	local params = parseParams(kv)
+	local ok, err = def.validate(params)
+	if not ok then out("validate: |cffff5050" .. tostring(err) .. "|r"); return end
+	local r = def.evaluate(params, nil)
+	out(string.format("%s  done=%s%s%s", name, tostring(r.done),
+		r.progress and ("  progress=" .. r.progress .. "/" .. tostring(r.max)) or "",
+		r.stale and "  |cffffcc00stale|r" or ""))
+end
+
+local function goalList()
+	local rows = ns.Goals.Store.list()
+	if #rows == 0 then out("no goals installed — try /tiw goal dev"); return end
+	for _, rec in ipairs(rows) do
+		local unsup = #(rec.state.unsupported or {})
+		out(string.format("  %s%s  |cffffd100%s|r  (%s, %d step%s)%s",
+			rec.state.active and "|cff40ff40on |r" or "|cff808080off|r",
+			rec.state.pinned and "*" or " ",
+			rec.id, rec.goal.scope, #rec.goal.steps, #rec.goal.steps == 1 and "" or "s",
+			unsup > 0 and ("  |cffff5050" .. unsup .. " unsupported|r") or ""))
+	end
+end
+
+-- arg arrives RAW (not lowercased) — import strings are case-sensitive.
+local function goalCmd(arg)
+	local sub, rest = arg:match("^(%S*)%s*(.-)$")
+	sub = sub:lower()
+	if not (ns.Goals and ns.Goals.Store and ns.Goals.Engine) then
+		out("goals layer not loaded"); return
+	end
+	if sub == "dev" then
+		for _, g in ipairs(ns.Goals.DevGoals()) do
+			out("  " .. g.id .. ": " .. tostring(ns.Goals.Store.install(g)))
+		end
+		startEngine()
+		out("dev goals installed — engine running, results print on change (~0.3s)")
+	elseif sub == "list" then
+		goalList()
+	elseif sub == "eval" then
+		startEngine()
+		out("re-evaluating all active goals…")
+	elseif sub == "check" then
+		goalCheck(rest)
+	elseif sub == "import" then
+		local goal, err = ns.Goals.Codec.decode(rest)
+		if not goal then out("import failed: " .. tostring(err)); return end
+		out("imported " .. goal.id .. ": " .. tostring(ns.Goals.Store.install(goal)))
+		startEngine()
+	elseif sub == "export" then
+		local rec = ns.Goals.Store.get(rest)
+		if not rec then out("not installed: '" .. rest .. "'  (/tiw goal list)"); return end
+		local str, err = ns.Goals.Codec.encode(rec.goal)
+		if not str then out("encode failed: " .. tostring(err)); return end
+		out("goal string ready — " .. #str .. " chars (Ctrl+C from the window)")
+		showExport(str)
+	elseif sub == "on" or sub == "off" then
+		local ok, err = ns.Goals.Store.setActive(rest, sub == "on")
+		if not ok then out(tostring(err) .. ": '" .. rest .. "'"); return end
+		startEngine()
+		out(rest .. " " .. sub)
+	elseif sub == "remove" then
+		out(ns.Goals.Store.remove(rest) and ("removed " .. rest) or ("not installed: '" .. rest .. "'"))
+		startEngine()
+	else
+		out("goal commands:  dev · list · eval · check <evaluator> k=v … · import <string> · export <id> · on/off <id> · remove <id>")
+	end
+end
+
+-- /tiw consent [none|generic|everything] — show or set the data-collection
+-- consent state (core/consent.lua). Setting is immediate: the gate reads live
+-- state, downgrades PURGE stored un-shipped sessions, and the active session
+-- rotates under the new state.
+local function consentCmd(arg)
+	if arg == "" then
+		out("data collection: |cffffd100" .. ns.Consent.get() .. "|r  (none · generic · everything)")
+		return
+	end
+	local ok, err = ns.Consent.set(arg)
+	if not ok then out(tostring(err)); return end
+	out("data collection set to |cffffd100" .. arg .. "|r"
+		.. (arg ~= "everything" and "  |cff808080(stored data beyond this level was deleted)|r" or ""))
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
-	msg = (msg or ""):lower():gsub("^%s*(.-)%s*$", "%1")
+	local raw = (msg or ""):gsub("^%s*(.-)%s*$", "%1")
+	local rawCmd, rawArg = raw:match("^(%S*)%s*(.-)$")
+	-- goal args stay RAW: import strings are case-sensitive.
+	if rawCmd:lower() == "goal" then
+		goalCmd(rawArg)
+		return
+	end
+	msg = raw:lower()
 	local cmd, arg = msg:match("^(%S*)%s*(.-)$")
 	if msg == "debug" then
 		debugReport()
@@ -376,6 +519,8 @@ SlashCmdList["TIW"] = function(msg)
 		collectCmd()
 	elseif cmd == "export" then
 		exportCmd(arg)
+	elseif cmd == "consent" then
+		consentCmd(arg)
 	elseif cmd == "log" then
 		logReport(arg)
 	elseif msg == "wq" then
@@ -391,7 +536,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent")
 	end
 end
 
