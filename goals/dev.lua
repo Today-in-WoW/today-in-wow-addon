@@ -32,10 +32,13 @@ function ns.Goals.DevGoals()
 			},
 		},
 		{
-			-- rev 2: encounter=12 (The Lich King) added when per-boss mode landed.
-			v = 1, id = "tiwdev:invincible-farm", rev = 2,
+			-- rev 3: featured icon + tooltip added for the Goal Tracker demo.
+			-- 134400 = inv_misc_questionmark (always-present placeholder).
+			v = 1, id = "tiwdev:invincible-farm", rev = 3,
 			name = "Farm Invincible",
 			desc = "Weekly 25H Icecrown Citadel on every eligible character.",
+			icon = 134400,
+			tooltip = "The rarest mount in the game — a 1% drop from the Lich King.",
 			scope = "perchar",
 			require = { level = 80 },
 			done = { evaluator = "collected", params = { mount = 363 } },
@@ -47,7 +50,8 @@ function ns.Goals.DevGoals()
 		},
 		{
 			-- rev 2: currency 3008 (Valorstones) was removed in Midnight; 3418 is
-			-- the live-verified S1 crest.
+			-- the live-verified S1 crest. Intentionally NO icon — exercises the
+			-- "goal without an icon" render path.
 			v = 1, id = "tiwdev:crest-cap", rev = 2,
 			name = "Cap weekly crests",
 			scope = "perchar",

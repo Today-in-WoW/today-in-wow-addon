@@ -77,6 +77,40 @@ describe("goal codec §1 encoding", function()
 		end
 	end)
 
+	it("accepts optional goal + step icon (fileDataID) and tooltip, round-tripping (§2/§3)", function()
+		local Codec = loadCodec()
+		local goal = fixtures().mount_account
+		goal.icon = 134400
+		goal.tooltip = "The rarest mount in the game."
+		goal.steps[1].icon = 237272
+		goal.steps[1].tooltip = "Drops from the final boss."
+		local back = Codec.decode(assert(Codec.encode(goal)))
+		assert.equal(134400, back.icon)
+		assert.equal("The rarest mount in the game.", back.tooltip)
+		assert.equal(237272, back.steps[1].icon)
+		assert.equal("Drops from the final boss.", back.steps[1].tooltip)
+	end)
+
+	it("rejects a non-number icon and non-string tooltip, at goal and step level (§2/§3)", function()
+		local Codec = loadCodec()
+		local cases = {
+			function(g) g.icon = "path/to/icon" end,    -- goal icon must be fileDataID
+			function(g) g.tooltip = 5 end,              -- goal tooltip must be string
+			function(g) g.steps[1].icon = true end,     -- step icon must be fileDataID
+			function(g) g.steps[1].tooltip = {} end,    -- step tooltip must be string
+		}
+		for _, mutate in ipairs(cases) do
+			local goal = fixtures().mount_account
+			mutate(goal)
+			local ok, err = Codec.encode(goal)
+			assert.is_nil(ok)
+			assert.is_string(err)
+			local got, derr = Codec.decode(rawEncode(goal))
+			assert.is_nil(got)
+			assert.is_string(derr)
+		end
+	end)
+
 	it("rejects a future transport version cleanly", function()
 		local Codec = loadCodec()
 		local got, err = Codec.decode("!TIWG:9!AAAA")

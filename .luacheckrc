@@ -34,6 +34,7 @@ read_globals = {
 	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo", "GetSavedInstanceEncounterInfo",
 	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo", "GetInstanceInfo",
 	"LibStub", "UIParent", "UISpecialFrames",   -- export §8: embedded libs + copy-paste popup
+	"GameTooltip",                              -- goal/step icon hover tooltips (ui_panel)
 }
 
 exclude_files = {

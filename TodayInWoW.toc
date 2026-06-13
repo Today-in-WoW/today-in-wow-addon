@@ -11,6 +11,8 @@
 Libs\LibStub\LibStub.lua
 Libs\LibDeflate\LibDeflate.lua
 Libs\AceSerializer-3.0\AceSerializer-3.0.lua
+# LibEditMode (goals\ui_panel.lua): native Edit Mode position/size for the Goal Tracker.
+Libs\LibEditMode\embed.xml
 
 # Load order: bootstrap → frozen contract core → log/snapshot → collectors → login.
 core\namespace.lua
@@ -38,6 +40,9 @@ goals\store.lua
 goals\engine.lua
 goals\substrate.lua
 goals\offline.lua
+goals\presenter.lua
+goals\ui_panel.lua
+goals\ui_matrix.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua
 goals\evaluators\currency.lua

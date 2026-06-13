@@ -388,8 +388,12 @@ local function renderChat(vm)
 	end
 end
 
+-- The pinned panel owns the Engine's render seam (it caches the flat view-model
+-- the matrix reuses). renderChat survives as the one-shot chat dump (/tiw goal
+-- eval), installed as a temporary render target that prints once and hands the
+-- seam back to the panel.
 local function startEngine()
-	ns.Goals.Engine.SetRender(renderChat)
+	ns.Goals.Engine.SetRender(ns.Goals.UIPanel.render)
 	ns.Goals.Engine.Start()
 end
 
@@ -504,8 +508,22 @@ local function goalCmd(arg)
 		goalList()
 	elseif sub == "alts" then
 		goalAlts()
-	elseif sub == "eval" then
+	elseif sub == "panel" then
 		startEngine()
+		ns.Goals.UIPanel.Toggle()
+	elseif sub == "matrix" then
+		startEngine()
+		ns.Goals.UIMatrix.Open()
+	elseif sub == "eval" then
+		-- One-shot chat dump: print the next pass once, then return the render
+		-- seam to the panel (which also gets the same view-model).
+		local Engine = ns.Goals.Engine
+		Engine.SetRender(function(vm)
+			renderChat(vm)
+			Engine.SetRender(ns.Goals.UIPanel.render)
+			ns.Goals.UIPanel.render(vm)
+		end)
+		Engine.Start()
 		out("re-evaluating all active goals…")
 	elseif sub == "check" then
 		goalCheck(rest)
@@ -526,11 +544,16 @@ local function goalCmd(arg)
 		if not ok then out(tostring(err) .. ": '" .. rest .. "'"); return end
 		startEngine()
 		out(rest .. " " .. sub)
+	elseif sub == "pin" or sub == "unpin" then
+		local ok, err = ns.Goals.Store.setPinned(rest, sub == "pin")
+		if not ok then out(tostring(err) .. ": '" .. rest .. "'"); return end
+		startEngine()
+		out(rest .. " " .. sub .. "ned")
 	elseif sub == "remove" then
 		out(ns.Goals.Store.remove(rest) and ("removed " .. rest) or ("not installed: '" .. rest .. "'"))
 		startEngine()
 	else
-		out("goal commands:  dev · list · alts · eval · check <evaluator> k=v … · import <string> · export <id> · on/off <id> · remove <id>")
+		out("goal commands:  dev · list · alts · panel · matrix · eval · check <evaluator> k=v … · import <string> · export <id> · on/off <id> · pin/unpin <id> · remove <id>")
 	end
 end
 
