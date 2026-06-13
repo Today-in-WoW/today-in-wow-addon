@@ -43,6 +43,7 @@ goals\offline.lua
 goals\presenter.lua
 goals\ui_panel.lua
 goals\ui_matrix.lua
+goals\ui_options.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua
 goals\evaluators\currency.lua

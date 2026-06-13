@@ -621,6 +621,24 @@ function Panel.Toggle()
 	applyVisibility()
 end
 
+-- Set the tracker's shown state explicitly (the options-panel checkbox binds
+-- here). Idempotent: builds the frame on first call (which loads the persisted
+-- state), records the choice, persists it, and applies visibility. build()'s
+-- loadShown runs first, so set userShown after it.
+function Panel.SetShown(shown)
+	shown = not not shown
+	if not frame then build() end
+	userShown = shown
+	TiWDB.settings.trackerShown = userShown
+	applyVisibility()
+end
+
+-- The persisted user show choice (the checkbox reads this). Reflects userShown,
+-- which build()/loadShown restores from TiWDB at login; false before then.
+function Panel.IsShown()
+	return userShown
+end
+
 -- Wire the Engine's render seam to us and start it (the panel owns the seam; see
 -- commands.lua startEngine). Engine.Start is idempotent and forces a fresh pass,
 -- so the restored-shown tracker gets real data instead of the empty default.

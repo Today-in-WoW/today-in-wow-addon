@@ -595,6 +595,12 @@ SlashCmdList["TIW"] = function(msg)
 		exportCmd(arg)
 	elseif cmd == "consent" then
 		consentCmd(arg)
+	elseif msg == "options" or msg == "settings" then
+		if ns.Goals and ns.Goals.UIOptions then
+			ns.Goals.UIOptions.Open()
+		else
+			out("options panel not loaded")
+		end
 	elseif cmd == "log" then
 		logReport(arg)
 	elseif msg == "wq" then
@@ -610,7 +616,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options")
 	end
 end
 

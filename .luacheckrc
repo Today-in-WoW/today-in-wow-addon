@@ -3,7 +3,9 @@ max_line_length = false
 
 -- WoW addon files are called with (addonName, ns) varargs and read the bit lib.
 -- TiWDB is the SavedVariables global (declared in TodayInWoW.toc).
-globals = { "bit", "TiWDB", "SlashCmdList" }
+-- StaticPopupDialogs: ui_options registers its consent-prompt dialog by assigning
+-- a field on this global table (like SlashCmdList).
+globals = { "bit", "TiWDB", "SlashCmdList", "StaticPopupDialogs" }
 
 -- WoW API surface the addon reads (kept minimal; extend as collectors land).
 read_globals = {
@@ -37,6 +39,9 @@ read_globals = {
 	"GameTooltip",                              -- goal/step icon hover tooltips (ui_panel)
 	"IsShiftKeyDown",                           -- shift-click a goal header to unpin (ui_panel)
 	"debugprofilestop",                         -- login-timing breadcrumbs (ns.dbg)
+	-- Options panel + consent prompt (ui_options): modern Settings API and the
+	-- StaticPopup_Show the first-login consent prompt calls.
+	"Settings", "CreateSettingsListSectionHeaderInitializer", "StaticPopup_Show",
 }
 
 exclude_files = {
