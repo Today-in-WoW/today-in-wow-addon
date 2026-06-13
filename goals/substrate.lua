@@ -120,6 +120,7 @@ end
 -- Record shape: see goal-format-v1 §6. Never errors — missing API namespaces
 -- yield empty sections; seen is always stamped.
 function Substrate.capture()
+	local t0 = debugprofilestop and debugprofilestop()
 	local key = Substrate.charKey()
 	local now = GetServerTime()
 	Store.writeSubstrate(key, {
@@ -130,6 +131,7 @@ function Substrate.capture()
 		quests     = scanQuests(),
 	})
 	questSets[key] = nil
+	if ns.dbg and t0 then ns.dbg(string.format("substrate.capture %.1fms", debugprofilestop() - t0)) end
 end
 
 -- Partial refreshes: rebuild ONE section of the current character's existing

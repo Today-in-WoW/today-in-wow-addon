@@ -164,6 +164,13 @@ describe("Presenter.pinned — aggregate state", function()
 		assert.equal("done", pinnedFarm(ns, { done = false }).state)
 	end)
 
+	it("goal-level `done` also resolves every step to done (struck), not just the header", function()
+		local ns = harness({ mount = COLLECTED })
+		local g = pinnedFarm(ns, { done = false })
+		assert.equal("done", g.state)
+		assert.is_true(g.steps[1].result.done)
+	end)
+
 	it("a stale step with nothing done → state 'stale'", function()
 		local ns = harness()
 		assert.equal("stale", pinnedFarm(ns, { done = false, stale = true }).state)

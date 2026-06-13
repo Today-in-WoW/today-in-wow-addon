@@ -232,15 +232,21 @@ local function tooltipShow(owner, text)
 	GameTooltip:Show()
 end
 
-local function isCollapsed(id)
+-- Effective collapse: an explicit user choice (true/false) wins; with none, a
+-- DONE goal defaults to collapsed (its steps are moot) and others to expanded.
+local function isCollapsed(id, done)
 	local c = cfg()
-	return c.collapsed and c.collapsed[id]
+	local v = c.collapsed and c.collapsed[id]
+	if v ~= nil then return v end
+	return done == true
 end
 
-local function toggleCollapse(id)
+-- Flip the effective state and persist it explicitly, so the choice sticks even
+-- as the goal's done-state changes.
+local function toggleCollapse(id, done)
 	local c = cfg()
 	c.collapsed = c.collapsed or {}
-	c.collapsed[id] = (not c.collapsed[id]) or nil
+	c.collapsed[id] = not isCollapsed(id, done)
 end
 
 local function newHeader()
@@ -265,8 +271,21 @@ local function newHeader()
 	label:SetJustifyH("LEFT"); label:SetJustifyV("TOP")
 	b.label = label
 
-	b:SetScript("OnClick", function(self) toggleCollapse(self.goalId); rebuild() end)
-	b:SetScript("OnEnter", function(self) if self.tooltip then tooltipShow(self, self.tooltip) end end)
+	b:SetScript("OnClick", function(self)
+		if IsShiftKeyDown() then
+			-- Shift-click a header to unpin the goal (quest-tracker style).
+			ns.Goals.Store.setPinned(self.goalId, false)
+		else
+			toggleCollapse(self.goalId, self.done)
+		end
+		rebuild()
+	end)
+	b:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(self.tooltip or self.name or "", 1, 1, 1, 1, true)
+		GameTooltip:AddLine("Shift-click to unpin", 0.6, 0.6, 0.6)
+		GameTooltip:Show()
+	end)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	return b
 end
@@ -322,7 +341,9 @@ end
 local function configHeader(b, g, y, contentW)
 	b.goalId = g.id
 	b.tooltip = g.tooltip
-	b.chev:SetTexture(isCollapsed(g.id)
+	b.name = g.name
+	b.done = g.state == "done"
+	b.chev:SetTexture(isCollapsed(g.id, b.done)
 		and "Interface\\Buttons\\UI-PlusButton-Up"
 		or "Interface\\Buttons\\UI-MinusButton-Up")
 
@@ -336,10 +357,13 @@ local function configHeader(b, g, y, contentW)
 
 	local count = (g.progress and g.max) and (g.progress .. "/" .. g.max)
 		or (tostring(g.done) .. "/" .. tostring(g.total))
+	-- A completed goal (goal-level `done`, or every step done) dims its title so it
+	-- reads as resolved alongside its struck steps, not as another active goal.
+	local nameColor = (g.state == "done") and "ff9d9d9d" or "ffffd100"
 	b.label:ClearAllPoints()
 	b.label:SetPoint("TOPLEFT", labelX, -1)
 	b.label:SetWidth(contentW - labelX - 2)
-	b.label:SetText("|cffffd100" .. tostring(g.name) .. "|r  |cff9d9d9d" .. count .. "|r")
+	b.label:SetText("|c" .. nameColor .. tostring(g.name) .. "|r  |cff9d9d9d" .. count .. "|r")
 
 	local h = math.max(HEADER_H, math.ceil(b.label:GetStringHeight()) + 4)
 	b:ClearAllPoints()
@@ -409,6 +433,7 @@ end
 -- viewport, with a scrollbar on the configured side. No-op without a frame.
 function rebuild()
 	if not frame then return end
+	local t0 = debugprofilestop and debugprofilestop()
 	hCount, lCount = 0, 0
 
 	local c = cfg()
@@ -437,7 +462,7 @@ function rebuild()
 	else
 		for _, g in ipairs(vm.goals) do
 			y = y - configHeader(acquireHeader(), g, y, contentW)
-			if not isCollapsed(g.id) then
+			if not isCollapsed(g.id, g.state == "done") then
 				for _, step in ipairs(g.steps) do
 					y = y - configStep(acquireLine(), step, y, contentW)
 				end
@@ -486,6 +511,8 @@ function rebuild()
 
 	for i = hCount + 1, #headers do headers[i]:Hide() end
 	for i = lCount + 1, #lines do lines[i]:Hide() end
+
+	if ns.dbg and t0 then ns.dbg(string.format("tracker rebuild %.1fms (%d goals)", debugprofilestop() - t0, #vm.goals)) end
 end
 
 local function build()

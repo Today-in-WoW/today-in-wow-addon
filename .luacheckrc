@@ -35,6 +35,8 @@ read_globals = {
 	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo", "GetInstanceInfo",
 	"LibStub", "UIParent", "UISpecialFrames",   -- export §8: embedded libs + copy-paste popup
 	"GameTooltip",                              -- goal/step icon hover tooltips (ui_panel)
+	"IsShiftKeyDown",                           -- shift-click a goal header to unpin (ui_panel)
+	"debugprofilestop",                         -- login-timing breadcrumbs (ns.dbg)
 }
 
 exclude_files = {

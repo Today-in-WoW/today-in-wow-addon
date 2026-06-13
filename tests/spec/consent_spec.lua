@@ -193,6 +193,43 @@ describe("Consent.allows — gate matrix", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- shouldPrompt / markPrompted (first-run consent prompt gating)
+-- ---------------------------------------------------------------------------
+
+describe("Consent.shouldPrompt / markPrompted", function()
+	it("prompts on a fresh install (nothing stored)", function()
+		local Consent = makeConsent()
+		assert.is_true(Consent.shouldPrompt())
+	end)
+
+	it("still prompts when a state exists but the prompt was never shown", function()
+		local Consent = makeConsent()
+		_G.TiWDB = { settings = { consent = "generic" } }
+		assert.is_true(Consent.shouldPrompt())
+	end)
+
+	it("does not prompt once markPrompted is called", function()
+		local Consent = makeConsent()
+		Consent.markPrompted()
+		assert.is_false(Consent.shouldPrompt())
+	end)
+
+	it("markPrompted persists the flag (creating settings if needed)", function()
+		local Consent = makeConsent()
+		_G.TiWDB = {}
+		Consent.markPrompted()
+		assert.is_true(TiWDB.settings.consentPrompted)
+	end)
+
+	it("an explicit 'none' choice + markPrompted suppresses the prompt", function()
+		local Consent = makeConsent()
+		Consent.set("none")        -- a deliberate choice, not the unset default
+		Consent.markPrompted()
+		assert.is_false(Consent.shouldPrompt())
+	end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- anonymousGUID
 -- ---------------------------------------------------------------------------
 

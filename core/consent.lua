@@ -156,4 +156,21 @@ function Consent.anonymousGUID(guid)
 	return "Player-" .. (realm or "0") .. "-00000000"
 end
 
+-- First-run prompt gating. shouldPrompt is true until the user has been shown
+-- the consent prompt AND made a choice (markPrompted). This is deliberately
+-- SEPARATE from the consent state — "none" is a valid chosen value, so the
+-- state can't double as "never asked". The prompt flow calls Consent.set(choice)
+-- then Consent.markPrompted(); changing consent later from the options panel
+-- does NOT mark prompted (and need not, since it's already marked).
+function Consent.shouldPrompt()
+	local db = TiWDB
+	return not (db and db.settings and db.settings.consentPrompted)
+end
+
+function Consent.markPrompted()
+	if not TiWDB then TiWDB = {} end
+	TiWDB.settings = TiWDB.settings or {}
+	TiWDB.settings.consentPrompted = true
+end
+
 return ns

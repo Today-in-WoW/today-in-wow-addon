@@ -69,13 +69,16 @@ end
 
 -- The debounced pass: evaluate DIRTY steps only, render iff a result changed.
 local function runPass()
-	local changed = false
+	local t0 = debugprofilestop and debugprofilestop()
+	local changed, n = false, 0
 	for ref in pairs(dirty) do
 		local res = ref.def.evaluate(ref.step.params, nil)
 		if not sameResult(results[ref], res) then changed = true end
 		results[ref] = res
+		n = n + 1
 	end
 	dirty = {}
+	if ns.dbg and t0 then ns.dbg(string.format("engine eval %.1fms (%d steps)", debugprofilestop() - t0, n)) end
 	if changed and Engine._render then
 		Engine._render(buildViewModel())
 	end

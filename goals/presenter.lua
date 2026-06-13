@@ -166,10 +166,14 @@ function Presenter.pinned(flatVM)
 			local goalDone = goalLevelDone(goal)
 			local agg = aggregate(currentResults(rows), currentEligible(goal), goalDone)
 
+			-- Goal-level `done` completes the goal "regardless of per-character step
+			-- state" (§2): when it's true the steps are moot, so they render struck
+			-- too — not an active checklist under a 1/1 header.
 			local steps = {}
 			for i = 1, #(rows or {}) do
 				local def = goal.steps[rows[i].index] or {}
-				steps[i] = { label = rows[i].label, result = rows[i].result,
+				steps[i] = { label = rows[i].label,
+				             result = goalDone and { done = true } or rows[i].result,
 				             icon = def.icon, tooltip = def.tooltip }
 			end
 
