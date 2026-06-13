@@ -53,6 +53,30 @@ describe("goal codec §1 encoding", function()
 		assert.is_string(err)
 	end)
 
+	it("accepts step.resets = 'weekly' / 'daily' and round-trips them (§3)", function()
+		local Codec = loadCodec()
+		local goal = fixtures().mount_account
+		goal.steps[1].resets = "weekly"
+		local str = assert(Codec.encode(goal))
+		assert.equal("weekly", Codec.decode(str).steps[1].resets)
+		goal.steps[1].resets = "daily"
+		assert.is_string(Codec.encode(goal))
+	end)
+
+	it("rejects step.resets outside daily/weekly — bad value and bad type (§3)", function()
+		local Codec = loadCodec()
+		for _, bad in ipairs({ "monthly", true, 7 }) do
+			local goal = fixtures().mount_account
+			goal.steps[1].resets = bad
+			local ok, err = Codec.encode(goal)
+			assert.is_nil(ok, tostring(bad))
+			assert.is_string(err)
+			local got, derr = Codec.decode(rawEncode(goal))
+			assert.is_nil(got, tostring(bad))
+			assert.is_string(derr)
+		end
+	end)
+
 	it("rejects a future transport version cleanly", function()
 		local Codec = loadCodec()
 		local got, err = Codec.decode("!TIWG:9!AAAA")

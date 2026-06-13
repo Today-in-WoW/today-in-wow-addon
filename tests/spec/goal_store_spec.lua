@@ -31,7 +31,7 @@ describe("store §6 binding", function()
 		local ns = harness()
 		assert.is_table(TiWDB.goals.installed)
 		assert.is_table(TiWDB.goals.state)
-		assert.is_table(TiWDB.goals.progress)
+		assert.is_table(TiWDB.goals.substrate)
 		assert.equal(TiWDB.goals, ns.Goals.db)
 	end)
 
@@ -130,16 +130,16 @@ describe("store list / get / remove / assignment", function()
 		assert.same({ "tiw:dev-crests", "tiw:dev-mount" }, ids)
 	end)
 
-	it("remove drops goal + state + per-character progress; false for unknown id", function()
+	it("remove drops goal + state but NEVER substrate (goal-independent); false for unknown id", function()
 		local ns = harness()
 		local S = ns.Goals.Store
 		S.install(fixtures().mount_account)
-		TiWDB.goals.progress["Toon-Realm"] = { ["tiw:dev-mount"] = { steps = {}, seen = 1 } }
+		TiWDB.goals.substrate["Toon-Realm"] = { seen = 1, lockouts = {}, currencies = {}, quests = "" }
 
 		assert.is_true(S.remove("tiw:dev-mount"))
 		assert.is_nil(TiWDB.goals.installed["tiw:dev-mount"])
 		assert.is_nil(TiWDB.goals.state["tiw:dev-mount"])
-		assert.is_nil(TiWDB.goals.progress["Toon-Realm"]["tiw:dev-mount"])
+		assert.is_table(TiWDB.goals.substrate["Toon-Realm"])
 		assert.is_false(S.remove("tiw:dev-mount"))
 	end)
 

@@ -154,6 +154,73 @@ describe("achievement.evaluate — in-progress (done=false)", function()
 end)
 
 -- ===========================================================================
+-- evaluate — single-criterion quantity achievements (the criteria tree)
+--
+-- LIVE FINDING (2026-06-12, achievement 62568 at 199/250 read 0/1): criteria
+-- form a tree — achievement -> one root -> leaves. "Collect N" achievements
+-- surface ONE displayable criterion whose quantity/reqQuantity carries the
+-- real progress; counting completed criteria reads 0/1 until the very end.
+-- Rule: exactly one criterion AND its reqQuantity > 1 → progress is
+-- quantity/reqQuantity. Multi-criteria stays N-of-M completed. A single
+-- criterion with reqQuantity <= 1 (boss-kill style) stays completed-count.
+-- ===========================================================================
+
+describe("achievement.evaluate — single-criterion quantity progress", function()
+	it("one criterion with reqQuantity > 1 → progress = quantity/reqQuantity (the 199/250 case)", function()
+		_G.GetAchievementInfo         = function() return nil, nil, nil, false end
+		_G.GetAchievementNumCriteria  = function() return 1 end
+		_G.GetAchievementCriteriaInfo = function() return nil, nil, false, 199, 250 end
+
+		local r = eval.evaluate({ achievement = 62568 })
+		assert.is_false(r.done)
+		assert.equal(199, r.progress)
+		assert.equal(250, r.max)
+	end)
+
+	it("done still comes from the earned flag, not the quantity", function()
+		_G.GetAchievementInfo         = function() return nil, nil, nil, true end
+		_G.GetAchievementNumCriteria  = function() return 1 end
+		_G.GetAchievementCriteriaInfo = function() return nil, nil, true, 250, 250 end
+
+		local r = eval.evaluate({ achievement = 62568 })
+		assert.is_true(r.done)
+		assert.equal(250, r.progress)
+		assert.equal(250, r.max)
+	end)
+
+	it("one criterion with reqQuantity = 1 keeps completed-count semantics", function()
+		_G.GetAchievementInfo         = function() return nil, nil, nil, false end
+		_G.GetAchievementNumCriteria  = function() return 1 end
+		_G.GetAchievementCriteriaInfo = function() return nil, nil, false, 0, 1 end
+
+		local r = eval.evaluate({ achievement = 4987 })
+		assert.equal(0, r.progress)
+		assert.equal(1, r.max)
+	end)
+
+	it("one criterion with reqQuantity nil keeps completed-count semantics", function()
+		_G.GetAchievementInfo         = function() return nil, nil, nil, false end
+		_G.GetAchievementNumCriteria  = function() return 1 end
+		_G.GetAchievementCriteriaInfo = function() return nil, nil, true end
+
+		local r = eval.evaluate({ achievement = 4987 })
+		assert.equal(1, r.progress)
+		assert.equal(1, r.max)
+	end)
+
+	it("multiple criteria are unaffected — N-of-M completed, quantities ignored", function()
+		_G.GetAchievementInfo         = function() return nil, nil, nil, false end
+		_G.GetAchievementNumCriteria  = function() return 3 end
+		local flags = { true, false, false }
+		_G.GetAchievementCriteriaInfo = function(_, idx) return nil, nil, flags[idx], 199, 250 end
+
+		local r = eval.evaluate({ achievement = 4987 })
+		assert.equal(1, r.progress)
+		assert.equal(3, r.max)
+	end)
+end)
+
+-- ===========================================================================
 -- evaluate — API unavailable (§5 resilience)
 -- "Unreadable answer ... returns { done = false, stale = true }.
 --  Never answer a different question as a fallback."

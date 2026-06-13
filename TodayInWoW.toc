@@ -36,6 +36,8 @@ goals\registry.lua
 goals\codec.lua
 goals\store.lua
 goals\engine.lua
+goals\substrate.lua
+goals\offline.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua
 goals\evaluators\currency.lua

@@ -32,7 +32,8 @@ function ns.Goals.DevGoals()
 			},
 		},
 		{
-			v = 1, id = "tiwdev:invincible-farm", rev = 1,
+			-- rev 2: encounter=12 (The Lich King) added when per-boss mode landed.
+			v = 1, id = "tiwdev:invincible-farm", rev = 2,
 			name = "Farm Invincible",
 			desc = "Weekly 25H Icecrown Citadel on every eligible character.",
 			scope = "perchar",
@@ -40,7 +41,7 @@ function ns.Goals.DevGoals()
 			done = { evaluator = "collected", params = { mount = 363 } },
 			steps = {
 				{ label = "Kill the Lich King (25H)", evaluator = "lockout",
-				  params = { instance = 631, difficulty = 6 },
+				  params = { instance = 631, difficulty = 6, encounter = 12 },
 				  note = "Resets weekly, per character." },
 			},
 		},

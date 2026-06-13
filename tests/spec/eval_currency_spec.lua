@@ -94,6 +94,27 @@ describe("currency validate — oneOf: exactly one of amount/cap required", func
 		assert.is_nil(ok)
 		assert.is_string(err)
 	end)
+
+	-- LIVE FINDING (2026-06-12): cap=false passed the boolean type check, then
+	-- evaluate fell through to amount mode with no amount → compare nil with
+	-- number. cap=false is meaningless ("not at cap" mode doesn't exist — use
+	-- amount); reject it at validate so evaluate can never see it.
+	it("rejects cap=false — cap must be literally true", function()
+		local ok, err = ev.validate({ currency = 3008, cap = false })
+		assert.is_nil(ok)
+		assert.is_string(err)
+	end)
+
+	it("evaluate is never reached with cap=false (validate rejects), but never errors even if forced", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 5, maxQuantity = 16 }
+		end }
+		local okCall, r = pcall(ev.evaluate, { currency = 3008, cap = false })
+		_G.C_CurrencyInfo = nil
+		assert.is_true(okCall, "evaluate must not error on a cap=false params table")
+		assert.is_table(r)
+		assert.is_false(r.done)
+	end)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -181,6 +202,67 @@ describe("currency evaluate — cap mode", function()
 		_G.C_CurrencyInfo = { GetCurrencyInfo = function() return fakeInfo(500, 1000) end }
 		local r = ev.evaluate({ currency = 1, cap = true })
 		assert.equal(1000, r.max)
+	end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- evaluate — cap mode with useTotalEarnedForMaxQty (seasonal/crest caps)
+--
+-- LIVE FINDING (2026-06-12, currency 3418): for crest-style currencies the cap
+-- counts TOTAL EARNED this season, not the spendable quantity — quantity drops
+-- when you spend, totalEarned doesn't. Holding 2 at 14-of-16 earned must read
+-- 14/16, never 2/16. The API marks these with info.useTotalEarnedForMaxQty.
+-- ---------------------------------------------------------------------------
+
+describe("currency evaluate — cap mode, useTotalEarnedForMaxQty", function()
+	local ev
+	before_each(function() ev = harness() end)
+	after_each(function() _G.C_CurrencyInfo = nil end)
+
+	it("progress tracks totalEarned, not quantity (the 2-held / 14-earned case)", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 2, maxQuantity = 16, totalEarned = 14, useTotalEarnedForMaxQty = true }
+		end }
+		local r = ev.evaluate({ currency = 3418, cap = true })
+		assert.is_false(r.done)
+		assert.equal(14, r.progress)
+		assert.equal(16, r.max)
+	end)
+
+	it("done=true at the cap even when the spendable quantity is below it", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 0, maxQuantity = 16, totalEarned = 16, useTotalEarnedForMaxQty = true }
+		end }
+		local r = ev.evaluate({ currency = 3418, cap = true })
+		assert.is_true(r.done)
+	end)
+
+	it("flag false/absent keeps quantity-based cap behavior", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 2, maxQuantity = 16, totalEarned = 14, useTotalEarnedForMaxQty = false }
+		end }
+		local r = ev.evaluate({ currency = 1, cap = true })
+		assert.equal(2, r.progress)
+		assert.equal(16, r.max)
+	end)
+
+	it("totalEarned nil with the flag set defaults to 0 (defensive)", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 5, maxQuantity = 16, useTotalEarnedForMaxQty = true }
+		end }
+		local r = ev.evaluate({ currency = 1, cap = true })
+		assert.is_false(r.done)
+		assert.equal(0, r.progress)
+	end)
+
+	it("amount mode ignores the flag — 'do I hold N to spend' stays quantity", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 2, maxQuantity = 16, totalEarned = 14, useTotalEarnedForMaxQty = true }
+		end }
+		local r = ev.evaluate({ currency = 3418, amount = 10 })
+		assert.is_false(r.done)
+		assert.equal(2, r.progress)
+		assert.equal(10, r.max)
 	end)
 end)
 

@@ -31,7 +31,7 @@ read_globals = {
 	"GetProfessions", "GetProfessionInfo", "C_TradeSkillUI",
 	"C_CurrencyInfo", "C_WeeklyRewards",
 	"C_Reputation", "C_MajorFactions", "C_GossipInfo",
-	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo",
+	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo", "GetSavedInstanceEncounterInfo",
 	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo", "GetInstanceInfo",
 	"LibStub", "UIParent", "UISpecialFrames",   -- export §8: embedded libs + copy-paste popup
 }

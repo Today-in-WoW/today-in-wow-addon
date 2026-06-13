@@ -1,7 +1,7 @@
 local addonName, ns = ...
 
 -- ===========================================================================
--- goals/store.lua  ·  installed goals + state + progress (goal-format-v1 §6/§6a)
+-- goals/store.lua  ·  installed goals + state + substrate (goal-format-v1 §6/§6a)
 --
 -- SOLE WRITER of TiWDB.goals — drain/retention/collectors never touch it, and
 -- this module never touches anything else in TiWDB (guarded by a busted test,
@@ -11,8 +11,14 @@ local addonName, ns = ...
 --     installed = { [id] = goalTable },                 -- as imported
 --     state     = { [id] = { active, pinned, chars,     -- "all" | {charKey=true}
 --                            unsupported } },           -- step indices (§4)
---     progress  = { [charKey] = { [id] = { steps = {...}, seen = ts } } },
+--     substrate = { [charKey] = { seen, meta, lockouts, -- per-char raw state
+--                                 currencies, quests } },-- (§5 charKey / §6)
 --   }
+--
+-- substrate is goal-independent (remove() never touches it) and doubles as
+-- the known-characters registry — its keys are every character that has
+-- logged in with the addon (goals/substrate.lua is the scanner; this module
+-- just owns the writes).
 --
 -- Install semantics (§2): same id + higher rev = update (replace goal, KEEP
 -- state); same/lower rev = "unchanged" no-op. Assignment (chars) is the
@@ -34,7 +40,7 @@ function Store._bind()
 	TiWDB.goals = g
 	g.installed = g.installed or {}
 	g.state     = g.state or {}
-	g.progress  = g.progress or {}
+	g.substrate = g.substrate or {}
 	ns.Goals.db = g
 end
 
@@ -64,17 +70,33 @@ function Store.install(goal, opts)
 	return "installed"
 end
 
--- Remove an installed goal (goal + state + per-character progress).
+-- Remove an installed goal (goal + state). Substrate is goal-independent —
+-- removing a goal never touches per-character state.
 -- true when removed, false when the id wasn't installed.
 function Store.remove(id)
 	local db = ns.Goals.db
 	if not db.installed[id] then return false end
 	db.installed[id] = nil
 	db.state[id] = nil
-	for _, byGoal in pairs(db.progress) do
-		byGoal[id] = nil
-	end
 	return true
+end
+
+-- ---------------------------------------------------------------------------
+-- substrate writes (goals/substrate.lua composes records; this module owns
+-- the persistence so TiWDB.goals keeps a single writer)
+-- ---------------------------------------------------------------------------
+
+function Store.writeSubstrate(charKey, record)
+	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+end
+
+function Store.getSubstrate(charKey)
+	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+end
+
+-- Sorted array of known charKeys (the registry the display iterates).
+function Store.chars()
+	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
 end
 
 -- { goal = installed[id], state = state[id] } or nil.

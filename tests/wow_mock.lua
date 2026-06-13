@@ -29,6 +29,7 @@ local function build()
 		hasRestrictions = false, -- C_Secrets.HasSecretRestrictions() return
 		mapID = nil,
 		secondsToReset = 0,
+		secondsToWeeklyReset = 0,   -- C_DateAndTime.GetSecondsUntilWeeklyReset
 		secrets = {},            -- value -> true
 		timers = {},             -- { due = epoch, fn = fn, ticker = bool, interval = n }
 		frames = {},             -- list of created frame tables
@@ -138,6 +139,7 @@ local function build()
 		_G.C_Map = { GetBestMapForUnit = function() return mock.mapID end }
 		_G.C_DateAndTime = {
 			GetSecondsUntilDailyReset = function() return mock.secondsToReset end,
+			GetSecondsUntilWeeklyReset = function() return mock.secondsToWeeklyReset end,
 		}
 	end
 

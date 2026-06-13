@@ -9,10 +9,15 @@ local _, ns = ...
 ns.Goals.Registry.register("currency", {
 	events = { "CURRENCY_DISPLAY_UPDATE" },
 	validate = function(params)
-		return ns.Goals.Registry.checkParams(params, {
+		local ok, err = ns.Goals.Registry.checkParams(params, {
 			required = { currency = "number" },
 			oneOf    = { amount = "number", cap = "boolean" },
 		})
+		if not ok then return ok, err end
+		-- cap=false is meaningless ("not at cap" mode doesn't exist — use amount)
+		-- and would fall through to amount mode with no amount in evaluate.
+		if params.cap == false then return nil, "cap must be true" end
+		return ok
 	end,
 	evaluate = function(params)
 		local CI = C_CurrencyInfo
@@ -21,8 +26,17 @@ ns.Goals.Registry.register("currency", {
 		local q = info.quantity or 0
 		if params.cap then
 			local m = info.maxQuantity or 0
-			return { done = m > 0 and q >= m, progress = q, max = m }
+			-- Seasonal/crest caps count TOTAL EARNED, not the spendable quantity
+			-- (quantity drops on spend, totalEarned doesn't); the API marks these
+			-- with useTotalEarnedForMaxQty. Live finding: holding 2 at 14-of-16
+			-- earned must read 14/16.
+			local n = info.useTotalEarnedForMaxQty and (info.totalEarned or 0) or q
+			return { done = m > 0 and n >= m, progress = n, max = m }
 		end
+		-- Defensive (§5: evaluate never errors): a params table that dodged
+		-- validate (e.g. cap=false) has no amount — answer un-done, don't compare
+		-- nil with a number.
+		if type(params.amount) ~= "number" then return { done = false } end
 		return { done = q >= params.amount, progress = q, max = params.amount }
 	end,
 })

@@ -3,16 +3,24 @@
 -- Run from the repo root: busted
 --
 -- §5 lockout row:
---   Params:    instance (instanceID), difficulty (difficultyID)
---   Done when: done this reset (instance is locked)
+--   Params:    instance (instanceID), difficulty (difficultyID),
+--              encounter? (boss position, 1-based saved-instance order)
+--   Done when: ACTIVE row (reset > 0) and — plain: locked OR any boss down;
+--              encounter: that boss's isKilled.
 --   Progress:  — (no progress/max fields)
+--
+-- LIVE FINDINGS (2026-06-12, Midnight client):
+--   · Expired rows LINGER with reset=0 and their isKilled flags still true —
+--     reading kill state without the reset>0 gate answers from last week.
+--   · Modern flex difficulties (Normal/Heroic raids) record kills with
+--     locked=false on an active row — `done = locked` alone never fires there.
+--   · GetSavedInstanceEncounterInfo works on legacy + modern, tracks
+--     non-contiguous kills, ordering is the saved-instance boss order, and the
+--     data survives /reload. No secret-value contamination.
 --
 -- §5 Result conventions:
 --   API unavailable → { done = false, stale = true }, never errors.
 --   Never answer a different question as a fallback.
---
--- `encounter` (specific boss) is DEFERRED post-contest and strict-rejected in
--- v1 — see the dedicated describe block at the bottom for the rationale.
 --
 -- BUG (fixed in lockout.lua): evaluate only guarded GetNumSavedInstances; if
 --   GetSavedInstanceInfo was nil while GetNumSavedInstances returned ≥ 1, calling
@@ -33,9 +41,13 @@ end
 
 -- Build the 14 return values of GetSavedInstanceInfo for a single instance.
 -- WoW API positional layout (1-indexed):
---   4 = difficultyID, 5 = locked, 14 = instanceID (the map/instance ID, e.g. 533)
-local function savedInstanceRow(instanceID, difficultyID, locked)
-	return nil, nil, nil, difficultyID, locked, nil, nil, nil, nil, nil, nil, nil, nil, instanceID
+--   3 = reset (seconds until expiry; 0 = expired row lingering in the list),
+--   4 = difficultyID, 5 = locked, 12 = encounterProgress,
+--   14 = instanceID (the map/instance ID, e.g. 631)
+-- reset defaults to an active week; encounterProgress defaults to 0.
+local function savedInstanceRow(instanceID, difficultyID, locked, reset, encounterProgress)
+	return nil, nil, reset or 604800, difficultyID, locked,
+		nil, nil, nil, nil, nil, nil, encounterProgress or 0, nil, instanceID
 end
 
 -- Stub both globals for a single saved instance.
@@ -63,10 +75,8 @@ describe("lockout validate — happy paths", function()
 		assert.is_true(ev.validate({ instance = 533, difficulty = 4 }))
 	end)
 
-	it("rejects { instance, difficulty, encounter } — encounter is deferred post-contest", function()
-		local ok, err = ev.validate({ instance = 533, difficulty = 4, encounter = 36 })
-		assert.is_nil(ok)
-		assert.is_string(err)
+	it("accepts { instance, difficulty, encounter } — per-boss mode (live-verified 2026-06-12)", function()
+		assert.is_true(ev.validate({ instance = 631, difficulty = 6, encounter = 12 }))
 	end)
 end)
 
@@ -132,8 +142,8 @@ describe("lockout validate — wrong param types", function()
 		assert.is_string(err)
 	end)
 
-	it("encounter in any form → nil, err (unknown key in v1)", function()
-		local ok, err = ev.validate({ instance = 533, difficulty = 4, encounter = "36" })
+	it("encounter as string → nil, err (wrong type — must be a number)", function()
+		local ok, err = ev.validate({ instance = 533, difficulty = 4, encounter = "12" })
 		assert.is_nil(ok)
 		assert.is_string(err)
 	end)
@@ -283,23 +293,132 @@ describe("lockout evaluate — API-unavailable paths", function()
 end)
 
 -- ---------------------------------------------------------------------------
--- encounter param — DEFERRED post-contest (discrepancy resolved 2026-06-12)
+-- reset gating — only rows with reset > 0 count (live finding 2026-06-12:
+-- expired rows linger at reset=0 with locked=false BUT isKilled/progress
+-- still showing last reset's clear)
 -- ---------------------------------------------------------------------------
 
-describe("lockout — encounter param is strict-rejected in v1", function()
-	-- §5 originally listed `encounter?` (specific boss within the lockout).
-	-- Accepting-but-ignoring it answered a DIFFERENT question (whole-instance
-	-- lock vs. boss kill) — the exact fallback the §5 result conventions
-	-- forbid. v1 therefore rejects the key outright: goals using it degrade to
-	-- an unsupported step ("update to track this"). A future version can
-	-- implement per-boss checking (GetSavedInstanceEncounterInfo) and
-	-- re-accept the key — old addons keep degrading gracefully under §4.
+describe("lockout evaluate — reset gating", function()
 	local ev
 	before_each(function() ev = makeHarness() end)
+	after_each(function()
+		_G.GetNumSavedInstances = nil
+		_G.GetSavedInstanceInfo = nil
+	end)
 
-	it("validate rejects encounter as an unknown key in v1 (§4 strict)", function()
-		local ok, err = ev.validate({ instance = 533, difficulty = 4, encounter = 36 })
-		assert.is_nil(ok)
-		assert.is_string(err)
+	it("expired row (reset=0) with full progress → done = false (the lingering Voidspire case)", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(2912, 15, false, 0, 6) end
+		assert.is_false(ev.evaluate({ instance = 2912, difficulty = 15 }).done)
+	end)
+
+	it("modern flex row: locked=false but reset>0 with a boss down → done = true (the Dreamrift case)", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(2939, 15, false, 314129, 1) end
+		assert.is_true(ev.evaluate({ instance = 2939, difficulty = 15 }).done)
+	end)
+
+	it("active row with no kills and not locked → done = false", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(2939, 16, false, 314129, 0) end
+		assert.is_false(ev.evaluate({ instance = 2939, difficulty = 16 }).done)
+	end)
+
+	it("an expired matching row is skipped, a later active row answers", function()
+		_G.GetNumSavedInstances = function() return 2 end
+		_G.GetSavedInstanceInfo = function(i)
+			if i == 1 then return savedInstanceRow(2912, 15, false, 0, 6) end   -- last week
+			return savedInstanceRow(2912, 15, false, 314129, 2)                 -- this week
+		end
+		assert.is_true(ev.evaluate({ instance = 2912, difficulty = 15 }).done)
+	end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- encounter mode — per-boss checking (pulled into v1 2026-06-12 after live
+-- verification; GetSavedInstanceEncounterInfo(instanceIndex, bossPosition)
+-- → bossName, fileDataID, isKilled; ordering = saved-instance boss order)
+-- ---------------------------------------------------------------------------
+
+describe("lockout evaluate — encounter mode", function()
+	local ev
+	before_each(function() ev = makeHarness() end)
+	after_each(function()
+		_G.GetNumSavedInstances = nil
+		_G.GetSavedInstanceInfo = nil
+		_G.GetSavedInstanceEncounterInfo = nil
+	end)
+
+	local function stubICC(kills)
+		-- One active locked ICC 25H row; kills = { [position] = true }.
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(631, 6, true, 314129, 6) end
+		_G.GetSavedInstanceEncounterInfo = function(_, j)
+			return "Boss " .. j, nil, kills[j] == true
+		end
+	end
+
+	it("target boss killed → done = true", function()
+		stubICC({ [5] = true })
+		assert.is_true(ev.evaluate({ instance = 631, difficulty = 6, encounter = 5 }).done)
+	end)
+
+	it("instance locked but target boss NOT killed → done = false (the Festergut case)", function()
+		stubICC({ [5] = true, [8] = true })
+		assert.is_false(ev.evaluate({ instance = 631, difficulty = 6, encounter = 6 }).done)
+	end)
+
+	it("instance index and boss position are forwarded to GetSavedInstanceEncounterInfo", function()
+		local seenI, seenJ
+		_G.GetNumSavedInstances = function() return 3 end
+		_G.GetSavedInstanceInfo = function(i)
+			if i == 2 then return savedInstanceRow(631, 6, true) end
+			return savedInstanceRow(999, 1, false, 0)
+		end
+		_G.GetSavedInstanceEncounterInfo = function(i, j) seenI, seenJ = i, j; return nil, nil, false end
+		ev.evaluate({ instance = 631, difficulty = 6, encounter = 12 })
+		assert.equal(2, seenI)
+		assert.equal(12, seenJ)
+	end)
+
+	it("expired row with the boss flagged killed → done = false (kill flags linger past reset)", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(631, 6, false, 0, 12) end
+		_G.GetSavedInstanceEncounterInfo = function() return "The Lich King", nil, true end
+		assert.is_false(ev.evaluate({ instance = 631, difficulty = 6, encounter = 12 }).done)
+	end)
+
+	it("boss position beyond the row's encounters (API returns nil) → done = false, never errors", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(631, 6, true) end
+		_G.GetSavedInstanceEncounterInfo = function() return nil end
+		local ok, r = pcall(ev.evaluate, { instance = 631, difficulty = 6, encounter = 99 })
+		assert.is_true(ok)
+		assert.is_false(r.done)
+	end)
+
+	it("no matching active row → done = false, encounter API never called", function()
+		_G.GetNumSavedInstances = function() return 0 end
+		_G.GetSavedInstanceInfo = function() end
+		_G.GetSavedInstanceEncounterInfo = function() error("must not be called") end
+		assert.is_false(ev.evaluate({ instance = 631, difficulty = 6, encounter = 12 }).done)
+	end)
+
+	it("GetSavedInstanceEncounterInfo missing with encounter param → stale, not a whole-instance answer (§5)", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(631, 6, true, 314129, 12) end
+		_G.GetSavedInstanceEncounterInfo = nil
+		local r = ev.evaluate({ instance = 631, difficulty = 6, encounter = 12 })
+		assert.is_false(r.done)
+		assert.is_true(r.stale)
+	end)
+
+	it("plain mode does not need GetSavedInstanceEncounterInfo", function()
+		_G.GetNumSavedInstances = function() return 1 end
+		_G.GetSavedInstanceInfo = function() return savedInstanceRow(631, 6, true) end
+		_G.GetSavedInstanceEncounterInfo = nil
+		local r = ev.evaluate({ instance = 631, difficulty = 6 })
+		assert.is_true(r.done)
+		assert.is_nil(r.stale)
 	end)
 end)
