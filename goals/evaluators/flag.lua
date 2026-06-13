@@ -19,7 +19,14 @@ ns.Goals.Registry.register("flag", {
 	-- Unreadable answer (namespace OR the specific function absent) → stale=true
 	-- (§5 result contract). Deliberately NO fallback from the account API to the
 	-- per-char API: silently answering the wrong question is worse than "unknown".
-	evaluate = function(params)
+	evaluate = function(params, charKey)
+		-- `account` is account-truth (§5): ALWAYS the live warband API, even for
+		-- an alt. Only the per-char branch reads the offline substrate quest set.
+		if charKey and not params.account then
+			local set = ns.Goals.Substrate and ns.Goals.Substrate.questSet(charKey)
+			if not set then return { done = false, stale = true } end
+			return { done = set[params.quest] == true }
+		end
 		local QL = C_QuestLog
 		local fn
 		if QL then

@@ -13,8 +13,8 @@ local _, ns = ...
 -- ID notes for live verification:
 --   mount 363       = Invincible's Reins (mount journal ID)
 --   instance 631/6  = Icecrown Citadel, 25 Heroic (legacy difficultyID 6)
---   currency 3008   = Valorstones (TWW) — swap for the Midnight S1 crest ID
---                     once verified live
+--   currency 3418   = Midnight S1 crest (live-verified 2026-06-12; 3008
+--                     Valorstones was removed in Midnight)
 -- ===========================================================================
 
 ns.Goals = ns.Goals or {}
@@ -46,12 +46,14 @@ function ns.Goals.DevGoals()
 			},
 		},
 		{
-			v = 1, id = "tiwdev:crest-cap", rev = 1,
-			name = "Cap weekly Valorstones",
+			-- rev 2: currency 3008 (Valorstones) was removed in Midnight; 3418 is
+			-- the live-verified S1 crest.
+			v = 1, id = "tiwdev:crest-cap", rev = 2,
+			name = "Cap weekly crests",
 			scope = "perchar",
 			steps = {
-				{ label = "Reach the Valorstone cap", evaluator = "currency",
-				  params = { currency = 3008, cap = true },
+				{ label = "Reach the weekly crest cap", evaluator = "currency",
+				  params = { currency = 3418, cap = true },
 				  require = { level = 80 } },
 			},
 		},

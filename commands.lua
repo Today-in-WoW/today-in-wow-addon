@@ -438,6 +438,55 @@ local function goalList()
 	end
 end
 
+-- Coarse "Nm/Nh/Nd ago" for a substrate snapshot's age (display only).
+local function fmtAge(secs)
+	if secs < 3600 then return math.floor(secs / 60) .. "m"
+	elseif secs < 86400 then return math.floor(secs / 3600) .. "h" end
+	return math.floor(secs / 86400) .. "d"
+end
+
+-- /tiw goal alts — the offline-character checklist: for every known character
+-- other than the one logged in, each active goal's Offline.goalFor rows in the
+-- renderChat box-mark style.
+local function goalAlts()
+	local me = ns.Goals.Substrate.charKey()
+	local now = GetServerTime()
+	local goals = ns.Goals.Store.list()
+	local any = false
+	for _, charKey in ipairs(ns.Goals.Store.chars()) do
+		if charKey ~= me then
+			any = true
+			out("|cffffd100" .. charKey .. "|r")
+			for _, rec in ipairs(goals) do
+				if rec.state.active then
+					local g = ns.Goals.Offline.goalFor(charKey, rec.goal)
+					if g.noData then
+						out("  " .. rec.id .. "  |cff808080(no data)|r")
+					else
+						out(string.format("  %s  |cff808080(%s ago)|r%s", rec.id,
+							fmtAge(math.max(0, now - (g.seen or now))),
+							g.eligible and "" or "  |cff808080(ineligible)|r"))
+						for _, row in ipairs(g.steps) do
+							if row.ineligible then
+								out("    |cff808080[-] " .. tostring(row.label) .. "  (ineligible)|r")
+							else
+								local r = row.result
+								local box = "[ ]"
+								if r and r.stale then box = "|cffffcc00[?]|r"
+								elseif r and r.done then box = "|cff40ff40[x]|r" end
+								local prog = (r and r.progress) and ("  " .. r.progress .. "/" .. tostring(r.max or "?")) or ""
+								local note = (r and r.stale) and "  |cff808080(no data — log this character)|r" or ""
+								out("    " .. box .. " " .. tostring(row.label) .. prog .. note)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	if not any then out("no other characters known — log in on an alt once"); return end
+end
+
 -- arg arrives RAW (not lowercased) — import strings are case-sensitive.
 local function goalCmd(arg)
 	local sub, rest = arg:match("^(%S*)%s*(.-)$")
@@ -453,6 +502,8 @@ local function goalCmd(arg)
 		out("dev goals installed — engine running, results print on change (~0.3s)")
 	elseif sub == "list" then
 		goalList()
+	elseif sub == "alts" then
+		goalAlts()
 	elseif sub == "eval" then
 		startEngine()
 		out("re-evaluating all active goals…")
@@ -479,7 +530,7 @@ local function goalCmd(arg)
 		out(ns.Goals.Store.remove(rest) and ("removed " .. rest) or ("not installed: '" .. rest .. "'"))
 		startEngine()
 	else
-		out("goal commands:  dev · list · eval · check <evaluator> k=v … · import <string> · export <id> · on/off <id> · remove <id>")
+		out("goal commands:  dev · list · alts · eval · check <evaluator> k=v … · import <string> · export <id> · on/off <id> · remove <id>")
 	end
 end
 

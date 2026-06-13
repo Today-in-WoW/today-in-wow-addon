@@ -87,16 +87,19 @@ end
 -- ---------------------------------------------------------------------------
 
 function Store.writeSubstrate(charKey, record)
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	ns.Goals.db.substrate[charKey] = record
 end
 
 function Store.getSubstrate(charKey)
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	return ns.Goals.db.substrate[charKey]
 end
 
 -- Sorted array of known charKeys (the registry the display iterates).
 function Store.chars()
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	local keys = {}
+	for k in pairs(ns.Goals.db.substrate) do keys[#keys + 1] = k end
+	table.sort(keys)
+	return keys
 end
 
 -- { goal = installed[id], state = state[id] } or nil.

@@ -64,6 +64,9 @@ local function checkShape(goal)
 			return nil, "step " .. i .. " is missing an evaluator"
 		end
 		if type(step.params) ~= "table" then return nil, "step " .. i .. " params must be a table" end
+		if step.resets ~= nil and step.resets ~= "daily" and step.resets ~= "weekly" then
+			return nil, "step " .. i .. " resets must be 'daily' or 'weekly'"
+		end
 	end
 	return true
 end

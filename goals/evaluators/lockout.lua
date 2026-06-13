@@ -26,7 +26,24 @@ ns.Goals.Registry.register("lockout", {
 			optional = { encounter = "number" },
 		})
 	end,
-	evaluate = function(params)
+	evaluate = function(params, charKey)
+		if charKey then
+			-- Offline alt: read the stored substrate (§5). Rows self-expire via
+			-- their absolute expiry timestamp — no reset-boundary math here.
+			local rec = ns.Goals.Substrate and ns.Goals.Substrate.get(charKey)
+			if not rec then return { done = false, stale = true } end
+			local now = GetServerTime()
+			for _, row in ipairs(rec.lockouts or {}) do
+				if row.instance == params.instance and row.difficulty == params.difficulty
+					and (row.expiry or 0) > now then
+					if params.encounter then
+						return { done = (row.kills and row.kills[params.encounter]) == true }
+					end
+					return { done = row.locked == true or (tonumber(row.progress) or 0) > 0 }
+				end
+			end
+			return { done = false }
+		end
 		if not GetNumSavedInstances or not GetSavedInstanceInfo then return { done = false, stale = true } end
 		if params.encounter and not GetSavedInstanceEncounterInfo then
 			-- Never fall back to the whole-instance answer (§5: never answer a

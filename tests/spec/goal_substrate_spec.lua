@@ -27,8 +27,6 @@ local function harness()
 	_G.GetSavedInstanceInfo = nil
 	_G.GetSavedInstanceEncounterInfo = nil
 	_G.C_CurrencyInfo = nil
-	_G.GetCurrencyListSize = nil
-	_G.GetCurrencyListLink = nil
 	_G.C_QuestLog = nil
 
 	local ns = {}
@@ -53,14 +51,16 @@ local function stubLockouts()
 	end
 end
 
--- Currency list: one header, one real currency.
+-- Currency list: one header, one real currency. The list APIs live in the
+-- C_CurrencyInfo namespace (the bare globals were removed in BfA — live
+-- finding 2026-06-12: the legacy-global dance captured nothing).
 local function stubCurrencies()
-	_G.GetCurrencyListSize = function() return 2 end
-	_G.GetCurrencyListLink = function(i)
-		if i == 2 then return "|Hcurrency:3418|h[Crest]|h" end
-		return nil   -- header rows have no link
-	end
 	_G.C_CurrencyInfo = {
+		GetCurrencyListSize = function() return 2 end,
+		GetCurrencyListLink = function(i)
+			if i == 2 then return "|Hcurrency:3418|h[Crest]|h" end
+			return nil   -- header rows have no link
+		end,
 		GetCurrencyIDFromLink = function(link) return tonumber(link:match("currency:(%d+)")) end,
 		GetCurrencyInfo = function(id)
 			if id == 3418 then
@@ -136,6 +136,31 @@ describe("Substrate.capture — record shape", function()
 		local n = 0
 		for _ in pairs(cur) do n = n + 1 end
 		assert.equal(1, n)
+	end)
+
+	it("currencies referenced by installed goals are captured even when absent from the list (collapsed headers hide currencies; GetCurrencyInfo works by ID regardless)", function()
+		local ns = harness()
+		stubCurrencies()
+		_G.C_CurrencyInfo.GetCurrencyInfo = function(id)
+			if id == 3418 then
+				return { quantity = 2, maxQuantity = 16, totalEarned = 14,
+				         useTotalEarnedForMaxQty = true }
+			end
+			if id == 3008 then
+				return { quantity = 700, maxQuantity = 2000, totalEarned = 0,
+				         useTotalEarnedForMaxQty = false }
+			end
+		end
+		ns.Goals.Store.install({
+			v = 1, id = "tiw:crests", rev = 1, name = "Crests", scope = "perchar",
+			steps = { { label = "Cap", evaluator = "currency",
+			            params = { currency = 3008, cap = true } } },
+		})
+		ns.Goals.Substrate.capture()
+		local cur = ns.Goals.Store.getSubstrate(KEY).currencies
+		assert.equal(2, cur[3418].quantity)     -- from the list
+		assert.equal(700, cur[3008].quantity)   -- goal-referenced, not in the list
+		assert.equal(2000, cur[3008].max)
 	end)
 
 	it("quests: completed IDs joined with commas", function()
@@ -302,7 +327,7 @@ describe("Substrate event wiring", function()
 		local ns, mock = harness()
 		mock.fireEvent("PLAYER_LOGIN")
 		local calls = 0
-		_G.GetCurrencyListSize = function() calls = calls + 1; return 0 end
+		_G.C_CurrencyInfo = { GetCurrencyListSize = function() calls = calls + 1; return 0 end }
 		mock.fireEvent("CURRENCY_DISPLAY_UPDATE")
 		mock.fireEvent("CURRENCY_DISPLAY_UPDATE")
 		mock.fireEvent("CURRENCY_DISPLAY_UPDATE")

@@ -29,53 +29,189 @@ local _, ns = ...
 ns.Goals = ns.Goals or {}
 local Substrate = {}
 ns.Goals.Substrate = Substrate
+local Store = ns.Goals.Store
 
 Substrate.DEBOUNCE = 2   -- seconds; CURRENCY_DISPLAY_UPDATE burst coalescing
 
+-- questSet caches, keyed by charKey. capture()/noteQuestTurnedIn keep them in
+-- sync with the record they rewrite (questSet itself fills a missing entry).
+local questSets = {}
+
 -- "Name-Realm" for the logged-in character (same key scheme as TiWDB.characters).
 function Substrate.charKey()
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	return UnitName("player") .. "-" .. GetRealmName()
+end
+
+-- Active saved-instance rows (reset > 0 only). `now` anchors the absolute
+-- expiry (seen + reset). Empty when the API namespace is unavailable.
+local function scanLockouts(now)
+	local rows = {}
+	if not GetNumSavedInstances or not GetSavedInstanceInfo then return rows end
+	for i = 1, GetNumSavedInstances() do
+		local _, _, reset, difficulty, locked, _, _, _, _, _, numEnc, encProg, _, instanceID =
+			GetSavedInstanceInfo(i)
+		reset = tonumber(reset) or 0
+		if reset > 0 then
+			local kills = {}
+			if GetSavedInstanceEncounterInfo then
+				for j = 1, (numEnc or 0) do
+					local _, _, killed = GetSavedInstanceEncounterInfo(i, j)
+					kills[j] = killed == true
+				end
+			end
+			rows[#rows + 1] = {
+				instance   = instanceID,
+				difficulty = difficulty,
+				locked     = locked == true,
+				expiry     = now + reset,
+				progress   = encProg,
+				kills      = kills,
+			}
+		end
+	end
+	return rows
+end
+
+-- The currency list keyed by ID with the four cap-relevant fields. All list
+-- APIs live in the C_CurrencyInfo namespace (the bare globals were removed in
+-- BfA — live finding 2026-06-12); header rows (no link) are skipped. The list
+-- only shows EXPANDED headers, so currencies referenced by installed goals
+-- are additionally fetched by ID (GetCurrencyInfo works regardless of the
+-- list's collapse state). Empty when the namespace is unavailable.
+local function entryFor(CI, id)
+	local info = id and CI.GetCurrencyInfo and CI.GetCurrencyInfo(id)
+	if not info then return nil end
+	return {
+		quantity                = info.quantity,
+		totalEarned             = info.totalEarned,
+		useTotalEarnedForMaxQty = info.useTotalEarnedForMaxQty,
+		max                     = info.maxQuantity,
+	}
+end
+
+local function scanCurrencies()
+	local out = {}
+	local CI = C_CurrencyInfo
+	if not (CI and CI.GetCurrencyListSize) then return out end
+	for i = 1, CI.GetCurrencyListSize() do
+		local link = CI.GetCurrencyListLink and CI.GetCurrencyListLink(i)
+		local id = link and CI.GetCurrencyIDFromLink and CI.GetCurrencyIDFromLink(link)
+		if id then out[id] = entryFor(CI, id) end
+	end
+	-- Goal-referenced currencies, immune to collapsed headers.
+	if ns.Goals.db then
+		for _, goal in pairs(ns.Goals.db.installed) do
+			for _, step in ipairs(goal.steps or {}) do
+				local id = step.evaluator == "currency" and step.params and step.params.currency
+				if id and not out[id] then out[id] = entryFor(CI, id) end
+			end
+		end
+	end
+	return out
+end
+
+-- Completed-quest IDs joined with commas; "" when the API is unavailable.
+local function scanQuests()
+	if not C_QuestLog or not C_QuestLog.GetAllCompletedQuestIDs then return "" end
+	return table.concat(C_QuestLog.GetAllCompletedQuestIDs() or {}, ",")
 end
 
 -- Full scan of the live character -> Store.writeSubstrate(charKey(), record).
--- Record shape: see goal-format-v1 §6. lockouts: ACTIVE rows only (reset > 0),
--- expiry = seen + reset, progress = encounterProgress, kills[j] from
--- GetSavedInstanceEncounterInfo. currencies: enumerate the currency list for
--- IDs (skip headers), GetCurrencyInfo(id) for the four fields. quests:
--- ascending IDs joined with "," from C_QuestLog.GetAllCompletedQuestIDs().
+-- Record shape: see goal-format-v1 §6. Never errors — missing API namespaces
+-- yield empty sections; seen is always stamped.
 function Substrate.capture()
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	local key = Substrate.charKey()
+	local now = GetServerTime()
+	Store.writeSubstrate(key, {
+		seen       = now,
+		meta       = { level = UnitLevel("player"), class = select(2, UnitClass("player")) },
+		lockouts   = scanLockouts(now),
+		currencies = scanCurrencies(),
+		quests     = scanQuests(),
+	})
+	questSets[key] = nil
 end
 
 -- Partial refreshes: rebuild ONE section of the current character's existing
 -- record (no-op when no record exists yet).
 function Substrate.captureLockouts()
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	local key = Substrate.charKey()
+	local rec = Store.getSubstrate(key)
+	if not rec then return end
+	rec.lockouts = scanLockouts(GetServerTime())
+	Store.writeSubstrate(key, rec)
 end
 
 function Substrate.captureCurrencies()
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	local key = Substrate.charKey()
+	local rec = Store.getSubstrate(key)
+	if not rec then return end
+	rec.currencies = scanCurrencies()
+	Store.writeSubstrate(key, rec)
 end
 
 -- Incremental: append questID to the current character's quests string (and
 -- the cached set) if not already present. No-op without a record.
 function Substrate.noteQuestTurnedIn(questID)
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	local key = Substrate.charKey()
+	local rec = Store.getSubstrate(key)
+	if not rec then return end
+	local set = Substrate.questSet(key)
+	if set[questID] then return end
+	set[questID] = true
+	rec.quests = (rec.quests == nil or rec.quests == "") and tostring(questID)
+		or (rec.quests .. "," .. questID)
+	Store.writeSubstrate(key, rec)
 end
 
 -- Read a character's substrate record (nil when never captured).
 function Substrate.get(charKey)
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	return Store.getSubstrate(charKey)
 end
 
 -- The quests string parsed into a set { [id] = true }, lazily, cached per
 -- charKey; the cache busts when capture()/noteQuestTurnedIn touch the record.
 -- nil when there is no substrate for charKey.
 function Substrate.questSet(charKey)
-	-- TODO(opus): implement to tests/spec/goal_substrate_spec.lua
+	local rec = Store.getSubstrate(charKey)
+	if not rec then return nil end
+	local set = questSets[charKey]
+	if not set then
+		set = {}
+		for id in (rec.quests or ""):gmatch("%d+") do
+			set[tonumber(id)] = true
+		end
+		questSets[charKey] = set
+	end
+	return set
 end
 
--- Event wiring (PLAYER_LOGIN full capture + the refresh events above).
--- TODO(opus): single frame, registered at file load like core/session.lua.
+-- Event wiring: PLAYER_LOGIN full capture + cheap in-session refreshes. Single
+-- frame registered at file load, like core/session.lua.
+local currencyPending = false
+local f = CreateFrame("Frame")
+f:RegisterEvent("PLAYER_LOGIN")
+f:RegisterEvent("UPDATE_INSTANCE_INFO")
+f:RegisterEvent("BOSS_KILL")
+f:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+f:RegisterEvent("QUEST_TURNED_IN")
+f:SetScript("OnEvent", function(_, event, arg1)
+	if event == "PLAYER_LOGIN" then
+		Substrate.capture()
+	elseif event == "UPDATE_INSTANCE_INFO" or event == "BOSS_KILL" then
+		Substrate.captureLockouts()
+	elseif event == "CURRENCY_DISPLAY_UPDATE" then
+		-- The event arrives in bursts; one trailing capture per burst.
+		if not currencyPending then
+			currencyPending = true
+			C_Timer.After(Substrate.DEBOUNCE, function()
+				currencyPending = false
+				Substrate.captureCurrencies()
+			end)
+		end
+	elseif event == "QUEST_TURNED_IN" then
+		Substrate.noteQuestTurnedIn(arg1)
+	end
+end)
 
 return ns
