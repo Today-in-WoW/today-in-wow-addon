@@ -5,7 +5,9 @@ max_line_length = false
 -- TiWDB is the SavedVariables global (declared in TodayInWoW.toc).
 -- StaticPopupDialogs: ui_options registers its consent-prompt dialog by assigning
 -- a field on this global table (like SlashCmdList).
-globals = { "bit", "TiWDB", "SlashCmdList", "StaticPopupDialogs" }
+-- TiW_OnAddonCompartment: ui_main defines this global by name for the .toc's
+-- AddonCompartmentFunc directive (like SlashCmdList, it's assigned, not read).
+globals = { "bit", "TiWDB", "SlashCmdList", "StaticPopupDialogs", "TiW_OnAddonCompartment" }
 
 -- WoW API surface the addon reads (kept minimal; extend as collectors land).
 read_globals = {
@@ -38,10 +40,12 @@ read_globals = {
 	"LibStub", "UIParent", "UISpecialFrames",   -- export §8: embedded libs + copy-paste popup
 	"GameTooltip",                              -- goal/step icon hover tooltips (ui_panel)
 	"IsShiftKeyDown",                           -- shift-click a goal header to unpin (ui_panel)
+	"GetCursorPosition",                        -- card drag-and-drop reordering (ui_main)
 	"debugprofilestop",                         -- login-timing breadcrumbs (ns.dbg)
 	-- Options panel + consent prompt (ui_options): modern Settings API and the
 	-- StaticPopup_Show the first-login consent prompt calls.
 	"Settings", "CreateSettingsListSectionHeaderInitializer", "StaticPopup_Show",
+	"MinimalSliderWithSteppersMixin",   -- font-size slider label formatter (ui_options)
 }
 
 exclude_files = {

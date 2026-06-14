@@ -90,17 +90,31 @@ end
 -- ===========================================================================
 
 describe("Presenter.pinned — selection & grouping", function()
-	it("includes only pinned && active goals, in Store id order", function()
+	it("includes only pinned && active goals, in display order (pinned-section arrangement)", function()
 		local ns = harness()
 		local S = ns.Goals.Store
-		S.install(gFarm());  S.setPinned("g:farm", true)
-		S.install(gCrests()); S.setPinned("g:crests", true)
+		S.install(gFarm());  S.setPinned("g:farm", true)    -- pinned first
+		S.install(gCrests()); S.setPinned("g:crests", true) -- pinned second
 		S.install(gMount())   -- active but NOT pinned
 		local flat = {
 			row("g:farm", 1, "Kill LK", { done = true }),
 			row("g:crests", 1, "Cap", { done = false, progress = 14, max = 16 }),
 		}
 		local vm = ns.Goals.Presenter.pinned(flat)
+		local ids = {}
+		for _, g in ipairs(vm.goals) do ids[#ids + 1] = g.id end
+		assert.same({ "g:farm", "g:crests" }, ids)
+	end)
+
+	it("respects an explicit section order set via Store.setSectionOrder", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gFarm()); S.install(gCrests())
+		S.setSectionOrder(true, { "g:crests", "g:farm" })   -- pin both, crests first
+		local vm = ns.Goals.Presenter.pinned({
+			row("g:farm", 1, "Kill LK", { done = true }),
+			row("g:crests", 1, "Cap", { done = false }),
+		})
 		local ids = {}
 		for _, g in ipairs(vm.goals) do ids[#ids + 1] = g.id end
 		assert.same({ "g:crests", "g:farm" }, ids)
@@ -285,6 +299,47 @@ describe("Presenter.matrix — goal icon passthrough", function()
 	end)
 end)
 
+describe("Presenter.library — the goals window's two sections", function()
+	local function ids(t)
+		local o = {}
+		for _, g in ipairs(t) do o[#o + 1] = g.id end
+		return o
+	end
+
+	it("splits installed goals into pinned and available, each in display order", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gFarm()); S.setPinned("g:farm", true)
+		S.install(gCrests())   -- available
+		S.install(gMount())    -- available
+		local lib = ns.Goals.Presenter.library({})
+		assert.same({ "g:farm" }, ids(lib.pinned))
+		assert.same({ "g:crests", "g:mount" }, ids(lib.available))
+	end)
+
+	it("carries name/icon/scope/steps for the detail panel", function()
+		local ns = harness()
+		local g = gCrests(); g.icon = 555
+		ns.Goals.Store.install(g)
+		local entry = ns.Goals.Presenter.library({
+			row("g:crests", 1, "Cap", { done = false, progress = 14, max = 16 }),
+		}).available[1]
+		assert.equal("Weekly Crests", entry.name)
+		assert.equal(555, entry.icon)
+		assert.equal("perchar", entry.scope)
+		assert.equal("Cap", entry.steps[1].label)
+		assert.equal(14, entry.steps[1].result.progress)
+	end)
+
+	it("available section honors an explicit arranged order", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gMount()); S.install(gFarm()); S.install(gCrests())
+		S.setSectionOrder(false, { "g:crests", "g:mount", "g:farm" })
+		assert.same({ "g:crests", "g:mount", "g:farm" }, ids(ns.Goals.Presenter.library({}).available))
+	end)
+end)
+
 describe("Presenter.matrix — axes", function()
 	it("current character is the first column; others follow id-sorted", function()
 		local ns = harness()
@@ -306,13 +361,23 @@ describe("Presenter.matrix — axes", function()
 		assert.equal(ME, vm.chars[1].key)
 	end)
 
-	it("goals are the active set in Store id order", function()
+	it("goals follow display order (install order when unarranged)", function()
 		local ns = harness()
 		local S = ns.Goals.Store
 		S.install(gMount()); S.install(gFarm()); S.install(gCrests())
 		local ids = {}
 		for _, g in ipairs(ns.Goals.Presenter.matrix({}).goals) do ids[#ids + 1] = g.id end
-		assert.same({ "g:crests", "g:farm", "g:mount" }, ids)
+		assert.same({ "g:mount", "g:farm", "g:crests" }, ids)
+	end)
+
+	it("goals are pinned-section first, then available — matching the goals window", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gMount()); S.install(gFarm()); S.install(gCrests())
+		S.setPinned("g:crests", true)   -- crests jumps to the pinned section
+		local ids = {}
+		for _, g in ipairs(ns.Goals.Presenter.matrix({}).goals) do ids[#ids + 1] = g.id end
+		assert.same({ "g:crests", "g:mount", "g:farm" }, ids)
 	end)
 end)
 

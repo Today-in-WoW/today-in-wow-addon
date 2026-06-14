@@ -345,6 +345,10 @@ local function showExport(str)
 	exportFrame:Show()
 end
 
+-- Exposed so the goals window's per-goal Export button reuses this exact
+-- copy-paste popup (same style) instead of duplicating it.
+ns.showExport = showExport
+
 local function exportCmd(arg)
 	if arg == "clear" then
 		local n = (ns.Export and ns.Export.markExported()) or 0
@@ -512,8 +516,13 @@ local function goalCmd(arg)
 		startEngine()
 		ns.Goals.UIPanel.Toggle()
 	elseif sub == "matrix" then
-		startEngine()
-		ns.Goals.UIMatrix.Open()
+		-- Opens the main window's Account Completion tab (alias kept).
+		if ns.Goals.UIMain then
+			ns.Goals.UIMain.Open("matrix")
+		else
+			startEngine()
+			ns.Goals.UIMatrix.Open()
+		end
 	elseif sub == "eval" then
 		-- One-shot chat dump: print the next pass once, then return the render
 		-- seam to the panel (which also gets the same view-model).
@@ -583,7 +592,14 @@ SlashCmdList["TIW"] = function(msg)
 	end
 	msg = raw:lower()
 	local cmd, arg = msg:match("^(%S*)%s*(.-)$")
-	if msg == "debug" then
+	if msg == "" or msg == "goals" then
+		-- Bare /tiw restores the last-open tab; /tiw goals forces the Goals tab.
+		if ns.Goals and ns.Goals.UIMain then
+			ns.Goals.UIMain.Open(msg == "goals" and "goals" or nil)
+		else
+			out("main window not loaded")
+		end
+	elseif msg == "debug" then
 		debugReport()
 	elseif msg == "probe" then
 		probe()

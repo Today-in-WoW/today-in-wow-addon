@@ -51,8 +51,8 @@ local CONSENT_OPTIONS = {
 	{
 		value = "everything", label = "Everything",
 		desc = "Also shares your personal character sync (progress, collections, currencies) "
-			.. "AND the anonymous generic world contribution. This is required if you're using",
-			.. "the character tracking features on the site."
+			.. "AND the anonymous generic world contribution. This is required if you're using "
+			.. "the character tracking features on the site.",
 	},
 }
 
@@ -122,6 +122,22 @@ local function buildOptions()
 			false, getShown, setShown)
 		Settings.CreateCheckbox(category, setting,
 			"Show or hide the Today in WoW goal tracker.")
+	end
+
+	-- Goal window font size: a slider bound to the main window's step-list size.
+	if Settings.CreateSliderOptions and ns.Goals.UIMain then
+		local function getSize() return ns.Goals.UIMain.GetFontSize() end
+		local function setSize(v) ns.Goals.UIMain.SetFontSize(v) end
+		local setting = Settings.RegisterProxySetting(
+			category, "TIW_GOAL_FONT_SIZE",
+			Settings.VarType.Number, "Goal window font size",
+			ns.Goals.UIMain.GetFontSize(), getSize, setSize)
+		local options = Settings.CreateSliderOptions(9, 20, 1)
+		if MinimalSliderWithSteppersMixin then
+			options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+		end
+		Settings.CreateSlider(category, setting, options,
+			"Text size for the goal window's step lists.")
 	end
 
 	-- Layout lives in Edit Mode, not here.

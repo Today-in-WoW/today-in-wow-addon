@@ -44,6 +44,18 @@ function Store._bind()
 	ns.Goals.db = g
 end
 
+-- Next free display-order key: one past the current max across all state. New
+-- and section-moved goals land at the bottom; drag-reorder (setSectionOrder)
+-- renumbers a section 1..N. Order is a per-section sort key — values only need
+-- to be consistent within a section, since `ordered` sorts each independently.
+local function nextOrder()
+	local m = 0
+	for _, st in pairs(ns.Goals.db.state) do
+		if st.order and st.order > m then m = st.order end
+	end
+	return m + 1
+end
+
 -- Install a decoded goal. opts = { chars = "all" | { [charKey] = true } }
 -- (default "all"). Returns "installed" | "updated" | "unchanged", or nil, err.
 -- Marks unsupported step indices into state[id].unsupported via the Registry.
@@ -66,6 +78,7 @@ function Store.install(goal, opts)
 		pinned      = false,
 		chars       = (opts and opts.chars ~= nil) and opts.chars or "all",
 		unsupported = ns.Goals.Registry.unsupportedSteps(goal),
+		order       = nextOrder(),   -- bottom of its (available) section
 	}
 	return "installed"
 end
@@ -130,10 +143,16 @@ function Store.setActive(id, on)
 	return true
 end
 
+-- Single pin/unpin (shift-click). Moving sections lands the goal at the bottom
+-- of its new section (drag-reorder is the precise placement path).
 function Store.setPinned(id, on)
 	local st = ns.Goals.db.state[id]
 	if not st then return nil, "not installed" end
-	st.pinned = on and true or false
+	local want = on and true or false
+	if st.pinned ~= want then
+		st.pinned = want
+		st.order = nextOrder()
+	end
 	return true
 end
 
@@ -143,6 +162,44 @@ function Store.setChars(id, chars)
 	if not st then return nil, "not installed" end
 	st.chars = chars
 	return true
+end
+
+-- Drag-reorder / move: assign the given ids, in order, to the `pinned` section
+-- (renumbering them 1..N) and set their pinned flag to match — so this one call
+-- handles both within-section reordering and dragging a card across sections.
+-- Unknown ids are skipped. The window passes a section's full id list after a drag.
+function Store.setSectionOrder(pinned, orderedIds)
+	local db = ns.Goals.db
+	local want = pinned and true or false
+	for i = 1, #orderedIds do
+		local st = db.state[orderedIds[i]]
+		if st then
+			st.pinned = want
+			st.order = i
+		end
+	end
+	return true
+end
+
+-- Installed goals split into the two display sections, each sorted by `order`
+-- (id as tiebreak). The single source of display order for the goals window AND
+-- the matrix tab: { pinned = { {id, goal, state}, ... }, available = { ... } }.
+function Store.ordered()
+	local db = ns.Goals.db
+	local pinned, available = {}, {}
+	for id, goal in pairs(db.installed) do
+		local st = db.state[id]
+		local rec = { id = id, goal = goal, state = st }
+		if st.pinned then pinned[#pinned + 1] = rec else available[#available + 1] = rec end
+	end
+	local function cmp(a, b)
+		local oa, ob = a.state.order or math.huge, b.state.order or math.huge
+		if oa ~= ob then return oa < ob end
+		return a.id < b.id
+	end
+	table.sort(pinned, cmp)
+	table.sort(available, cmp)
+	return { pinned = pinned, available = available }
 end
 
 local f = CreateFrame("Frame")

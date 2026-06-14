@@ -154,6 +154,68 @@ describe("store list / get / remove / assignment", function()
 	end)
 end)
 
+describe("store ordering (display order for the goals window + matrix)", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	local function ids(list)
+		local o = {}
+		for _, rec in ipairs(list) do o[#o + 1] = rec.id end
+		return o
+	end
+
+	it("install lands goals at the bottom of the available section, in install order", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)   -- tiw:dev-mount
+		S.install(fixtures().crest_cap)       -- tiw:dev-crests
+		local ord = S.ordered()
+		assert.same({}, ids(ord.pinned))
+		assert.same({ "tiw:dev-mount", "tiw:dev-crests" }, ids(ord.available))
+	end)
+
+	it("setPinned moves a goal into the pinned section", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		S.install(fixtures().crest_cap)
+		S.setPinned("tiw:dev-crests", true)
+		local ord = S.ordered()
+		assert.same({ "tiw:dev-crests" }, ids(ord.pinned))
+		assert.same({ "tiw:dev-mount" }, ids(ord.available))
+	end)
+
+	it("setSectionOrder renumbers a section and sets the pinned flag (drag-reorder/move)", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		S.install(fixtures().crest_cap)
+		S.install(fixtures().invincible_farm)
+		S.setSectionOrder(true, { "tiw:dev-crests", "tiw:dev-mount" })   -- pin both, crests first
+		local ord = S.ordered()
+		assert.same({ "tiw:dev-crests", "tiw:dev-mount" }, ids(ord.pinned))
+		assert.is_true(S.get("tiw:dev-crests").state.pinned)
+		assert.same({ "tiw:dev-invincible" }, ids(ord.available))
+	end)
+
+	it("ordered() uses id as a tiebreak when order ties", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().crest_cap)
+		S.install(fixtures().mount_account)
+		S.get("tiw:dev-crests").state.order = 5
+		S.get("tiw:dev-mount").state.order = 5
+		assert.same({ "tiw:dev-crests", "tiw:dev-mount" }, ids(S.ordered().available))
+	end)
+
+	it("setSectionOrder skips unknown ids without error", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		assert.is_true(S.setSectionOrder(true, { "tiw:dev-mount", "tiw:nope" }))
+		assert.same({ "tiw:dev-mount" }, ids(S.ordered().pinned))
+	end)
+end)
+
 describe("store §6 sole-writer guard", function()
 	after_each(function() _G.TiWDB = nil end)
 

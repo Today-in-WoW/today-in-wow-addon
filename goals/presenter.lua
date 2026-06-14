@@ -144,65 +144,77 @@ local function currentEligible(goal)
 	return true
 end
 
--- The always-on panel. Returns { goals = { {
---   id, name, scope, state, done, total, progress?, max?,
---   steps = { { label, result }, ... },   -- index order, from flatVM
---   nextAlt,                               -- charKey | nil (perchar cross-char only)
--- }, ... } }  — pinned && active goals only, Store id order.
--- nextAlt = first OTHER known character that is assigned, eligible, and not yet
--- done for the goal (the "do it here next" nudge); nil for account goals, goals
--- with no such alt, or single-character setups.
+-- Shared per-goal view-model entry for the display surfaces. `rows` = the current
+-- character's flatVM rows for this goal; `goalDone` = goal-level `done` (live).
+-- Goal-level done completes the goal "regardless of per-character step state"
+-- (§2): when true, steps render struck (result forced done) so a done goal isn't
+-- an active checklist under a 1/1 header. nextAlt is added by the caller.
+local function goalEntry(goal, rows, goalDone)
+	local agg = aggregate(currentResults(rows), currentEligible(goal), goalDone)
+	local steps = {}
+	for i = 1, #(rows or {}) do
+		local def = goal.steps[rows[i].index] or {}
+		steps[i] = { label = rows[i].label,
+		             result = goalDone and { done = true } or rows[i].result,
+		             icon = def.icon, tooltip = def.tooltip }
+	end
+	return {
+		id = goal.id, name = goal.name, scope = goal.scope,
+		icon = goal.icon, tooltip = goal.tooltip,
+		state = agg.state, done = agg.done, total = agg.total,
+		progress = agg.progress, max = agg.max,
+		steps = steps,
+	}
+end
+
+-- First OTHER known character assigned, eligible, and not yet done for a perchar
+-- goal — the "do it here next" nudge. nil for account goals, an account-wide-done
+-- goal, or when no such character exists.
+local function nextAltFor(goal, st, goalDone, current)
+	if goal.scope == "account" or goalDone then return nil end
+	for _, key in ipairs(ns.Goals.Store.chars()) do
+		if key ~= current and isAssigned(st.chars, key) then
+			local g = ns.Goals.Offline.goalFor(key, goal)
+			if not g.noData and g.eligible and not offlineComplete(g) then
+				return key
+			end
+		end
+	end
+end
+
+-- The always-on panel. Returns { goals = { <goalEntry> + nextAlt, ... } } —
+-- pinned && active goals only, in display order (Store.ordered).
 function Presenter.pinned(flatVM)
-	local Store = ns.Goals.Store
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
 	local out = { goals = {} }
-
-	for _, rec in ipairs(Store.list()) do
-		local st = rec.state
-		if st.active and st.pinned then
+	for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
+		if rec.state.active then
 			local goal = rec.goal
-			local rows = byId[goal.id]
 			local goalDone = goalLevelDone(goal)
-			local agg = aggregate(currentResults(rows), currentEligible(goal), goalDone)
-
-			-- Goal-level `done` completes the goal "regardless of per-character step
-			-- state" (§2): when it's true the steps are moot, so they render struck
-			-- too — not an active checklist under a 1/1 header.
-			local steps = {}
-			for i = 1, #(rows or {}) do
-				local def = goal.steps[rows[i].index] or {}
-				steps[i] = { label = rows[i].label,
-				             result = goalDone and { done = true } or rows[i].result,
-				             icon = def.icon, tooltip = def.tooltip }
-			end
-
-			-- nextAlt: first OTHER assigned+eligible+not-done known char (id order);
-			-- nil for account goals, account-wide-done goals, or no candidate.
-			local nextAlt
-			if goal.scope ~= "account" and not goalDone then
-				for _, key in ipairs(Store.chars()) do
-					if key ~= current and isAssigned(st.chars, key) then
-						local g = ns.Goals.Offline.goalFor(key, goal)
-						if not g.noData and g.eligible and not offlineComplete(g) then
-							nextAlt = key
-							break
-						end
-					end
-				end
-			end
-
-			out.goals[#out.goals + 1] = {
-				id = goal.id, name = goal.name, scope = goal.scope,
-				icon = goal.icon, tooltip = goal.tooltip,
-				state = agg.state, done = agg.done, total = agg.total,
-				progress = agg.progress, max = agg.max,
-				steps = steps, nextAlt = nextAlt,
-			}
+			local entry = goalEntry(goal, byId[goal.id], goalDone)
+			entry.nextAlt = nextAltFor(goal, rec.state, goalDone, current)
+			out.goals[#out.goals + 1] = entry
 		end
 	end
-
 	return out
+end
+
+-- The goals window's two-section library, in display order (Store.ordered):
+-- { pinned = { <goalEntry>... }, available = { <goalEntry>... } }. Both sections
+-- carry full step detail for the right-hand detail panel; nextAlt is a
+-- pinned-panel concern, omitted here.
+function Presenter.library(flatVM)
+	local byId = groupByGoal(flatVM)
+	local ord = ns.Goals.Store.ordered()
+	local function section(recs)
+		local list = {}
+		for _, rec in ipairs(recs) do
+			list[#list + 1] = goalEntry(rec.goal, byId[rec.goal.id], goalLevelDone(rec.goal))
+		end
+		return list
+	end
+	return { pinned = section(ord.pinned), available = section(ord.available) }
 end
 
 -- The goals×characters grid. Returns {
@@ -218,11 +230,12 @@ function Presenter.matrix(flatVM)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
 
-	-- Active goals in Store id order.
+	-- Active goals in display order: pinned section first, then available, each by
+	-- arranged `order` — the same order as the goals window (Store.ordered).
 	local active = {}
-	for _, rec in ipairs(Store.list()) do
-		if rec.state.active then active[#active + 1] = rec end
-	end
+	local ord = Store.ordered()
+	for _, rec in ipairs(ord.pinned) do if rec.state.active then active[#active + 1] = rec end end
+	for _, rec in ipairs(ord.available) do if rec.state.active then active[#active + 1] = rec end end
 
 	-- Columns: current first, then id-sorted others. "Others" = every known
 	-- character (substrate keys) plus any charKey a goal is explicitly assigned

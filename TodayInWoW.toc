@@ -5,6 +5,8 @@
 ## Version: @project-version@
 ## SavedVariables: TiWDB
 ## X-Category: Data
+## AddonCompartmentFunc: TiW_OnAddonCompartment
+## IconTexture: 134400
 
 # Embedded libraries (export pipeline §8). LibStub first; LibDeflate registers into
 # it; AceSerializer needs it. Only core\export.lua consumes them.
@@ -44,6 +46,7 @@ goals\presenter.lua
 goals\ui_panel.lua
 goals\ui_matrix.lua
 goals\ui_options.lua
+goals\ui_main.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua
 goals\evaluators\currency.lua

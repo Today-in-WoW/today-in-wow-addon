@@ -611,6 +611,8 @@ end
 function Panel.render(flatVM)
 	lastFlat = flatVM or {}
 	if frame and frame:IsShown() then rebuild() end
+	-- Let the main window refresh its Goals/Account tabs off the same fresh pass.
+	if ns.Goals.UIMain and ns.Goals.UIMain.OnRender then ns.Goals.UIMain.OnRender() end
 end
 
 -- /tiw goal panel — show/hide the tracker.
