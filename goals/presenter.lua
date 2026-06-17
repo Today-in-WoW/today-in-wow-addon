@@ -53,6 +53,22 @@ local function currentKey()
 	return ns.Goals.Substrate.charKey()
 end
 
+-- Display metadata for a character column/row: name, realm, class token, level.
+-- The current character reads live; alts read their substrate meta.
+local function charMeta(key, isCurrent)
+	local name = key:match("^[^-]+") or key
+	local realm = key:match("%-(.+)$")
+	local class, level
+	if isCurrent then
+		class = select(2, UnitClass("player"))
+		level = UnitLevel("player")
+	else
+		local s = ns.Goals.Substrate.get(key)
+		if s and s.meta then class, level = s.meta.class, s.meta.level end
+	end
+	return name, realm, class, level
+end
+
 -- Goal-level `done` evaluated LIVE (charKey = nil) — account-wide truth that
 -- overrides any per-step state (e.g. the mount is already collected). false
 -- when the goal declares no `done`, the evaluator is unknown, or it reads stale.
@@ -257,8 +273,12 @@ function Presenter.matrix(flatVM)
 	for key in pairs(colSet) do others[#others + 1] = key end
 	table.sort(others)
 
-	local chars = { { key = current, current = true } }
-	for _, key in ipairs(others) do chars[#chars + 1] = { key = key } end
+	local cn, cr, cc, cl = charMeta(current, true)
+	local chars = { { key = current, current = true, name = cn, realm = cr, class = cc, level = cl } }
+	for _, key in ipairs(others) do
+		local n, r, c, l = charMeta(key, false)
+		chars[#chars + 1] = { key = key, name = n, realm = r, class = c, level = l }
+	end
 
 	-- Cells per goal × column.
 	local goals = {}

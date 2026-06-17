@@ -63,12 +63,15 @@ local DEFAULT_ICON = 134400     -- inv_misc_questionmark, per the brief
 local DEFAULT_FONT_SIZE = 13    -- detail step-list text size (Settings-adjustable)
 local MIN_FONT_SIZE, MAX_FONT_SIZE = 9, 20
 
--- Account Completion (matrix) grid metrics.
-local M_NAME_W = 150    -- frozen goal-name column width
-local M_COL_W  = 66     -- per-character column width
-local M_ROW_H  = 20     -- grid row height
-local M_HEAD_H = 38     -- frozen header row height
-local M_SB     = 12     -- scrollbar thickness (both axes)
+-- Completion Matrix grid metrics (characters down, goals across).
+local M_NAME_W = 196    -- frozen character column width (name + meta line)
+local M_COL_W  = 96     -- per-goal column width
+local M_ROW_H  = 58     -- character row height
+local M_HEAD_H = 64     -- frozen goal-header row height (icon + name)
+local M_SB     = 10     -- scrollbar thickness (both axes)
+local M_CHIP   = 32     -- completion chip size
+local M_HEADER = 64     -- title + subtitle band above the grid
+local M_LEGEND = 30     -- legend band below the grid
 
 -- Palette (the mockup's modern dark theme).
 local GOLD   = { 1, 0.82, 0.33 }     -- titles, active tab, selection
@@ -84,7 +87,7 @@ local FAINT  = { 1, 1, 1, 0.07 }     -- separators / dividers
 local LABEL_RULE = { LABEL[1], LABEL[2], LABEL[3], 0.25 }  -- header trailing line
 
 local TABS = { "goals", "matrix" }
-local TAB_LABEL = { goals = "Goals", matrix = "Account Completion" }
+local TAB_LABEL = { goals = "Goals", matrix = "Completion Matrix" }
 
 -- Goal-level status badge: aggregate state -> { text, color }.
 local BADGE = {
@@ -109,6 +112,17 @@ local CHAR_STATUS = {
 local CHAR_MARK = {
 	done    = "|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t ",
 	partial = "|TInterface\\COMMON\\Indicator-Yellow:10:10|t ",
+}
+
+-- Completion-matrix cell chip per state: a tinted, bordered square with a marker.
+-- `mark` selects the centered glyph; nil def = an empty (unassigned) cell.
+local CELL = {
+	done       = { mark = "check", bg = { 0.16, 0.30, 0.16, 0.55 }, edge = { 0.40, 0.70, 0.40, 0.85 } },
+	partial    = { mark = "dot",   bg = { 0.34, 0.26, 0.07, 0.55 }, edge = { 0.85, 0.65, 0.20, 0.85 } },
+	todo       = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
+	stale      = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
+	nodata     = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
+	ineligible = { mark = "lock",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.08 } },
 }
 
 local function hex(c)
@@ -159,9 +173,7 @@ local function footerVersion()
 	elseif GetAddOnMetadata then
 		v = GetAddOnMetadata("TodayInWoW", "Version")
 	end
-	-- Ignore the unsubstituted "@project-version@" token in unpackaged dev builds.
-	if v and v:find("@", 1, true) then v = nil end
-	return "TODAY IN WOW" .. (v and ("  \226\128\162  V" .. v) or "")
+	return "Today in WoW" .. (v and ("  \226\128\162  v" .. v) or "")
 end
 
 -- ---------------------------------------------------------------------------
@@ -238,7 +250,7 @@ local function makeImportButton(parent)
 
 	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	label:SetPoint("CENTER")
-	label:SetText("+  IMPORT GOAL")
+	label:SetText("+  Import Goal")
 	label:SetTextColor(1, 0.88, 0.62)
 
 	b:SetScript("OnEnter", function() b:SetBackdropBorderColor(1, 0.5, 0.4, 1); label:SetTextColor(1, 0.95, 0.78) end)
@@ -896,21 +908,106 @@ function refreshGoals()
 end
 
 -- ---------------------------------------------------------------------------
--- Account Completion tab (matrix) — unchanged frozen-header grid.
+-- Completion Matrix tab — characters down the left (class-colored, with a
+-- level/class/realm meta line), goals across the top (icon + name), a chip per
+-- cell for completion state. Frozen header row + character column (three synced
+-- ScrollFrames). Hovering a character row highlights it.
 -- ---------------------------------------------------------------------------
-local function shortName(key)
-	return key:match("^[^-]+") or key
+
+-- Trim text to a pixel width, adding "..." (column-header / name fitting).
+local function fitText(fs, text, maxW)
+	fs:SetText(text)
+	if fs:GetStringWidth() <= maxW or #text <= 1 then return end
+	while #text > 1 do
+		text = text:sub(1, #text - 1)
+		fs:SetText(text .. "...")
+		if fs:GetStringWidth() <= maxW then return end
+	end
 end
 
-local function cellGlyph(c)
-	if not c then return "" end
-	local s = c.state
-	if s == "done" then return "|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t" end
-	if s == "partial" then return "|cffffd100" .. tostring(c.done) .. "/" .. tostring(c.total) .. "|r" end
-	if s == "todo" then return "|cff9d9d9d\226\128\147|r" end
-	if s == "ineligible" then return "|cff707070n/a|r" end
-	if s == "nodata" then return "|cff707070?|r" end
-	return ""
+-- A completion chip: tinted bordered square + centered marker (texture or dash).
+local function newChip(parent)
+	local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+	f:SetSize(M_CHIP, M_CHIP)
+	f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	local tex = f:CreateTexture(nil, "ARTWORK"); tex:SetPoint("CENTER"); f.tex = tex
+	local dash = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	dash:SetPoint("CENTER", 0, 1); dash:SetText("\226\128\148"); dash:SetTextColor(0.5, 0.5, 0.5)
+	f.dash = dash
+	return f
+end
+
+local function styleChip(f, state)
+	local def = CELL[state]
+	if not def then f:Hide(); return end
+	f:Show()
+	f:SetBackdropColor(def.bg[1], def.bg[2], def.bg[3], def.bg[4])
+	f:SetBackdropBorderColor(def.edge[1], def.edge[2], def.edge[3], def.edge[4])
+	if def.mark == "dash" then
+		f.tex:Hide(); f.dash:Show()
+	else
+		f.dash:Hide(); f.tex:Show()
+		if def.mark == "check" then
+			f.tex:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready"); f.tex:SetSize(18, 18); f.tex:SetVertexColor(1, 1, 1)
+		elseif def.mark == "dot" then
+			f.tex:SetTexture("Interface\\COMMON\\Indicator-Yellow"); f.tex:SetSize(12, 12); f.tex:SetVertexColor(1, 1, 1)
+		elseif def.mark == "lock" then
+			f.tex:SetTexture("Interface\\LFGFrame\\UI-LFG-ICON-LOCK"); f.tex:SetSize(15, 15); f.tex:SetVertexColor(0.7, 0.7, 0.7)
+		end
+	end
+end
+
+-- Row hover: highlight the character row (frozen header + body) under the mouse.
+local function setRowHover(i)
+	local M = frame and frame.matrix
+	if not M or M.hoverRow == i then return end
+	if M.hoverRow and M.rows[M.hoverRow] then
+		M.rows[M.hoverRow].headHi:Hide(); M.rows[M.hoverRow].bodyHi:Hide()
+	end
+	M.hoverRow = i
+	if i and M.rows[i] then M.rows[i].headHi:Show(); M.rows[i].bodyHi:Show() end
+end
+
+-- A pooled matrix row: a frozen character-header button (name + meta) and a body
+-- button holding the row's chips; both highlight the row on hover.
+local function newMatrixRow(M)
+	local head = CreateFrame("Button", nil, M.rowChild)
+	local headHi = head:CreateTexture(nil, "BACKGROUND")
+	headHi:SetAllPoints(); headHi:SetColorTexture(1, 1, 1, 0.05); headHi:Hide()
+	local name = head:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	name:SetPoint("TOPLEFT", 8, -9); name:SetPoint("RIGHT", head, "RIGHT", -6, 0)
+	name:SetJustifyH("LEFT"); name:SetWordWrap(false)
+	local meta = head:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	meta:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -3); meta:SetPoint("RIGHT", head, "RIGHT", -6, 0)
+	meta:SetJustifyH("LEFT"); meta:SetWordWrap(false); meta:SetTextColor(0.5, 0.5, 0.5)
+	local rule = head:CreateTexture(nil, "ARTWORK")
+	rule:SetPoint("BOTTOMLEFT", 4, 0); rule:SetPoint("BOTTOMRIGHT", -2, 0)
+	rule:SetHeight(1); rule:SetColorTexture(1, 1, 1, 0.03)
+	head:SetScript("OnEnter", function(self) setRowHover(self.idx) end)
+	head:SetScript("OnLeave", function() setRowHover(nil) end)
+
+	local body = CreateFrame("Button", nil, M.bodyChild)
+	local bodyHi = body:CreateTexture(nil, "BACKGROUND")
+	bodyHi:SetAllPoints(); bodyHi:SetColorTexture(1, 1, 1, 0.05); bodyHi:Hide()
+	body:SetScript("OnEnter", function(self) setRowHover(self.idx) end)
+	body:SetScript("OnLeave", function() setRowHover(nil) end)
+
+	return { head = head, headHi = headHi, name = name, meta = meta,
+	         body = body, bodyHi = bodyHi, chips = {} }
+end
+
+-- "Lv 80 Mage • Stormrage" from a matrix char column.
+local function charMetaLine(col)
+	local out = col.level and ("Lv " .. col.level) or ""
+	if col.class then
+		local cn = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[col.class]) or col.class
+		out = out ~= "" and (out .. " " .. cn) or cn
+	end
+	if col.realm then
+		out = out ~= "" and (out .. " \226\128\162 " .. col.realm) or col.realm
+	end
+	return out
 end
 
 local function makeMatrixSlider(parent, orient)
@@ -952,61 +1049,67 @@ local function refreshMatrix()
 	local M = frame and frame.matrix
 	if not M then return end
 	local vm = ns.Goals.Presenter.matrix(ns.Goals.UIPanel.lastFlat())
+	setRowHover(nil)
 
+	local contentW = math.max(1, #vm.goals * M_COL_W)
+	local contentH = math.max(1, #vm.chars * M_ROW_H)
+
+	-- Goal column headers: icon + truncated uppercase name.
 	local cn = 0
-	for ci, col in ipairs(vm.chars) do
+	for ci, g in ipairs(vm.goals) do
 		cn = cn + 1
-		local fs = M.colCells[cn]
-		if not fs then
-			fs = M.colChild:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-			fs:SetJustifyH("CENTER"); fs:SetWordWrap(false)
-			M.colCells[cn] = fs
+		local h = M.cols[cn]
+		if not h then
+			h = CreateFrame("Frame", nil, M.colChild)
+			h.ib = h:CreateTexture(nil, "BORDER"); h.ib:SetColorTexture(0.30, 0.28, 0.26, 0.9)
+			h.ib:SetSize(36, 36)
+			h.icon = h:CreateTexture(nil, "ARTWORK"); h.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+			h.icon:SetSize(34, 34); h.icon:SetPoint("TOP", 0, -7)
+			h.ib:SetPoint("CENTER", h.icon, "CENTER")
+			h.name = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+			h.name:SetPoint("TOP", h.icon, "BOTTOM", 0, -5); h.name:SetJustifyH("CENTER"); h.name:SetWordWrap(false)
+			h.name:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+			M.cols[cn] = h
 		end
-		fs:ClearAllPoints()
-		fs:SetPoint("TOPLEFT", (ci - 1) * M_COL_W, -12)
-		fs:SetWidth(M_COL_W)
-		local nm = shortName(col.key)
-		fs:SetText(col.current and ("|cffffd100" .. nm .. "|r") or ("|cffe6e6e6" .. nm .. "|r"))
-		fs:Show()
+		h:SetSize(M_COL_W, M_HEAD_H)
+		h:ClearAllPoints(); h:SetPoint("TOPLEFT", (ci - 1) * M_COL_W, 0)
+		h.icon:SetTexture(g.icon or DEFAULT_ICON)
+		fitText(h.name, g.name or "", M_COL_W - 10)
+		h:Show()
 	end
-	for i = cn + 1, #M.colCells do M.colCells[i]:Hide() end
+	for i = cn + 1, #M.cols do M.cols[i]:Hide() end
 
-	local rn, bn = 0, 0
-	for ri, g in ipairs(vm.goals) do
-		local y = -((ri - 1) * M_ROW_H) - 3
+	-- Character rows: frozen header (name + meta) + body chips.
+	local rn = 0
+	for ri, col in ipairs(vm.chars) do
 		rn = rn + 1
-		local rfs = M.rowCells[rn]
-		if not rfs then
-			rfs = M.rowChild:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-			rfs:SetJustifyH("LEFT"); rfs:SetWordWrap(false)
-			M.rowCells[rn] = rfs
-		end
-		rfs:ClearAllPoints()
-		rfs:SetPoint("TOPLEFT", 6, y)
-		rfs:SetWidth(M_NAME_W - 10)
-		rfs:SetText("|cffffd100" .. tostring(g.name) .. "|r")
-		rfs:Show()
+		local row = M.rows[rn]
+		if not row then row = newMatrixRow(M); M.rows[rn] = row end
+		local y = -((ri - 1) * M_ROW_H)
 
-		for ci, col in ipairs(vm.chars) do
-			bn = bn + 1
-			local fs = M.cells[bn]
-			if not fs then
-				fs = M.bodyChild:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-				fs:SetJustifyH("CENTER"); fs:SetWordWrap(false)
-				M.cells[bn] = fs
-			end
-			fs:ClearAllPoints()
-			fs:SetPoint("TOPLEFT", (ci - 1) * M_COL_W, y)
-			fs:SetWidth(M_COL_W)
-			fs:SetText(cellGlyph(g.cells[col.key]))
-			fs:Show()
+		row.head.idx, row.body.idx = ri, ri
+		row.head:ClearAllPoints(); row.head:SetPoint("TOPLEFT", 0, y); row.head:SetSize(M_NAME_W, M_ROW_H)
+		local cr, cg, cb = classRGB(col.class)
+		fitText(row.name, col.name, M_NAME_W - 14); row.name:SetTextColor(cr, cg, cb)
+		row.meta:SetText(charMetaLine(col))
+		row.headHi:Hide()
+		row.head:Show()
+
+		row.body:ClearAllPoints(); row.body:SetPoint("TOPLEFT", 0, y); row.body:SetSize(contentW, M_ROW_H)
+		row.bodyHi:Hide()
+		row.body:Show()
+		for ci, g in ipairs(vm.goals) do
+			local chip = row.chips[ci]
+			if not chip then chip = newChip(row.body); row.chips[ci] = chip end
+			chip:ClearAllPoints()
+			chip:SetPoint("LEFT", (ci - 1) * M_COL_W + (M_COL_W - M_CHIP) / 2, 0)
+			local cell = g.cells[col.key]
+			styleChip(chip, cell and cell.state)
 		end
+		for j = #vm.goals + 1, #row.chips do row.chips[j]:Hide() end
 	end
-	for i = rn + 1, #M.rowCells do M.rowCells[i]:Hide() end
-	for i = bn + 1, #M.cells do M.cells[i]:Hide() end
+	for i = rn + 1, #M.rows do M.rows[i].head:Hide(); M.rows[i].body:Hide() end
 
-	local contentW = math.max(1, #vm.chars * M_COL_W)
-	local contentH = math.max(1, #vm.goals * M_ROW_H)
 	M.colChild:SetSize(contentW, M_HEAD_H)
 	M.rowChild:SetSize(M_NAME_W, contentH)
 	M.bodyChild:SetSize(contentW, contentH)
@@ -1014,7 +1117,7 @@ local function refreshMatrix()
 	updateAxis(M.vScroll, M.thumbV, M.bodySF:GetHeight(), contentH)
 	updateAxis(M.hScroll, M.thumbH, M.bodySF:GetWidth(), contentW)
 
-	M.empty:SetShown(#vm.goals == 0)
+	M.empty:SetShown(#vm.goals == 0 or #vm.chars == 0)
 end
 
 local function refreshActive()
@@ -1330,41 +1433,52 @@ local function buildGoalsTab(pane)
 	frame.goals = G
 end
 
--- Account Completion grid (unchanged): frozen corner/header backgrounds, three
--- ScrollFrames, two sliders driving body + frozen headers in lock-step.
+-- Completion Matrix grid: title/subtitle band, frozen "Character" corner + goal
+-- header row + character column (three synced ScrollFrames + two sliders), and a
+-- legend along the bottom.
 local function buildMatrixTab(pane)
 	local M = {}
 
+	local title = pane:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("TOPLEFT", 2, -2)
+	title:SetFont("Fonts\\MORPHEUS.ttf", 22, "")
+	title:SetText("Completion Matrix"); title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	local sub = pane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -4)
+	do local sf, _, sfl = sub:GetFont(); sub:SetFont(sf, 12, sfl) end
+	sub:SetText("Every tracked goal across every character on your account.")
+	sub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+
+	local topY = -M_HEADER
+	local botY = M_LEGEND + M_SB
+
 	local cornerBg = pane:CreateTexture(nil, "BACKGROUND")
-	cornerBg:SetColorTexture(0, 0, 0, 0.35)
-	cornerBg:SetPoint("TOPLEFT", 0, 0); cornerBg:SetSize(M_NAME_W, M_HEAD_H)
+	cornerBg:SetColorTexture(1, 1, 1, 0.03)
+	cornerBg:SetPoint("TOPLEFT", 0, topY); cornerBg:SetSize(M_NAME_W, M_HEAD_H)
 	local colBg = pane:CreateTexture(nil, "BACKGROUND")
-	colBg:SetColorTexture(0, 0, 0, 0.25)
-	colBg:SetPoint("TOPLEFT", M_NAME_W, 0); colBg:SetPoint("TOPRIGHT", -M_SB, 0); colBg:SetHeight(M_HEAD_H)
-	local rowBg = pane:CreateTexture(nil, "BACKGROUND")
-	rowBg:SetColorTexture(0, 0, 0, 0.25)
-	rowBg:SetPoint("TOPLEFT", 0, -M_HEAD_H); rowBg:SetPoint("BOTTOMLEFT", 0, M_SB); rowBg:SetWidth(M_NAME_W)
+	colBg:SetColorTexture(1, 1, 1, 0.03)
+	colBg:SetPoint("TOPLEFT", M_NAME_W, topY); colBg:SetPoint("TOPRIGHT", -M_SB, topY); colBg:SetHeight(M_HEAD_H)
 
 	local corner = pane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	corner:SetPoint("LEFT", cornerBg, "LEFT", 6, 0)
-	corner:SetText("Goal"); corner:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	corner:SetPoint("LEFT", cornerBg, "LEFT", 8, 0)
+	corner:SetText("Character"); corner:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
 
 	local colSF = CreateFrame("ScrollFrame", nil, pane)
-	colSF:SetPoint("TOPLEFT", M_NAME_W, 0); colSF:SetPoint("TOPRIGHT", -M_SB, 0); colSF:SetHeight(M_HEAD_H)
+	colSF:SetPoint("TOPLEFT", M_NAME_W, topY); colSF:SetPoint("TOPRIGHT", -M_SB, topY); colSF:SetHeight(M_HEAD_H)
 	local colChild = CreateFrame("Frame", nil, colSF); colChild:SetSize(1, M_HEAD_H); colSF:SetScrollChild(colChild)
 
 	local rowSF = CreateFrame("ScrollFrame", nil, pane)
-	rowSF:SetPoint("TOPLEFT", 0, -M_HEAD_H); rowSF:SetPoint("BOTTOMLEFT", 0, M_SB); rowSF:SetWidth(M_NAME_W)
+	rowSF:SetPoint("TOPLEFT", 0, topY - M_HEAD_H); rowSF:SetPoint("BOTTOMLEFT", 0, botY); rowSF:SetWidth(M_NAME_W)
 	local rowChild = CreateFrame("Frame", nil, rowSF); rowChild:SetSize(M_NAME_W, 1); rowSF:SetScrollChild(rowChild)
 
 	local bodySF = CreateFrame("ScrollFrame", nil, pane)
-	bodySF:SetPoint("TOPLEFT", M_NAME_W, -M_HEAD_H); bodySF:SetPoint("BOTTOMRIGHT", -M_SB, M_SB)
+	bodySF:SetPoint("TOPLEFT", M_NAME_W, topY - M_HEAD_H); bodySF:SetPoint("BOTTOMRIGHT", -M_SB, botY)
 	local bodyChild = CreateFrame("Frame", nil, bodySF); bodyChild:SetSize(1, 1); bodySF:SetScrollChild(bodyChild)
 
 	local vS, thumbV = makeMatrixSlider(pane, "VERTICAL")
-	vS:SetPoint("TOPRIGHT", 0, -M_HEAD_H); vS:SetPoint("BOTTOMRIGHT", 0, M_SB)
+	vS:SetPoint("TOPRIGHT", 0, topY - M_HEAD_H); vS:SetPoint("BOTTOMRIGHT", 0, botY)
 	local hS, thumbH = makeMatrixSlider(pane, "HORIZONTAL")
-	hS:SetPoint("BOTTOMLEFT", M_NAME_W, 0); hS:SetPoint("BOTTOMRIGHT", -M_SB, 0)
+	hS:SetPoint("BOTTOMLEFT", M_NAME_W, M_LEGEND); hS:SetPoint("BOTTOMRIGHT", -M_SB, M_LEGEND)
 
 	vS.apply = function(v) bodySF:SetVerticalScroll(v); rowSF:SetVerticalScroll(v) end
 	hS.apply = function(v) bodySF:SetHorizontalScroll(v); colSF:SetHorizontalScroll(v) end
@@ -1382,9 +1496,18 @@ local function buildMatrixTab(pane)
 		end
 	end)
 
+	-- Legend (inline markers + grey labels).
+	local legend = pane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	legend:SetPoint("BOTTOMLEFT", 2, 8)
+	legend:SetText(
+		"|TInterface\\RaidFrame\\ReadyCheck-Ready:13:13|t COMPLETE     "
+		.. "|TInterface\\COMMON\\Indicator-Yellow:11:11|t IN PROGRESS     "
+		.. "|cff808080\226\128\148|r NOT STARTED     "
+		.. "|TInterface\\LFGFrame\\UI-LFG-ICON-LOCK:13:13|t LOCKED")
+
 	local empty = pane:CreateFontString(nil, "OVERLAY", "GameFontDisable")
 	empty:SetPoint("CENTER")
-	empty:SetText("No active goals to compare.")
+	empty:SetText("No goals to compare yet.")
 	empty:Hide()
 
 	M.colSF, M.colChild = colSF, colChild
@@ -1392,7 +1515,8 @@ local function buildMatrixTab(pane)
 	M.bodySF, M.bodyChild = bodySF, bodyChild
 	M.vScroll, M.thumbV = vS, thumbV
 	M.hScroll, M.thumbH = hS, thumbH
-	M.colCells, M.rowCells, M.cells = {}, {}, {}
+	M.cols, M.rows = {}, {}
+	M.hoverRow = nil
 	M.empty = empty
 	frame.matrix = M
 end
@@ -1524,7 +1648,7 @@ local function build()
 
 	local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	hint:SetPoint("BOTTOMRIGHT", -PANE_PAD, 8)
-	hint:SetText("DRAG ICONS TO REORDER  \226\128\162  SHIFT+CLICK TO PIN")
+	hint:SetText("Drag icons to reorder  \226\128\162  Shift+click to pin")
 	hint:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
 
 	-- Content panes (between the top bar and the footer).

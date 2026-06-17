@@ -451,6 +451,20 @@ describe("Presenter.matrix — axes", function()
 		assert.equal(ME, vm.chars[1].key)
 	end)
 
+	it("columns carry display meta: name, realm, class, level", function()
+		local ns = harness()
+		ns.Goals.Store.install(gCrests())
+		seedAlt(ns, "Abe-Realm", { level = 70 })
+		local vm = ns.Goals.Presenter.matrix({})
+		assert.equal("Main", vm.chars[1].name)
+		assert.equal("Realm", vm.chars[1].realm)
+		assert.equal("MAGE", vm.chars[1].class)   -- live UnitClass stub
+		assert.equal(80, vm.chars[1].level)
+		assert.equal("Abe", vm.chars[2].name)
+		assert.equal("MAGE", vm.chars[2].class)   -- substrate meta.class
+		assert.equal(70, vm.chars[2].level)
+	end)
+
 	it("goals follow display order (install order when unarranged)", function()
 		local ns = harness()
 		local S = ns.Goals.Store
