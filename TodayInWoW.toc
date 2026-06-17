@@ -1,12 +1,13 @@
-## Interface: 120000
+## Interface: 120007
 ## Title: Today in WoW
 ## Notes: Collects world & character data for Today in WoW (todayinwow.com).
 ## Author: Today in WoW
 ## Version: @project-version@
 ## SavedVariables: TiWDB
 ## X-Category: Data
+## X-Curse-Project-ID: 1575811
 ## AddonCompartmentFunc: TiW_OnAddonCompartment
-## IconTexture: 134400
+## IconTexture: Interface\AddOns\TodayInWoW\TodayInWoW
 
 # Embedded libraries (export pipeline §8). LibStub first; LibDeflate registers into
 # it; AceSerializer needs it. Only core\export.lua consumes them.
