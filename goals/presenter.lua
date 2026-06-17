@@ -156,11 +156,13 @@ local function goalEntry(goal, rows, goalDone)
 		local def = goal.steps[rows[i].index] or {}
 		steps[i] = { label = rows[i].label,
 		             result = goalDone and { done = true } or rows[i].result,
-		             icon = def.icon, tooltip = def.tooltip }
+		             icon = def.icon, tooltip = def.tooltip,
+		             note = def.note, resets = def.resets }
 	end
 	return {
 		id = goal.id, name = goal.name, scope = goal.scope,
 		icon = goal.icon, tooltip = goal.tooltip,
+		category = goal.category, desc = goal.desc,
 		state = agg.state, done = agg.done, total = agg.total,
 		progress = agg.progress, max = agg.max,
 		steps = steps,
@@ -296,6 +298,75 @@ function Presenter.matrix(flatVM)
 	end
 
 	return { chars = chars, goals = goals }
+end
+
+-- Per-goal character progress for the detail panel (the matrix narrowed to ONE
+-- goal): every character this goal is assigned to, current first then id-sorted,
+-- each carrying { key, name, realm, class, current, state, done, total }. class
+-- (token, e.g. "MAGE") drives the class-color of the name — live UnitClass for
+-- the current character, substrate meta.class for alts. Account-scope goals
+-- broadcast the one account-wide answer to every column (same rule as matrix).
+-- Empty for an unknown goal id.
+function Presenter.goalChars(flatVM, goalId)
+	local Store = ns.Goals.Store
+	local rec = Store.get(goalId)
+	if not rec then return {} end
+	local goal, st = rec.goal, rec.state
+	local current = currentKey()
+	local byId = groupByGoal(flatVM)
+	local goalDone = goalLevelDone(goal)
+	local currentCell = aggregate(currentResults(byId[goalId]), currentEligible(goal), goalDone)
+
+	-- Assigned columns: current first (when assigned), then id-sorted others —
+	-- known substrate characters plus any explicitly-assigned-but-unseen alt.
+	local seen = {}
+	local others = {}
+	local function consider(key)
+		if key == current or seen[key] or not isAssigned(st.chars, key) then return end
+		seen[key] = true
+		others[#others + 1] = key
+	end
+	for _, key in ipairs(Store.chars()) do consider(key) end
+	if type(st.chars) == "table" then
+		for key in pairs(st.chars) do consider(key) end
+	end
+	table.sort(others)
+
+	local cols = {}
+	if isAssigned(st.chars, current) then cols[#cols + 1] = current end
+	for _, key in ipairs(others) do cols[#cols + 1] = key end
+
+	local out = {}
+	for _, key in ipairs(cols) do
+		local cell
+		if key == current or goal.scope == "account" then
+			cell = currentCell
+		else
+			local g = ns.Goals.Offline.goalFor(key, goal)
+			if g.noData then
+				cell = { state = "nodata" }
+			else
+				local results = {}
+				for _, r in ipairs(g.steps) do
+					if not r.ineligible then results[#results + 1] = r.result end
+				end
+				cell = aggregate(results, g.eligible, goalDone)
+			end
+		end
+		local class
+		if key == current then
+			class = select(2, UnitClass("player"))
+		else
+			local sub = ns.Goals.Substrate.get(key)
+			class = sub and sub.meta and sub.meta.class
+		end
+		out[#out + 1] = {
+			key = key, name = key:match("^[^-]+") or key, realm = key:match("%-(.+)$"),
+			class = class, current = (key == current),
+			state = cell.state, done = cell.done, total = cell.total,
+		}
+	end
+	return out
 end
 
 return ns

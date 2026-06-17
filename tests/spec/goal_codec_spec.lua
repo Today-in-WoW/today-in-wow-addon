@@ -91,6 +91,33 @@ describe("goal codec §1 encoding", function()
 		assert.equal("Drops from the final boss.", back.steps[1].tooltip)
 	end)
 
+	it("accepts optional goal desc + category strings, round-tripping (§2)", function()
+		local Codec = loadCodec()
+		local goal = fixtures().mount_account
+		goal.desc = "Arthas' beloved steed, raised into undeath."
+		goal.category = "Icecrown Citadel • Mount"
+		local back = Codec.decode(assert(Codec.encode(goal)))
+		assert.equal("Arthas' beloved steed, raised into undeath.", back.desc)
+		assert.equal("Icecrown Citadel • Mount", back.category)
+	end)
+
+	it("rejects a non-string desc or category (§2)", function()
+		local Codec = loadCodec()
+		for _, mutate in ipairs({
+			function(g) g.desc = 5 end,
+			function(g) g.category = {} end,
+		}) do
+			local goal = fixtures().mount_account
+			mutate(goal)
+			local ok, err = Codec.encode(goal)
+			assert.is_nil(ok)
+			assert.is_string(err)
+			local got, derr = Codec.decode(rawEncode(goal))
+			assert.is_nil(got)
+			assert.is_string(derr)
+		end
+	end)
+
 	it("rejects a non-number icon and non-string tooltip, at goal and step level (§2/§3)", function()
 		local Codec = loadCodec()
 		local cases = {

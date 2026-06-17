@@ -41,6 +41,9 @@ read_globals = {
 	"GameTooltip",                              -- goal/step icon hover tooltips (ui_panel)
 	"IsShiftKeyDown",                           -- shift-click a goal header to unpin (ui_panel)
 	"GetCursorPosition",                        -- card drag-and-drop reordering (ui_main)
+	"RAID_CLASS_COLORS",                        -- class-colored character progress (ui_main)
+	"CreateColor",                              -- gradient backdrop/buttons (ui_main)
+	"C_AddOns", "GetAddOnMetadata",             -- version string in the window footer (ui_main)
 	"debugprofilestop",                         -- login-timing breadcrumbs (ns.dbg)
 	-- Options panel + consent prompt (ui_options): modern Settings API and the
 	-- StaticPopup_Show the first-login consent prompt calls.

@@ -3,22 +3,27 @@ local _, ns = ...
 -- ===========================================================================
 -- goals/ui_main.lua  ·  the main addon window (contest-roadmap §6 display)
 --
--- A tabbed, Shop-styled frame opened by /tiw and the AddOn Compartment button.
--- Two tabs — "Goals" and "Account Completion" — switch between content panes.
--- Dark Blizzard_StoreUI-like backdrop with a gold border (the Store look,
--- rebuilt — Blizzard_StoreUI is restricted). Movable; Escape closes it.
+-- A frameless, dark, custom-styled window opened by /tiw and the AddOn
+-- Compartment button. Two tabs — "Goals" and "Account Completion". Movable,
+-- resizable, Escape closes it. NOT a Blizzard-bordered frame: a custom dark
+-- panel with a subtle top gradient and 1px edge (the modern-addon look), built
+-- to resemble the reference mockup rather than the default UI.
 --
---   Goals tab (M2): left half is a scrollable card grid in two labeled sections
---   ("Pinned Goals" / "Available Goals") from Presenter.library(lastFlat); right
---   half is the selected goal's detail (icon/name header, step list, Export +
---   Remove). A header "Import Goal" button opens a paste/validate/import modal.
---   Click a card to select; shift-click to move it across sections (setPinned).
+--   Goals tab: a left "Active Pursuits" column — pinned goals as an icon grid,
+--   available goals as a metadata list (icon + name + category) — and a right
+--   detail panel: goal name, category breadcrumb, status badge, flavor
+--   description, the step checklist (accent bars + markers), and per-character
+--   progress (class-colored). A red "Import Goal" button opens a paste/validate
+--   /import modal; Export + Remove sit in the detail footer. Click a card/row to
+--   select; shift-click to move it across sections; drag to reorder or move.
 --
--- Built lazily on first Open (in-game only), like ui_matrix: requiring this file
--- headless defines only functions + the compartment global and never touches a
--- frame API (no file-scope CreateFrame) — every frame call lives inside build(),
--- which the slash hub / compartment / Panel hook reach only after login. The
--- last-open tab and the window position persist in TiWDB.settings.window.
+--   Account Completion tab: Presenter.matrix as a frozen-header goals×characters
+--   grid (unchanged from the prior milestone).
+--
+-- Built lazily on first Open (in-game only): requiring this file headless defines
+-- only functions + the compartment global and never touches a frame API. The
+-- last-open tab, window position, size, and detail font size persist in
+-- TiWDB.settings.window.
 -- ===========================================================================
 
 ns.Goals = ns.Goals or {}
@@ -31,24 +36,29 @@ local selectTab             -- forward declaration (build wires tab OnClick to i
 -- Goals-tab state + forward declarations (assigned below; closures capture them).
 local selectedId            -- currently selected goal id (persists across refresh)
 local libCache              -- { byId = { [id] = entry } } from the last library()
-local cards, cardN = {}, 0  -- pooled card buttons + per-refresh cursor
-local cardParent            -- the scroll child the cards live under
-local LEFT_W                -- left (card-grid) region width, computed in build
+local gridCards, gridN = {}, 0   -- pooled pinned icon cards
+local listRows, listN = {}, 0    -- pooled available list rows
+local cardParent            -- the scroll child the cards/rows live under
+local LEFT_W                -- left (Active Pursuits) region width, computed live
 local refreshGoals, selectGoal, renderDetail
-local onCardDragStart, onCardDragStop   -- assigned below; newCard wires them
-local dragState             -- active card drag { id, pinned }, or nil
+local onItemDragStart, onItemDragStop   -- assigned below; builders wire them
+local dragState             -- active drag { id, pinned }, or nil
 local importFrame           -- import modal, built on first use
 
-local WIDTH, HEIGHT = 720, 520
-local TITLE_H = 32          -- centered-title band height
-local TAB_H = 30            -- tab button height
-local PANE_PAD = 12         -- inner padding around the content panes
+local WIDTH, HEIGHT = 900, 600
+local TOPBAR_H = 48         -- tab/import/close band height
+local FOOTER_H = 26         -- version + hint band height
+local PANE_PAD = 16         -- inner padding around the content panes
+local LEFT_FRAC = 0.46      -- left column share of the content width
 
-local CARD_W, CARD_H = 72, 86   -- card footprint
-local CARD_ICON = 42            -- card icon size
-local CARD_GAP = 8              -- gap between cards / grid pitch addend
-local SEC_LABEL_H = 22          -- section-label row height
-local SCROLL_STEP = 28          -- pixels per mouse-wheel notch
+local GRID_W, GRID_H = 78, 92   -- pinned icon-card footprint
+local GRID_ICON = 50            -- pinned icon size
+local GRID_GAP = 10             -- gap between cards
+local ROW_H = 50                -- available list-row height
+local ROW_ICON = 38             -- available list-row icon size
+local ROW_GAP = 4               -- gap between list rows
+local SEC_LABEL_H = 26          -- section-label row height
+local SCROLL_STEP = 32          -- pixels per mouse-wheel notch
 local DEFAULT_ICON = 134400     -- inv_misc_questionmark, per the brief
 local DEFAULT_FONT_SIZE = 13    -- detail step-list text size (Settings-adjustable)
 local MIN_FONT_SIZE, MAX_FONT_SIZE = 9, 20
@@ -60,15 +70,59 @@ local M_ROW_H  = 20     -- grid row height
 local M_HEAD_H = 38     -- frozen header row height
 local M_SB     = 12     -- scrollbar thickness (both axes)
 
--- Shop accents: bright gold (selected/rules), muted tan (resting tabs).
-local GOLD = { 1, 0.84, 0.36 }
-local TAN  = { 0.78, 0.62, 0.34 }
-local RULE = { 0.82, 0.66, 0.32, 0.7 }
+-- Palette (the mockup's modern dark theme).
+local GOLD   = { 1, 0.82, 0.33 }     -- titles, active tab, selection
+local LABEL  = { 0.72, 0.62, 0.42 }  -- section headers (warm muted gold)
+local WHITE  = { 0.93, 0.93, 0.95 }  -- primary body text
+local MUTED  = { 0.55, 0.52, 0.50 }  -- breadcrumbs
+local SUBTLE = { 0.50, 0.50, 0.56 }  -- subtitles / captions / hints
+local DESC   = { 0.62, 0.70, 0.82 }  -- flavor description (soft blue)
+local GREEN  = { 0.46, 0.82, 0.46 }  -- done
+local AMBER  = { 1.00, 0.74, 0.26 }  -- in progress
+local GREY   = { 0.52, 0.52, 0.55 }  -- not started / unknown
+local FAINT  = { 1, 1, 1, 0.07 }     -- separators / dividers
+local LABEL_RULE = { LABEL[1], LABEL[2], LABEL[3], 0.25 }  -- header trailing line
 
 local TABS = { "goals", "matrix" }
 local TAB_LABEL = { goals = "Goals", matrix = "Account Completion" }
 
--- Persisted window state { tab, point, x, y }. Touched only here, after login.
+-- Goal-level status badge: aggregate state -> { text, color }.
+local BADGE = {
+	done       = { "COMPLETE",    GREEN },
+	partial    = { "IN PROGRESS", AMBER },
+	todo       = { "NOT STARTED", GREY },
+	stale      = { "UNKNOWN",     GREY },
+	ineligible = { "UNAVAILABLE", GREY },
+}
+
+-- Per-character progress line: cell state -> { text, color }. The leading marker
+-- is a texture — the same green check the checklist uses for "done", a yellow dot
+-- for "in progress" — or a grey em-dash for the rest.
+local CHAR_STATUS = {
+	done       = { "DONE",        GREEN },
+	partial    = { "IN PROGRESS", AMBER },
+	todo       = { "NOT STARTED", GREY },
+	stale      = { "UNKNOWN",     GREY },
+	ineligible = { "N/A",         GREY },
+	nodata     = { "NO DATA",     GREY },
+}
+local CHAR_MARK = {
+	done    = "|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t ",
+	partial = "|TInterface\\COMMON\\Indicator-Yellow:10:10|t ",
+}
+
+local function hex(c)
+	return string.format("ff%02x%02x%02x",
+		math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5))
+end
+
+local function classRGB(token)
+	local c = token and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
+	if c then return c.r, c.g, c.b end
+	return WHITE[1], WHITE[2], WHITE[3]
+end
+
+-- Persisted window state { tab, point, x, y, width, height, fontSize }.
 local function winCfg()
 	_G.TiWDB = _G.TiWDB or {}
 	TiWDB.settings = TiWDB.settings or {}
@@ -76,14 +130,12 @@ local function winCfg()
 	return TiWDB.settings.window
 end
 
--- Detail step-list font size (persisted; the Settings slider drives SetFontSize).
 local function fontSize()
 	return winCfg().fontSize or DEFAULT_FONT_SIZE
 end
 
 -- Ensure the goal Engine is running and caching the flat view-model (the tabs
--- read it via UIPanel.lastFlat). Idempotent — same render seam the tracker owns,
--- and Engine.Start forces a fresh pass so a just-installed goal gets evaluated.
+-- read it via UIPanel.lastFlat). Idempotent — same render seam the tracker owns.
 local function ensureEngine()
 	local Engine = ns.Goals and ns.Goals.Engine
 	if Engine then
@@ -99,19 +151,32 @@ local function applyPosition()
 	frame:SetPoint(c.point or "CENTER", UIParent, c.point or "CENTER", c.x or 0, c.y or 0)
 end
 
-local function makeRule(parent, y)
-	local r = parent:CreateTexture(nil, "ARTWORK")
-	r:SetPoint("TOPLEFT", 14, y)
-	r:SetPoint("TOPRIGHT", -14, y)
-	r:SetHeight(2)
-	r:SetColorTexture(RULE[1], RULE[2], RULE[3], RULE[4])
-	return r
+-- The addon version string for the footer ("TODAY IN WOW  •  V1.2.3").
+local function footerVersion()
+	local v
+	if C_AddOns and C_AddOns.GetAddOnMetadata then
+		v = C_AddOns.GetAddOnMetadata("TodayInWoW", "Version")
+	elseif GetAddOnMetadata then
+		v = GetAddOnMetadata("TodayInWoW", "Version")
+	end
+	-- Ignore the unsubstituted "@project-version@" token in unpackaged dev builds.
+	if v and v:find("@", 1, true) then v = nil end
+	return "TODAY IN WOW" .. (v and ("  \226\128\162  V" .. v) or "")
 end
 
 -- ---------------------------------------------------------------------------
--- A small custom vertical scroll (ScrollFrame + thin slider), like ui_panel's,
--- so the card grid scrolls predictably with the mouse wheel.
+-- Small UI helpers.
 -- ---------------------------------------------------------------------------
+
+-- A 1px horizontal separator (caller anchors it).
+local function hLine(parent, color)
+	local t = parent:CreateTexture(nil, "ARTWORK")
+	t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+	t:SetHeight(1)
+	return t
+end
+
+-- A custom vertical scroll (ScrollFrame + thin slider), wheel-driven.
 local function makeScroll(parent)
 	local sf = CreateFrame("ScrollFrame", nil, parent)
 	local sc = CreateFrame("Frame", nil, sf)
@@ -120,11 +185,11 @@ local function makeScroll(parent)
 
 	local sb = CreateFrame("Slider", nil, parent)
 	sb:SetOrientation("VERTICAL")
-	sb:SetWidth(8)
+	sb:SetWidth(6)
 	local track = sb:CreateTexture(nil, "BACKGROUND")
-	track:SetAllPoints(); track:SetColorTexture(0, 0, 0, 0.3)
+	track:SetAllPoints(); track:SetColorTexture(1, 1, 1, 0.04)
 	local thumb = sb:CreateTexture(nil, "OVERLAY")
-	thumb:SetSize(8, 30); thumb:SetColorTexture(0.6, 0.6, 0.6, 0.85)
+	thumb:SetSize(6, 30); thumb:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.5)
 	sb:SetThumbTexture(thumb)
 	sb:SetScript("OnValueChanged", function(_, v) sf:SetVerticalScroll(v) end)
 	sb:Hide()
@@ -155,10 +220,64 @@ local function updateScroll(scroll, contentH)
 	end
 end
 
+-- A red gradient "Import Goal" pill with a 1px border + hover brighten.
+local function makeImportButton(parent)
+	local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	b:SetSize(124, 28)
+	b:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropBorderColor(0.85, 0.35, 0.28, 0.9)
+
+	local bg = b:CreateTexture(nil, "BACKGROUND")
+	bg:SetPoint("TOPLEFT", 1, -1); bg:SetPoint("BOTTOMRIGHT", -1, 1)
+	bg:SetColorTexture(1, 1, 1, 1)
+	if bg.SetGradient and CreateColor then
+		bg:SetGradient("VERTICAL", CreateColor(0.34, 0.09, 0.08, 1), CreateColor(0.58, 0.17, 0.13, 1))
+	else
+		bg:SetColorTexture(0.48, 0.13, 0.11, 1)
+	end
+
+	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetPoint("CENTER")
+	label:SetText("+  IMPORT GOAL")
+	label:SetTextColor(1, 0.88, 0.62)
+
+	b:SetScript("OnEnter", function() b:SetBackdropBorderColor(1, 0.5, 0.4, 1); label:SetTextColor(1, 0.95, 0.78) end)
+	b:SetScript("OnLeave", function() b:SetBackdropBorderColor(0.85, 0.35, 0.28, 0.9); label:SetTextColor(1, 0.88, 0.62) end)
+	return b
+end
+
+-- A thin grey × close button (brightens on hover).
+local function makeClose(parent)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetSize(24, 24)
+	local x = b:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	x:SetPoint("CENTER")
+	x:SetText("\195\151")   -- ×
+	x:SetTextColor(0.6, 0.6, 0.62)
+	b:SetScript("OnEnter", function() x:SetTextColor(1, 0.85, 0.4) end)
+	b:SetScript("OnLeave", function() x:SetTextColor(0.6, 0.6, 0.62) end)
+	return b
+end
+
+-- A small ghost button for the detail footer (Export / Remove).
+local function makeGhostButton(parent, text)
+	local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	b:SetSize(86, 22)
+	b:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropBorderColor(1, 1, 1, 0.12)
+	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	label:SetPoint("CENTER")
+	label:SetText(text); label:SetTextColor(MUTED[1], MUTED[2], MUTED[3])
+	b:SetScript("OnEnter", function() b:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.7); label:SetTextColor(1, 0.9, 0.6) end)
+	b:SetScript("OnLeave", function() b:SetBackdropBorderColor(1, 1, 1, 0.12); label:SetTextColor(MUTED[1], MUTED[2], MUTED[3]) end)
+	b.label = label
+	return b
+end
+
 -- ---------------------------------------------------------------------------
--- Card widgets (pooled): goal icon + name; selected card highlighted.
+-- Shared card/row interaction (grid cards AND list rows are "items").
 -- ---------------------------------------------------------------------------
-local function cardEnter(self)
+local function itemEnter(self)
 	if not self.tooltip then return end
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	GameTooltip:SetText(self.tooltip, 1, 1, 1, 1, true)
@@ -166,12 +285,10 @@ local function cardEnter(self)
 	GameTooltip:Show()
 end
 
-local function cardLeave() GameTooltip:Hide() end
+local function itemLeave() GameTooltip:Hide() end
 
-local function onCardClick(self)
+local function onItemClick(self)
 	if IsShiftKeyDown() then
-		-- Move to the opposite section, then re-evaluate (pinned affects the
-		-- tracker) and relayout; the selection follows the goal across sections.
 		ns.Goals.Store.setPinned(self.goalId, not self.pinned)
 		ensureEngine()
 		refreshGoals()
@@ -180,77 +297,191 @@ local function onCardClick(self)
 	end
 end
 
-local function newCard()
-	local b = CreateFrame("Button", nil, cardParent)
-	b:SetSize(CARD_W, CARD_H)
+local function wireItem(b)
 	b:RegisterForClicks("LeftButtonUp")
+	b:RegisterForDrag("LeftButton")
+	b:SetScript("OnClick", onItemClick)
+	b:SetScript("OnEnter", itemEnter)
+	b:SetScript("OnLeave", itemLeave)
+	b:SetScript("OnDragStart", function(self) onItemDragStart(self) end)
+	b:SetScript("OnDragStop", function(self) onItemDragStop(self) end)
+end
 
-	local hl = b:CreateTexture(nil, "HIGHLIGHT")
-	hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.08)
+-- Pinned: icon card with name beneath; gold border + bg when selected.
+local function newGridCard()
+	local b = CreateFrame("Button", nil, cardParent)
+	b:SetSize(GRID_W, GRID_H)
 
-	local sel = b:CreateTexture(nil, "BORDER")
-	sel:SetAllPoints(); sel:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.18)
+	local sel = b:CreateTexture(nil, "BACKGROUND")
+	sel:SetPoint("TOPLEFT", 2, -2); sel:SetPoint("BOTTOMRIGHT", -2, 2)
+	sel:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.12)
 	sel:Hide(); b.sel = sel
 
+	local hl = b:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetPoint("TOPLEFT", 2, -2); hl:SetPoint("BOTTOMRIGHT", -2, 2)
+	hl:SetColorTexture(1, 1, 1, 0.06)
+
+	-- A 1px frame behind the icon: faint by default, gold when selected (the
+	-- icon, drawn above it on ARTWORK, leaves only the 1px edge showing).
+	local border = b:CreateTexture(nil, "BORDER")
+	border:SetSize(GRID_ICON + 2, GRID_ICON + 2)
+	b.border = border
+
 	local icon = b:CreateTexture(nil, "ARTWORK")
-	icon:SetSize(CARD_ICON, CARD_ICON)
+	icon:SetSize(GRID_ICON, GRID_ICON)
 	icon:SetPoint("TOP", 0, -5)
+	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)   -- trim the default icon border
 	b.icon = icon
+	border:SetPoint("CENTER", icon, "CENTER")
 
 	local name = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	name:SetPoint("TOP", icon, "BOTTOM", 0, -3)
-	name:SetWidth(CARD_W - 4); name:SetJustifyH("CENTER")
+	name:SetPoint("TOP", icon, "BOTTOM", 0, -4)
+	name:SetWidth(GRID_W - 2); name:SetJustifyH("CENTER")
 	name:SetWordWrap(true)
 	if name.SetMaxLines then name:SetMaxLines(2) end
 	b.name = name
 
-	b:RegisterForDrag("LeftButton")
-	b:SetScript("OnClick", onCardClick)
-	b:SetScript("OnEnter", cardEnter)
-	b:SetScript("OnLeave", cardLeave)
-	b:SetScript("OnDragStart", function(self) onCardDragStart(self) end)
-	b:SetScript("OnDragStop", function(self) onCardDragStop(self) end)
+	wireItem(b)
 	return b
 end
 
-local function acquireCard()
-	cardN = cardN + 1
-	local c = cards[cardN]
-	if not c then c = newCard(); cards[cardN] = c end
+-- Available: full-width bordered card row — icon + name + category subtitle.
+local function newListRow()
+	local b = CreateFrame("Button", nil, cardParent, "BackdropTemplate")
+	b:SetHeight(ROW_H)
+	b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropColor(1, 1, 1, 0.025)
+	b:SetBackdropBorderColor(1, 1, 1, 0.06)
+
+	local sel = b:CreateTexture(nil, "BORDER")
+	sel:SetPoint("TOPLEFT", 1, -1); sel:SetPoint("BOTTOMRIGHT", -1, 1)
+	sel:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.08)
+	sel:Hide(); b.sel = sel
+
+	local accent = b:CreateTexture(nil, "ARTWORK")
+	accent:SetPoint("TOPLEFT", 1, -1); accent:SetPoint("BOTTOMLEFT", 1, 1)
+	accent:SetWidth(2); accent:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+	accent:Hide(); b.accent = accent
+
+	local hl = b:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetPoint("TOPLEFT", 1, -1); hl:SetPoint("BOTTOMRIGHT", -1, 1)
+	hl:SetColorTexture(1, 1, 1, 0.05)
+
+	local iconBorder = b:CreateTexture(nil, "BORDER")
+	iconBorder:SetSize(ROW_ICON + 2, ROW_ICON + 2)
+	iconBorder:SetColorTexture(0.30, 0.28, 0.26, 0.9)
+
+	local icon = b:CreateTexture(nil, "ARTWORK")
+	icon:SetSize(ROW_ICON, ROW_ICON)
+	icon:SetPoint("LEFT", 8, 0)
+	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	b.icon = icon
+	iconBorder:SetPoint("CENTER", icon, "CENTER")
+
+	local name = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	name:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -3)
+	name:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+	name:SetJustifyH("LEFT"); name:SetWordWrap(false)
+	name:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	b.nameFS = name
+
+	local cat = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	cat:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 10, 3)
+	cat:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+	cat:SetJustifyH("LEFT"); cat:SetWordWrap(false)
+	b.cat = cat
+
+	wireItem(b)
+	return b
+end
+
+local function acquireGrid()
+	gridN = gridN + 1
+	local c = gridCards[gridN]
+	if not c then c = newGridCard(); gridCards[gridN] = c end
 	c:Show()
 	return c
 end
 
--- Lay one section's entries into a grid; return the y below the last row.
--- Records each card in `outItems` (display order) for drag hit-testing.
-local function layoutCards(entries, pinned, startY, numCols, outItems)
+local function acquireList()
+	listN = listN + 1
+	local r = listRows[listN]
+	if not r then r = newListRow(); listRows[listN] = r end
+	r:Show()
+	return r
+end
+
+-- Selection styling: gold frame + gold name for the active card/row.
+local function markGrid(c, on)
+	c.sel:SetShown(on)
+	if on then
+		c.border:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+		c.name:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	else
+		c.border:SetColorTexture(0.30, 0.28, 0.26, 0.9)
+		c.name:SetTextColor(0.80, 0.80, 0.82)
+	end
+end
+
+local function markList(r, on)
+	r.sel:SetShown(on); r.accent:SetShown(on)
+	if on then
+		r.nameFS:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+		r:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.5)
+	else
+		r.nameFS:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+		r:SetBackdropBorderColor(1, 1, 1, 0.06)
+	end
+end
+
+-- Lay the pinned section as an icon grid; return the y below the last row.
+local function layoutGrid(entries, startY, numCols, outItems)
 	for i, e in ipairs(entries) do
 		local col = (i - 1) % numCols
-		local row = math.floor((i - 1) / numCols)
-		local c = acquireCard()
-		c.goalId, c.pinned, c.tooltip = e.id, pinned, e.tooltip
+		local rowi = math.floor((i - 1) / numCols)
+		local c = acquireGrid()
+		c.goalId, c.pinned, c.tooltip = e.id, true, e.tooltip
 		c.icon:SetTexture(e.icon or DEFAULT_ICON)
 		c.name:SetText(e.name)
-		c.sel:SetShown(e.id == selectedId)
+		markGrid(c, e.id == selectedId)
 		c:SetAlpha(1)
 		c:ClearAllPoints()
-		c:SetPoint("TOPLEFT", col * (CARD_W + CARD_GAP), startY - row * (CARD_H + CARD_GAP))
+		c:SetPoint("TOPLEFT", col * (GRID_W + GRID_GAP), startY - rowi * (GRID_H + GRID_GAP))
 		c:Show()
 		outItems[#outItems + 1] = { id = e.id, card = c }
 	end
 	local rows = math.ceil(#entries / numCols)
-	return startY - rows * (CARD_H + CARD_GAP)
+	return startY - rows * (GRID_H + GRID_GAP)
+end
+
+-- Lay the available section as a single-column metadata list.
+local function layoutList(entries, startY, width, outItems)
+	for i, e in ipairs(entries) do
+		local r = acquireList()
+		r.goalId, r.pinned, r.tooltip = e.id, false, e.tooltip
+		r.icon:SetTexture(e.icon or DEFAULT_ICON)
+		r.nameFS:SetText(e.name)
+		r.cat:SetText(e.category and e.category:upper() or "")
+		markList(r, e.id == selectedId)
+		r:SetAlpha(1)
+		r:SetWidth(width)
+		r:ClearAllPoints()
+		r:SetPoint("TOPLEFT", 0, startY - (i - 1) * (ROW_H + ROW_GAP))
+		r:Show()
+		outItems[#outItems + 1] = { id = e.id, card = r }
+	end
+	return startY - #entries * (ROW_H + ROW_GAP)
 end
 
 -- ---------------------------------------------------------------------------
--- Drag-and-drop reordering (M3): drag a card within or across sections; a gold
--- insertion bar shows where it lands; on drop, commit each affected section's
--- full id list via Store.setSectionOrder. Coexists with click-select and
--- shift-move — those fire OnClick; a real drag fires OnDragStart instead.
+-- Drag-and-drop reordering: drag within or across sections; an insertion bar
+-- shows where it lands; on drop, commit each affected section via
+-- Store.setSectionOrder. Coexists with click-select / shift-move.
 -- ---------------------------------------------------------------------------
 
--- Insertion slot 0..#list for the cursor over a row-major grid of card frames.
-local function insertionIndex(list, cx, cy)
+-- Grid insertion slot 0..#list for a cursor over a row-major card grid.
+local function gridSlot(list, cx, cy)
 	for i, c in ipairs(list) do
 		local top, bottom = c:GetTop(), c:GetBottom()
 		if not top then return #list end
@@ -260,8 +491,19 @@ local function insertionIndex(list, cx, cy)
 	return #list
 end
 
+-- List insertion slot 0..#list for a cursor over a single-column row list
+-- (upper half of a row inserts before it, lower half after).
+local function listSlot(list, cy)
+	for i, c in ipairs(list) do
+		local top, bottom = c:GetTop(), c:GetBottom()
+		if not top then return #list end
+		if cy > (top + bottom) / 2 then return i - 1 end
+	end
+	return #list
+end
+
 -- Resolve the current drop: which section the cursor is over, that section's new
--- id list (with the dragged card inserted), plus idx + card list for the bar.
+-- id list (dragged card inserted), the slot index, and the section's card list.
 local function dropTarget()
 	local G = frame.goals
 	local scale = G.scroll.sc:GetEffectiveScale()
@@ -276,7 +518,7 @@ local function dropTarget()
 			cardList[#cardList + 1] = it.card
 		end
 	end
-	local idx = insertionIndex(cardList, cx, cy)
+	local idx = pinned and gridSlot(cardList, cx, cy) or listSlot(cardList, cy)
 	table.insert(ids, idx + 1, dragState.id)
 	return { pinned = pinned, ids = ids, idx = idx, cardList = cardList }
 end
@@ -285,16 +527,31 @@ local function updateIndicator(d)
 	local ind = frame.goals.dropIndicator
 	if #d.cardList == 0 then ind:Hide(); return end
 	ind:ClearAllPoints()
-	if d.idx >= #d.cardList then
-		ind:SetPoint("CENTER", d.cardList[#d.cardList], "RIGHT", math.floor(CARD_GAP / 2), 0)
+	if d.pinned then
+		-- Vertical bar between grid cards.
+		ind:SetWidth(3)
+		if d.idx >= #d.cardList then
+			ind:SetPoint("TOP", d.cardList[#d.cardList], "TOPRIGHT", math.floor(GRID_GAP / 2), 0)
+			ind:SetPoint("BOTTOM", d.cardList[#d.cardList], "BOTTOMRIGHT", math.floor(GRID_GAP / 2), 0)
+		else
+			ind:SetPoint("TOP", d.cardList[d.idx + 1], "TOPLEFT", -math.floor(GRID_GAP / 2), 0)
+			ind:SetPoint("BOTTOM", d.cardList[d.idx + 1], "BOTTOMLEFT", -math.floor(GRID_GAP / 2), 0)
+		end
 	else
-		ind:SetPoint("CENTER", d.cardList[d.idx + 1], "LEFT", -math.floor(CARD_GAP / 2), 0)
+		-- Horizontal bar between list rows.
+		ind:SetHeight(2)
+		if d.idx >= #d.cardList then
+			ind:SetPoint("LEFT", d.cardList[#d.cardList], "BOTTOMLEFT", 0, -math.floor(ROW_GAP / 2))
+			ind:SetPoint("RIGHT", d.cardList[#d.cardList], "BOTTOMRIGHT", 0, -math.floor(ROW_GAP / 2))
+		else
+			ind:SetPoint("LEFT", d.cardList[d.idx + 1], "TOPLEFT", 0, math.floor(ROW_GAP / 2))
+			ind:SetPoint("RIGHT", d.cardList[d.idx + 1], "TOPRIGHT", 0, math.floor(ROW_GAP / 2))
+		end
 	end
-	ind:SetHeight(CARD_H)
 	ind:Show()
 end
 
-function onCardDragStart(self)
+function onItemDragStart(self)
 	dragState = { id = self.goalId, pinned = self.pinned }
 	self:SetAlpha(0.35)
 	local ghost = frame.goals.dragGhost
@@ -302,7 +559,7 @@ function onCardDragStart(self)
 	ghost:Show()
 end
 
-function onCardDragStop(self)
+function onItemDragStop(self)
 	self:SetAlpha(1)
 	local G = frame.goals
 	G.dragGhost:Hide()
@@ -325,84 +582,245 @@ function onCardDragStop(self)
 	refreshGoals()
 end
 
--- A detail step row mirrors the pinned panel: a green check (done) or a dash
--- marker, plus the label text colored like the tracker (done dimmed grey, stale
--- amber, otherwise light). Marker + text scale to the configurable font size.
+-- ---------------------------------------------------------------------------
+-- Detail step rows: accent bar + marker + label (+ strike on done) + subtitle +
+-- right-aligned progress. The first not-done step is the "active" one (gold).
+-- ---------------------------------------------------------------------------
+local MARK = {
+	done    = "Interface\\RaidFrame\\ReadyCheck-Ready",
+	active  = "Interface\\COMMON\\Indicator-Yellow",
+	pending = "Interface\\COMMON\\Indicator-Gray",
+}
+
 local function newStepRow(parent)
 	local fr = CreateFrame("Frame", nil, parent)
-	local check = fr:CreateTexture(nil, "ARTWORK")
-	check:SetPoint("TOPLEFT", 2, -1)
-	check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
-	fr.check = check
-	local mark = fr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	mark:SetPoint("TOPLEFT", 4, -1)
-	mark:SetText("-"); mark:SetTextColor(0.7, 0.7, 0.7)
+	local rowbg = fr:CreateTexture(nil, "BACKGROUND")
+	rowbg:SetAllPoints(); rowbg:SetColorTexture(1, 1, 1, 0.035)
+	rowbg:Hide(); fr.rowbg = rowbg
+	local bar = fr:CreateTexture(nil, "ARTWORK")
+	bar:SetPoint("TOPLEFT"); bar:SetPoint("BOTTOMLEFT")
+	bar:SetWidth(3)
+	fr.bar = bar
+	local mark = fr:CreateTexture(nil, "ARTWORK")
+	mark:SetPoint("TOPLEFT", 12, -1)
 	fr.mark = mark
-	local text = fr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	text:SetJustifyH("LEFT"); text:SetWordWrap(true)
-	fr.text = text
+	local label = fr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	label:SetJustifyH("LEFT"); label:SetWordWrap(true)
+	fr.label = label
+	local strike = fr:CreateTexture(nil, "OVERLAY")
+	strike:SetColorTexture(0.55, 0.55, 0.55, 1); strike:SetHeight(1)
+	strike:Hide()
+	fr.strike = strike
+	local sub = fr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	sub:SetJustifyH("LEFT"); sub:SetWordWrap(false)
+	fr.sub = sub
+	local prog = fr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	fr.prog = prog
 	return fr
 end
 
-local function configStep(fr, step, y, width, size)
+local function stepSubtitle(step)
+	local parts = {}
+	if step.resets == "weekly" then parts[#parts + 1] = "Weekly"
+	elseif step.resets == "daily" then parts[#parts + 1] = "Daily" end
+	if step.note and step.note ~= "" then parts[#parts + 1] = step.note end
+	return table.concat(parts, " \226\128\162 ")   -- • separator
+end
+
+local function configStep(fr, step, y, width, size, active)
 	local r = step.result
 	local done = r and r.done
-	fr.check:SetShown(done); fr.check:SetSize(size, size)
-	fr.mark:SetShown(not done)
+	local stale = r and r.stale and not done
+	local state = done and "done" or (active and "active") or "pending"
 
-	-- Scale the inherited GameFontHighlight to the chosen size (keep file + flags).
-	local file, _, flags = fr.text:GetFont()
-	fr.text:SetFont(file, size, flags)
-	fr.mark:SetFont(file, size, flags)
+	local bar = done and GREEN or (active and GOLD) or (stale and AMBER) or { 1, 1, 1, 0.10 }
+	fr.bar:SetColorTexture(bar[1], bar[2], bar[3], bar[4] or 1)
+	fr.rowbg:SetShown(active)
 
-	local count = (r and r.progress) and ("  " .. r.progress .. "/" .. tostring(r.max or "?")) or ""
-	fr.text:ClearAllPoints()
-	fr.text:SetPoint("TOPLEFT", size + 8, 0)
-	fr.text:SetWidth(width - size - 12)
-	fr.text:SetText(tostring(step.label) .. count)
+	fr.mark:SetTexture(MARK[done and "done" or (active and "active") or "pending"])
+	fr.mark:SetSize(size + 1, size + 1)
+	fr.mark:SetAlpha(state == "pending" and 0.5 or 1)
+
+	-- Label.
+	local file, _, flags = fr.label:GetFont()
+	fr.label:SetFont(file, size, flags)
+	fr.label:ClearAllPoints()
+	fr.label:SetPoint("TOPLEFT", size + 18, -1)
+	fr.label:SetWidth(width - size - 70)
+	fr.label:SetText(tostring(step.label))
+	if done then fr.label:SetTextColor(0.55, 0.55, 0.55)
+	elseif active then fr.label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	elseif stale then fr.label:SetTextColor(AMBER[1], AMBER[2], AMBER[3])
+	else fr.label:SetTextColor(0.62, 0.62, 0.64) end
+
+	-- Strike-through on done.
 	if done then
-		fr.text:SetTextColor(0.55, 0.55, 0.55)
-	elseif r and r.stale then
-		fr.text:SetTextColor(1, 0.82, 0)
+		fr.strike:ClearAllPoints()
+		fr.strike:SetPoint("LEFT", fr.label, "LEFT", 0, 0)
+		fr.strike:SetWidth(math.min(fr.label:GetStringWidth(), fr.label:GetWidth()))
+		fr.strike:Show()
 	else
-		fr.text:SetTextColor(0.95, 0.95, 0.95)
+		fr.strike:Hide()
 	end
 
-	local h = math.max(size + 4, math.ceil(fr.text:GetStringHeight()) + 4)
+	-- Subtitle.
+	local subtext = stepSubtitle(step)
+	fr.sub:ClearAllPoints()
+	fr.sub:SetPoint("TOPLEFT", fr.label, "BOTTOMLEFT", 0, -2)
+	fr.sub:SetText(subtext)
+	fr.sub:SetShown(subtext ~= "")
+
+	-- Right-aligned progress (n/m).
+	if r and r.progress then
+		fr.prog:ClearAllPoints()
+		fr.prog:SetPoint("TOPRIGHT", -2, -2)
+		local pcol = done and GREEN or GOLD
+		fr.prog:SetText("|c" .. hex(pcol) .. tostring(r.progress) .. "/" .. tostring(r.max or "?") .. "|r")
+		fr.prog:Show()
+	else
+		fr.prog:Hide()
+	end
+
+	local labelH = math.ceil(fr.label:GetStringHeight()) + 2
+	local subH = subtext ~= "" and (math.ceil(fr.sub:GetStringHeight()) + 4) or 4
+	local h = math.max(size + 8, labelH + subH)
 	fr:ClearAllPoints()
-	fr:SetPoint("TOPLEFT", 4, y)
-	fr:SetSize(width - 8, h)
+	fr:SetPoint("TOPLEFT", 0, y)
+	fr:SetSize(width, h)
 	return h
 end
 
+-- A per-character progress row: class-colored name, smaller grey realm, status
+-- (texture marker + colored text) on the right.
+local function newCharRow(parent)
+	local fr = CreateFrame("Frame", nil, parent)
+	fr:SetHeight(22)
+	local status = fr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	status:SetPoint("RIGHT", -2, 0); status:SetJustifyH("RIGHT")
+	fr.status = status
+	local name = fr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	name:SetPoint("LEFT", 2, 0)
+	name:SetJustifyH("LEFT"); name:SetWordWrap(false)
+	fr.name = name
+	local realm = fr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	realm:SetPoint("LEFT", name, "RIGHT", 6, -1)
+	realm:SetPoint("RIGHT", status, "LEFT", -8, 0)
+	realm:SetJustifyH("LEFT"); realm:SetWordWrap(false)
+	fr.realm = realm
+	local rule = fr:CreateTexture(nil, "ARTWORK")
+	rule:SetPoint("BOTTOMLEFT"); rule:SetPoint("BOTTOMRIGHT")
+	rule:SetHeight(1); rule:SetColorTexture(1, 1, 1, 0.04)
+	fr.rule = rule
+	return fr
+end
+
+local function configCharRow(fr, c, y, width)
+	local r, g, b = classRGB(c.class)
+	fr.name:SetText(c.name); fr.name:SetTextColor(r, g, b)
+	fr.realm:SetText(c.realm or ""); fr.realm:SetTextColor(0.5, 0.5, 0.5)
+
+	local st = CHAR_STATUS[c.state] or CHAR_STATUS.todo
+	local marker = CHAR_MARK[c.state] or "|cff808080\226\128\148|r "
+	fr.status:SetText(marker .. "|c" .. hex(st[2]) .. st[1] .. "|r")
+
+	fr:ClearAllPoints()
+	fr:SetPoint("TOPLEFT", 0, y)
+	fr:SetWidth(width)
+	fr:Show()
+	return 22
+end
+
 -- ---------------------------------------------------------------------------
--- Right-hand detail panel: header + step list + Export/Remove.
+-- Right-hand detail panel.
 -- ---------------------------------------------------------------------------
 function renderDetail(entry)
 	local G = frame and frame.goals
 	if not G then return end
 	if not entry then
-		G.dIcon:Hide(); G.dName:Hide(); G.exportBtn:Hide(); G.removeBtn:Hide()
-		for i = 1, #G.steps do G.steps[i]:Hide() end
+		G.dTitle:Hide(); G.dCat:Hide(); G.badge:Hide(); G.statusCap:Hide()
+		G.dScroll.sf:Hide(); G.dScroll.sb:Hide()
+		G.exportBtn:Hide(); G.removeBtn:Hide()
 		G.dHint:Show()
 		return
 	end
 	G.dHint:Hide()
-	G.dIcon:SetTexture(entry.icon or DEFAULT_ICON); G.dIcon:Show()
-	G.dName:SetText(entry.name); G.dName:Show()
+	G.dScroll.sf:Show()
 
-	local detailW = G.detail:GetWidth()
+	-- Header: title + category breadcrumb.
+	G.dTitle:SetText(entry.name); G.dTitle:Show()
+	if entry.category and entry.category ~= "" then
+		G.dCat:SetText(entry.category:upper()); G.dCat:Show()
+	else
+		G.dCat:Hide()
+	end
+
+	-- Status badge.
+	local badge = BADGE[entry.state] or BADGE.todo
+	G.badge.label:SetText(badge[1])
+	G.badge.label:SetTextColor(badge[2][1], badge[2][2], badge[2][3])
+	G.badge:SetBackdropColor(badge[2][1], badge[2][2], badge[2][3], 0.12)
+	G.badge:SetBackdropBorderColor(badge[2][1], badge[2][2], badge[2][3], 0.8)
+	G.badge:SetWidth(G.badge.label:GetStringWidth() + 20)
+	G.badge:Show(); G.statusCap:Show()
+
+	-- Scroll content: description, steps, character progress.
+	local sc = G.dScroll.sc
+	local width = G.dScroll.sf:GetWidth()
 	local size = fontSize()
-	local y = -54
+	local y = 0
+
+	if entry.desc and entry.desc ~= "" then
+		G.dDesc:ClearAllPoints(); G.dDesc:SetPoint("TOPLEFT", 0, y)
+		G.dDesc:SetWidth(width)
+		G.dDesc:SetText(entry.desc); G.dDesc:Show()
+		y = y - math.ceil(G.dDesc:GetStringHeight()) - 14
+	else
+		G.dDesc:Hide()
+	end
+
+	G.dStepsLabel:ClearAllPoints(); G.dStepsLabel:SetPoint("TOPLEFT", 0, y)
+	G.dStepsLabel:Show()
+	y = y - 20
+
+	local firstIncompleteSeen = false
 	local n = 0
 	for _, step in ipairs(entry.steps) do
 		n = n + 1
 		local fr = G.steps[n]
-		if not fr then fr = newStepRow(G.detail); G.steps[n] = fr end
+		if not fr then fr = newStepRow(sc); G.steps[n] = fr end
 		fr:Show()
-		y = y - configStep(fr, step, y, detailW, size)
+		local done = step.result and step.result.done
+		local active = (not done) and (not firstIncompleteSeen)
+		if active then firstIncompleteSeen = true end
+		y = y - configStep(fr, step, y, width, size, active) - 4
 	end
 	for i = n + 1, #G.steps do G.steps[i]:Hide() end
+
+	-- Character progress (per-character; account goals broadcast one answer, so
+	-- only worth a column list for perchar goals).
+	local cn = 0
+	if entry.scope == "perchar" then
+		local chars = ns.Goals.Presenter.goalChars(ns.Goals.UIPanel.lastFlat(), entry.id)
+		if #chars > 0 then
+			y = y - 10
+			G.dCharsLabel:ClearAllPoints(); G.dCharsLabel:SetPoint("TOPLEFT", 0, y)
+			G.dCharsLabel:Show()
+			y = y - 22
+			for _, c in ipairs(chars) do
+				cn = cn + 1
+				local fr = G.charRows[cn]
+				if not fr then fr = newCharRow(sc); G.charRows[cn] = fr end
+				y = y - configCharRow(fr, c, y, width)
+			end
+		else
+			G.dCharsLabel:Hide()
+		end
+	else
+		G.dCharsLabel:Hide()
+	end
+	for i = cn + 1, #G.charRows do G.charRows[i]:Hide() end
+
+	updateScroll(G.dScroll, -y + 6)
 
 	G.exportBtn.goalId = entry.id
 	G.removeBtn.goalId, G.removeBtn.goalName = entry.id, entry.name
@@ -411,55 +829,63 @@ end
 
 function selectGoal(id)
 	selectedId = id
-	for i = 1, cardN do
-		local c = cards[i]
-		c.sel:SetShown(c.goalId == id)
-	end
+	for i = 1, gridN do markGrid(gridCards[i], gridCards[i].goalId == id) end
+	for i = 1, listN do markList(listRows[i], listRows[i].goalId == id) end
 	renderDetail(libCache and libCache.byId[id])
 end
 
 -- ---------------------------------------------------------------------------
--- Refresh: recompute the library and relayout both sections + the detail panel.
+-- Refresh: recompute the library and relayout both sections + the detail.
 -- ---------------------------------------------------------------------------
 function refreshGoals()
 	local G = frame and frame.goals
 	if not G then return end
-	cardN = 0
+	gridN, listN = 0, 0
 
 	local lib = ns.Goals.Presenter.library(ns.Goals.UIPanel.lastFlat())
 	libCache = { byId = {} }
 	for _, e in ipairs(lib.pinned) do libCache.byId[e.id] = e end
 	for _, e in ipairs(lib.available) do libCache.byId[e.id] = e end
 
-	local contentW = LEFT_W - 16
-	local numCols = math.max(1, math.floor((contentW + CARD_GAP) / (CARD_W + CARD_GAP)))
+	local contentW = G.scroll.sf:GetWidth()
+	local numCols = math.max(1, math.floor((contentW + GRID_GAP) / (GRID_W + GRID_GAP)))
 	local pinnedItems, availItems = {}, {}
+
+	local function placeRule(rule, label)
+		rule:ClearAllPoints()
+		rule:SetPoint("LEFT", label, "RIGHT", 10, -1)
+		rule:SetPoint("RIGHT", G.scroll.sc, "RIGHT", -2, 0)
+		rule:Show()
+	end
 
 	local y = -2
 	G.secPinned:ClearAllPoints(); G.secPinned:SetPoint("TOPLEFT", 2, y); G.secPinned:Show()
+	placeRule(G.rulePinned, G.secPinned)
 	y = y - SEC_LABEL_H
 	if #lib.pinned == 0 then
-		G.notePinned:ClearAllPoints(); G.notePinned:SetPoint("TOPLEFT", 6, y); G.notePinned:Show()
-		y = y - 18
+		G.notePinned:ClearAllPoints(); G.notePinned:SetPoint("TOPLEFT", 4, y); G.notePinned:Show()
+		y = y - 20
 	else
 		G.notePinned:Hide()
-		y = layoutCards(lib.pinned, true, y, numCols, pinnedItems)
+		y = layoutGrid(lib.pinned, y, numCols, pinnedItems)
 	end
 
-	y = y - 8
+	y = y - 12
 	G.secAvail:ClearAllPoints(); G.secAvail:SetPoint("TOPLEFT", 2, y); G.secAvail:Show()
+	placeRule(G.ruleAvail, G.secAvail)
 	y = y - SEC_LABEL_H
 	if #lib.available == 0 then
-		G.noteAvail:ClearAllPoints(); G.noteAvail:SetPoint("TOPLEFT", 6, y); G.noteAvail:Show()
-		y = y - 18
+		G.noteAvail:ClearAllPoints(); G.noteAvail:SetPoint("TOPLEFT", 4, y); G.noteAvail:Show()
+		y = y - 20
 	else
 		G.noteAvail:Hide()
-		y = layoutCards(lib.available, false, y, numCols, availItems)
+		y = layoutList(lib.available, y, contentW, availItems)
 	end
 	G.secItems = { pinned = pinnedItems, available = availItems }
 
-	for i = cardN + 1, #cards do cards[i]:Hide() end
-	updateScroll(G.scroll, -y + 4)
+	for i = gridN + 1, #gridCards do gridCards[i]:Hide() end
+	for i = listN + 1, #listRows do listRows[i]:Hide() end
+	updateScroll(G.scroll, -y + 6)
 
 	if selectedId and libCache.byId[selectedId] then
 		selectGoal(selectedId)
@@ -470,39 +896,30 @@ function refreshGoals()
 end
 
 -- ---------------------------------------------------------------------------
--- Account Completion tab (M4): Presenter.matrix as a grid — goals down the left
--- (display order, pinned-first), characters across the top (current first). The
--- goal column + header row are frozen (separate clipped ScrollFrames synced to
--- the body), and both axes scroll when the grid overflows. Folds in the old
--- ui_matrix draw; /tiw goal matrix opens this tab.
+-- Account Completion tab (matrix) — unchanged frozen-header grid.
 -- ---------------------------------------------------------------------------
-
--- "Name-Realm" -> "Name".
 local function shortName(key)
 	return key:match("^[^-]+") or key
 end
 
--- Compact per-state cell glyph (function over flair): a green check for done,
--- k/n for partial, a dim dash / n/a / ? for the rest, blank for unassigned.
 local function cellGlyph(c)
 	if not c then return "" end
 	local s = c.state
 	if s == "done" then return "|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t" end
 	if s == "partial" then return "|cffffd100" .. tostring(c.done) .. "/" .. tostring(c.total) .. "|r" end
-	if s == "todo" then return "|cff9d9d9d\226\128\147|r" end   -- en dash
+	if s == "todo" then return "|cff9d9d9d\226\128\147|r" end
 	if s == "ineligible" then return "|cff707070n/a|r" end
 	if s == "nodata" then return "|cff707070?|r" end
-	return ""   -- unassigned
+	return ""
 end
 
--- A thin slider (one per axis); thumb sized to the viewport/content ratio.
 local function makeMatrixSlider(parent, orient)
 	local s = CreateFrame("Slider", nil, parent)
 	s:SetOrientation(orient)
 	local track = s:CreateTexture(nil, "BACKGROUND")
-	track:SetAllPoints(); track:SetColorTexture(0, 0, 0, 0.3)
+	track:SetAllPoints(); track:SetColorTexture(1, 1, 1, 0.04)
 	local thumb = s:CreateTexture(nil, "OVERLAY")
-	thumb:SetColorTexture(0.6, 0.6, 0.6, 0.85)
+	thumb:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.5)
 	if orient == "VERTICAL" then
 		s:SetWidth(M_SB); thumb:SetSize(M_SB, 30)
 	else
@@ -513,7 +930,6 @@ local function makeMatrixSlider(parent, orient)
 	return s, thumb
 end
 
--- Reset a slider's range to the new content, clamp, apply, size the thumb.
 local function updateAxis(slider, thumb, viewport, content)
 	local range = math.max(0, content - viewport)
 	slider:SetMinMaxValues(0, range)
@@ -537,7 +953,6 @@ local function refreshMatrix()
 	if not M then return end
 	local vm = ns.Goals.Presenter.matrix(ns.Goals.UIPanel.lastFlat())
 
-	-- Column headers (character names; current gold, realm stripped).
 	local cn = 0
 	for ci, col in ipairs(vm.chars) do
 		cn = cn + 1
@@ -556,7 +971,6 @@ local function refreshMatrix()
 	end
 	for i = cn + 1, #M.colCells do M.colCells[i]:Hide() end
 
-	-- Row headers (goal names) + body cells.
 	local rn, bn = 0, 0
 	for ri, g in ipairs(vm.goals) do
 		local y = -((ri - 1) * M_ROW_H) - 3
@@ -603,7 +1017,6 @@ local function refreshMatrix()
 	M.empty:SetShown(#vm.goals == 0)
 end
 
--- Refresh whichever tab is currently showing.
 local function refreshActive()
 	if not (frame and frame.tabs) then return end
 	if frame.tabs.matrix.selected then refreshMatrix() else refreshGoals() end
@@ -623,16 +1036,17 @@ local function buildImport()
 	f:SetScript("OnDragStop", f.StopMovingOrSizing)
 	if f.SetBackdrop then
 		f:SetBackdrop({
-			bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-			tile = true, tileSize = 32, edgeSize = 32,
-			insets = { left = 8, right = 8, top = 8, bottom = 8 },
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Buttons\\WHITE8X8",
+			edgeSize = 1, insets = { left = 1, right = 1, top = 1, bottom = 1 },
 		})
+		f:SetBackdropColor(0.06, 0.055, 0.065, 0.98)
+		f:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.6)
 	end
 
 	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("TOP", 0, -14)
-	title:SetText("Import Goal")
+	title:SetText("Import Goal"); title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
 
 	local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	hint:SetPoint("TOPLEFT", 16, -38)
@@ -666,7 +1080,7 @@ local function buildImport()
 		end
 		f.pending = goal
 		f.status:SetText("|cff40ff40Goal: " .. tostring(goal.name)
-			.. "  ·  " .. #goal.steps .. " step" .. (#goal.steps == 1 and "" or "s") .. "|r")
+			.. "  \226\128\162  " .. #goal.steps .. " step" .. (#goal.steps == 1 and "" or "s") .. "|r")
 		return goal
 	end
 
@@ -696,7 +1110,7 @@ local function buildImport()
 	cancel:SetText("Cancel")
 	cancel:SetScript("OnClick", function() f:Hide() end)
 
-	table.insert(UISpecialFrames, "TiWGoalImport")   -- Escape closes it
+	table.insert(UISpecialFrames, "TiWGoalImport")
 	importFrame = f
 	return f
 end
@@ -722,7 +1136,7 @@ function selectTab(key)
 		local b = frame.tabs[k]
 		b.selected = on
 		b.underline:SetShown(on)
-		local c = on and GOLD or TAN
+		local c = on and GOLD or { 0.55, 0.55, 0.58 }
 		b.label:SetTextColor(c[1], c[2], c[3])
 		frame.panes[k]:SetShown(on)
 	end
@@ -732,68 +1146,65 @@ end
 
 local function makeTab(parent, key)
 	local b = CreateFrame("Button", nil, parent)
-	b:SetHeight(TAB_H)
+	b:SetHeight(TOPBAR_H)
 
 	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	label:SetPoint("CENTER")
+	label:SetPoint("CENTER", 0, 0)
 	label:SetText(TAB_LABEL[key]:upper())
-	label:SetTextColor(TAN[1], TAN[2], TAN[3])
+	label:SetTextColor(0.55, 0.55, 0.58)
 	b.label = label
-	b:SetWidth(label:GetStringWidth() + 36)
+	b:SetWidth(label:GetStringWidth() + 28)
 
 	local underline = b:CreateTexture(nil, "OVERLAY")
-	underline:SetHeight(4)
-	underline:SetPoint("BOTTOMLEFT", 6, 0)
-	underline:SetPoint("BOTTOMRIGHT", -6, 0)
+	underline:SetHeight(3)
+	underline:SetPoint("BOTTOMLEFT", 4, 6)
+	underline:SetPoint("BOTTOMRIGHT", -4, 6)
 	underline:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
-	underline:SetBlendMode("ADD")
 	underline:Hide()
 	b.underline = underline
 
 	b:SetScript("OnEnter", function(self)
-		if not self.selected then self.label:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end
+		if not self.selected then self.label:SetTextColor(0.85, 0.84, 0.7) end
 	end)
 	b:SetScript("OnLeave", function(self)
-		if not self.selected then self.label:SetTextColor(TAN[1], TAN[2], TAN[3]) end
+		if not self.selected then self.label:SetTextColor(0.55, 0.55, 0.58) end
 	end)
 	b:SetScript("OnClick", function() selectTab(key) end)
 	return b
 end
 
 -- ---------------------------------------------------------------------------
--- Goals-tab content (left card grid + right detail + header Import button).
+-- Goals-tab content (left Active Pursuits column + right detail).
 -- ---------------------------------------------------------------------------
 local function buildGoalsTab(pane)
 	local G = {}
 
-	local title = pane:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 2, -4)
-	title:SetText("Goals")
-	title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	-- Left header.
+	local apTitle = pane:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	apTitle:SetPoint("TOPLEFT", 2, -2)
+	apTitle:SetFont("Fonts\\MORPHEUS.ttf", 22, "")
+	apTitle:SetText("Active Pursuits"); apTitle:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	G.apTitle = apTitle
 
-	local importBtn = CreateFrame("Button", nil, pane, "UIPanelButtonTemplate")
-	importBtn:SetSize(110, 24)
-	importBtn:SetPoint("TOPRIGHT", -2, -2)
-	importBtn:SetText("Import Goal")
-	importBtn:SetScript("OnClick", openImport)
+	local apSub = pane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	apSub:SetPoint("TOPLEFT", apTitle, "BOTTOMLEFT", 1, -4)
+	apSub:SetJustifyH("LEFT"); apSub:SetWordWrap(true)
+	apSub:SetText("Manage your tracked objectives and prioritize your journey.")
+	apSub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	G.apSub = apSub
 
-	-- Left: scrollable card grid.
+	-- Left scroll (sections + cards/rows).
 	G.scroll = makeScroll(pane)
-	G.scroll.sf:SetPoint("TOPLEFT", 0, -34)
-	G.scroll.sf:SetPoint("BOTTOMLEFT", 0, 0)
-	G.scroll.sf:SetWidth(LEFT_W - 16)
-	G.scroll.sb:SetPoint("TOPLEFT", G.scroll.sf, "TOPRIGHT", 2, 0)
-	G.scroll.sb:SetPoint("BOTTOMLEFT", G.scroll.sf, "BOTTOMRIGHT", 2, 0)
 	cardParent = G.scroll.sc
-	G.scroll.sc:SetWidth(LEFT_W - 16)
 
-	-- Drag-and-drop widgets: a cursor-following ghost + a gold insertion bar.
+	-- Drag widgets: cursor-following ghost + insertion bar.
 	local ghost = CreateFrame("Frame", nil, UIParent)
-	ghost:SetSize(CARD_ICON, CARD_ICON)
+	ghost:SetSize(GRID_ICON, GRID_ICON)
 	ghost:SetFrameStrata("TOOLTIP")
 	ghost:EnableMouse(false)
 	ghost.icon = ghost:CreateTexture(nil, "ARTWORK")
 	ghost.icon:SetAllPoints()
+	ghost.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 	ghost:SetAlpha(0.85)
 	ghost:Hide()
 	ghost:SetScript("OnUpdate", function(self)
@@ -806,16 +1217,21 @@ local function buildGoalsTab(pane)
 	G.dragGhost = ghost
 
 	local ind = G.scroll.sc:CreateTexture(nil, "OVERLAY")
-	ind:SetWidth(3)
 	ind:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
 	ind:Hide()
 	G.dropIndicator = ind
 
-	-- Section labels + empty-state notes (children of the scroll child).
+	-- Section labels (warm gold) + a trailing rule + empty-state notes (children
+	-- of the scroll child).
 	local function secLabel(text)
-		local fs = G.scroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-		fs:SetText(text); fs:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+		local fs = G.scroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		fs:SetText(text:upper()); fs:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
 		return fs
+	end
+	local function secRule()
+		local t = G.scroll.sc:CreateTexture(nil, "ARTWORK")
+		t:SetHeight(1); t:SetColorTexture(LABEL_RULE[1], LABEL_RULE[2], LABEL_RULE[3], LABEL_RULE[4])
+		return t
 	end
 	local function secNote(text)
 		local fs = G.scroll.sc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -823,46 +1239,78 @@ local function buildGoalsTab(pane)
 		return fs
 	end
 	G.secPinned = secLabel("Pinned Goals")
+	G.rulePinned = secRule()
 	G.notePinned = secNote("None pinned — shift-click a goal below to pin it.")
 	G.secAvail = secLabel("Available Goals")
+	G.ruleAvail = secRule()
 	G.noteAvail = secNote("No goals installed — use Import Goal.")
 
-	-- Divider between the two halves.
+	-- Vertical divider between the columns.
 	local divider = pane:CreateTexture(nil, "ARTWORK")
-	divider:SetPoint("TOPLEFT", LEFT_W, -32)
-	divider:SetPoint("BOTTOMLEFT", LEFT_W, 2)
 	divider:SetWidth(1)
-	divider:SetColorTexture(RULE[1], RULE[2], RULE[3], 0.5)
+	divider:SetColorTexture(FAINT[1], FAINT[2], FAINT[3], FAINT[4])
 	G.divider = divider
 
 	-- Right: detail panel.
 	local detail = CreateFrame("Frame", nil, pane)
-	detail:SetPoint("TOPLEFT", LEFT_W + 10, -34)
-	detail:SetPoint("BOTTOMRIGHT", 0, 0)
 	G.detail = detail
 
-	G.dIcon = detail:CreateTexture(nil, "ARTWORK")
-	G.dIcon:SetSize(40, 40)
-	G.dIcon:SetPoint("TOPLEFT", 4, -4)
-	G.dIcon:Hide()
+	local dTitle = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+	dTitle:SetPoint("TOPLEFT", 2, -2)
+	dTitle:SetPoint("RIGHT", detail, "RIGHT", -110, 0)
+	dTitle:SetFont("Fonts\\MORPHEUS.ttf", 30, "")
+	dTitle:SetJustifyH("LEFT"); dTitle:SetWordWrap(false)
+	dTitle:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	dTitle:Hide(); G.dTitle = dTitle
 
-	G.dName = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	G.dName:SetPoint("TOPLEFT", G.dIcon, "TOPRIGHT", 8, -6)
-	G.dName:SetPoint("RIGHT", detail, "RIGHT", -4, 0)
-	G.dName:SetJustifyH("LEFT"); G.dName:SetWordWrap(true)
-	if G.dName.SetMaxLines then G.dName:SetMaxLines(2) end
-	G.dName:Hide()
+	local dCat = detail:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	dCat:SetPoint("TOPLEFT", dTitle, "BOTTOMLEFT", 1, -4)
+	dCat:SetTextColor(MUTED[1], MUTED[2], MUTED[3])
+	dCat:Hide(); G.dCat = dCat
+
+	-- Status caption + badge (top-right of the detail).
+	local statusCap = detail:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	statusCap:SetPoint("TOPRIGHT", -2, -2)
+	statusCap:SetText("STATUS"); statusCap:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	statusCap:Hide(); G.statusCap = statusCap
+
+	local badge = CreateFrame("Frame", nil, detail, "BackdropTemplate")
+	badge:SetSize(90, 20)
+	badge:SetPoint("TOPRIGHT", statusCap, "BOTTOMRIGHT", 0, -4)
+	badge:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	badge:SetBackdropColor(1, 1, 1, 0.04)
+	local bl = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	bl:SetPoint("CENTER"); badge.label = bl
+	badge:Hide(); G.badge = badge
+
+	-- Detail scroll (description, steps, character progress).
+	G.dScroll = makeScroll(detail)
+	G.dDesc = G.dScroll.sc:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	G.dDesc:SetJustifyH("LEFT"); G.dDesc:SetWordWrap(true)
+	G.dDesc:SetTextColor(DESC[1], DESC[2], DESC[3])
+	G.dDesc:Hide()
+
+	G.dStepsLabel = G.dScroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	G.dStepsLabel:SetText("CURRENT STEPS")
+	G.dStepsLabel:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+	G.dStepsLabel:Hide()
+
+	G.dCharsLabel = G.dScroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	G.dCharsLabel:SetText("CHARACTER PROGRESS")
+	G.dCharsLabel:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+	G.dCharsLabel:Hide()
+
+	G.steps = {}
+	G.charRows = {}
 
 	G.dHint = detail:CreateFontString(nil, "OVERLAY", "GameFontDisable")
 	G.dHint:SetPoint("CENTER")
 	G.dHint:SetText("Select a goal to see its steps.")
 
-	G.steps = {}
-
-	G.exportBtn = CreateFrame("Button", nil, detail, "UIPanelButtonTemplate")
-	G.exportBtn:SetSize(100, 22)
-	G.exportBtn:SetPoint("BOTTOMLEFT", 4, 4)
-	G.exportBtn:SetText("Export")
+	-- Detail footer: Export + Remove ghost buttons.
+	G.exportBtn = makeGhostButton(detail, "Export")
+	G.exportBtn:SetPoint("BOTTOMLEFT", 2, 2)
 	G.exportBtn:SetScript("OnClick", function(self)
 		local rec = ns.Goals.Store.get(self.goalId)
 		if not rec then return end
@@ -871,10 +1319,8 @@ local function buildGoalsTab(pane)
 	end)
 	G.exportBtn:Hide()
 
-	G.removeBtn = CreateFrame("Button", nil, detail, "UIPanelButtonTemplate")
-	G.removeBtn:SetSize(100, 22)
-	G.removeBtn:SetPoint("BOTTOMRIGHT", -4, 4)
-	G.removeBtn:SetText("Remove")
+	G.removeBtn = makeGhostButton(detail, "Remove")
+	G.removeBtn:SetPoint("BOTTOMRIGHT", -2, 2)
 	G.removeBtn:SetScript("OnClick", function(self)
 		if StaticPopup_Show then StaticPopup_Show("TIW_GOAL_REMOVE", self.goalName, nil, self.goalId) end
 	end)
@@ -884,9 +1330,8 @@ local function buildGoalsTab(pane)
 	frame.goals = G
 end
 
--- Account Completion grid: frozen corner/header backgrounds, three ScrollFrames
--- (column header scrolls only horizontally, row header only vertically, body
--- both), and two sliders driving the body + the frozen headers in lock-step.
+-- Account Completion grid (unchanged): frozen corner/header backgrounds, three
+-- ScrollFrames, two sliders driving body + frozen headers in lock-step.
 local function buildMatrixTab(pane)
 	local M = {}
 
@@ -952,7 +1397,6 @@ local function buildMatrixTab(pane)
 	frame.matrix = M
 end
 
--- Remove confirmation (registered in-game; StaticPopupDialogs is a writable global).
 local function registerRemovePopup()
 	if not StaticPopupDialogs or StaticPopupDialogs["TIW_GOAL_REMOVE"] then return end
 	StaticPopupDialogs["TIW_GOAL_REMOVE"] = {
@@ -970,20 +1414,42 @@ local function registerRemovePopup()
 	}
 end
 
--- Recompute the Goals-tab left/right split for the current window size and
--- re-anchor the scroll, divider, and detail panel (cards reflow on refresh).
+-- Recompute the Goals-tab column split + re-anchor scroll / header / divider /
+-- detail for the current window size (cards reflow on refresh).
+local APH = 50   -- left-header (Active Pursuits + wrapped subtitle) height
 local function relayoutGoals()
 	local G = frame and frame.goals
 	if not G then return end
-	LEFT_W = math.floor(frame.panes.goals:GetWidth() * 0.5)
-	G.scroll.sf:SetWidth(LEFT_W - 16)
-	G.scroll.sc:SetWidth(LEFT_W - 16)
+	local paneW = frame.panes.goals:GetWidth()
+	LEFT_W = math.floor(paneW * LEFT_FRAC)
+
+	G.apSub:SetWidth(LEFT_W - 8)
+
+	G.scroll.sf:ClearAllPoints()
+	G.scroll.sf:SetPoint("TOPLEFT", 0, -APH)
+	G.scroll.sf:SetPoint("BOTTOMLEFT", 0, 0)
+	G.scroll.sf:SetWidth(LEFT_W - 12)
+	G.scroll.sc:SetWidth(LEFT_W - 12)
+	G.scroll.sb:ClearAllPoints()
+	G.scroll.sb:SetPoint("TOPLEFT", G.scroll.sf, "TOPRIGHT", 3, 0)
+	G.scroll.sb:SetPoint("BOTTOMLEFT", G.scroll.sf, "BOTTOMRIGHT", 3, 0)
+
 	G.divider:ClearAllPoints()
-	G.divider:SetPoint("TOPLEFT", LEFT_W, -32)
+	G.divider:SetPoint("TOPLEFT", LEFT_W, -2)
 	G.divider:SetPoint("BOTTOMLEFT", LEFT_W, 2)
+
 	G.detail:ClearAllPoints()
-	G.detail:SetPoint("TOPLEFT", LEFT_W + 10, -34)
+	G.detail:SetPoint("TOPLEFT", LEFT_W + 16, 0)
 	G.detail:SetPoint("BOTTOMRIGHT", 0, 0)
+
+	-- Detail scroll sits below the header block, above the footer buttons.
+	G.dScroll.sf:ClearAllPoints()
+	G.dScroll.sf:SetPoint("TOPLEFT", 2, -54)
+	G.dScroll.sf:SetPoint("BOTTOMRIGHT", G.detail, "BOTTOMRIGHT", -10, 28)
+	G.dScroll.sb:ClearAllPoints()
+	G.dScroll.sb:SetPoint("TOPRIGHT", G.detail, "TOPRIGHT", -2, -54)
+	G.dScroll.sb:SetPoint("BOTTOMRIGHT", G.detail, "BOTTOMRIGHT", -2, 28)
+	G.dScroll.sc:SetWidth(G.dScroll.sf:GetWidth())
 end
 
 local function build()
@@ -994,7 +1460,7 @@ local function build()
 	f:SetFrameStrata("HIGH")
 	f:SetToplevel(true)
 	f:SetResizable(true)
-	if f.SetResizeBounds then f:SetResizeBounds(560, 360, 1400, 1000) end
+	if f.SetResizeBounds then f:SetResizeBounds(600, 380, 1500, 1050) end
 	f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self)
@@ -1007,46 +1473,66 @@ local function build()
 	if f.SetBackdrop then
 		f:SetBackdrop({
 			bgFile = "Interface\\Buttons\\WHITE8X8",
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Gold-Border",
-			tile = false, edgeSize = 16,
-			insets = { left = 5, right = 5, top = 5, bottom = 5 },
+			edgeFile = "Interface\\Buttons\\WHITE8X8",
+			edgeSize = 1, insets = { left = 1, right = 1, top = 1, bottom = 1 },
 		})
-		f:SetBackdropColor(0.04, 0.04, 0.06, 0.96)
-		f:SetBackdropBorderColor(1, 1, 1, 1)
+		f:SetBackdropColor(0.05, 0.045, 0.055, 0.97)
+		f:SetBackdropBorderColor(1, 1, 1, 0.10)
 	end
 
-	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("TOP", 0, -14)
-	title:SetText("Today in WoW")
-	title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	-- Subtle top gradient sheen.
+	local grad = f:CreateTexture(nil, "BORDER")
+	grad:SetPoint("TOPLEFT", 1, -1); grad:SetPoint("TOPRIGHT", -1, -1)
+	grad:SetHeight(170)
+	grad:SetColorTexture(1, 1, 1, 1)
+	if grad.SetGradient and CreateColor then
+		grad:SetGradient("VERTICAL", CreateColor(0.05, 0.045, 0.055, 0), CreateColor(0.12, 0.10, 0.14, 0.55))
+	else
+		grad:SetColorTexture(0.10, 0.09, 0.12, 0.25)
+	end
 
-	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-	close:SetPoint("TOPRIGHT", -4, -4)
-	close:SetScript("OnClick", function() f:Hide() end)
-
-	makeRule(f, -(6 + TITLE_H))
-
+	-- Top bar: tabs (left), import + close (right), separator beneath.
 	f.tabs = {}
-	local tabTop = -(6 + TITLE_H + 4)
-	local x = 18
+	local x = PANE_PAD
 	for _, k in ipairs(TABS) do
 		local b = makeTab(f, k)
-		b:SetPoint("TOPLEFT", x, tabTop)
+		b:SetPoint("TOPLEFT", x, 0)
 		f.tabs[k] = b
-		x = x + b:GetWidth() + 8
+		x = x + b:GetWidth() + 6
 	end
 
-	local bodyTop = tabTop - TAB_H
-	makeRule(f, bodyTop)
+	local close = makeClose(f)
+	close:SetPoint("TOPRIGHT", -8, -((TOPBAR_H - 24) / 2))
+	close:SetScript("OnClick", function() f:Hide() end)
 
-	-- Content panes.
-	LEFT_W = math.floor((f:GetWidth() - 2 * PANE_PAD) * 0.5)
+	local importBtn = makeImportButton(f)
+	importBtn:SetPoint("RIGHT", close, "LEFT", -8, 0)
+	importBtn:SetScript("OnClick", openImport)
+
+	local topRule = hLine(f, FAINT)
+	topRule:SetPoint("TOPLEFT", PANE_PAD, -TOPBAR_H)
+	topRule:SetPoint("TOPRIGHT", -PANE_PAD, -TOPBAR_H)
+
+	-- Footer: separator + version (left) + hint (right).
+	local footRule = hLine(f, FAINT)
+	footRule:SetPoint("BOTTOMLEFT", PANE_PAD, FOOTER_H)
+	footRule:SetPoint("BOTTOMRIGHT", -PANE_PAD, FOOTER_H)
+
+	local ver = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	ver:SetPoint("BOTTOMLEFT", PANE_PAD, 8)
+	ver:SetText(footerVersion()); ver:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+
+	local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	hint:SetPoint("BOTTOMRIGHT", -PANE_PAD, 8)
+	hint:SetText("DRAG ICONS TO REORDER  \226\128\162  SHIFT+CLICK TO PIN")
+	hint:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+
+	-- Content panes (between the top bar and the footer).
 	f.panes = {}
-	local paneTop = bodyTop - 6
 	for _, k in ipairs(TABS) do
 		local p = CreateFrame("Frame", nil, f)
-		p:SetPoint("TOPLEFT", PANE_PAD, paneTop)
-		p:SetPoint("BOTTOMRIGHT", -PANE_PAD, PANE_PAD)
+		p:SetPoint("TOPLEFT", PANE_PAD, -(TOPBAR_H + 10))
+		p:SetPoint("BOTTOMRIGHT", -PANE_PAD, FOOTER_H + 6)
 		p:Hide()
 		f.panes[k] = p
 	end
@@ -1056,15 +1542,15 @@ local function build()
 	buildMatrixTab(f.panes.matrix)
 	registerRemovePopup()
 
-	-- Resize handle (bottom-right), like the tracker's Edit Mode grabber. Drag
-	-- to resize both axes; on release, persist the size and reflow the content.
+	-- Resize handle (bottom-right corner).
 	local grabber = CreateFrame("Button", nil, f)
 	grabber:SetSize(16, 16)
-	grabber:SetPoint("BOTTOMRIGHT", -4, 4)
+	grabber:SetPoint("BOTTOMRIGHT", -2, 2)
 	grabber:SetFrameLevel(f:GetFrameLevel() + 20)
 	grabber:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	grabber:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	grabber:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+	grabber:GetNormalTexture():SetAlpha(0.5)
 	grabber:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
 	grabber:SetScript("OnMouseUp", function()
 		f:StopMovingOrSizing()
@@ -1073,14 +1559,15 @@ local function build()
 	end)
 	f.grabber = grabber
 
-	-- Reflow the split + content live as the frame resizes (not just on release).
+	-- Reflow live as the frame resizes.
 	f:SetScript("OnSizeChanged", function()
 		relayoutGoals()
 		refreshActive()
 	end)
 
-	table.insert(UISpecialFrames, "TiWMainWindow")   -- Escape closes it
+	table.insert(UISpecialFrames, "TiWMainWindow")
 	applyPosition()
+	relayoutGoals()
 	return f
 end
 
@@ -1093,6 +1580,7 @@ function Main.Open(tab)
 	selectTab(tab or winCfg().tab or "goals")
 	frame:Show()
 	frame:Raise()
+	relayoutGoals()
 	refreshActive()
 end
 
@@ -1110,7 +1598,6 @@ function Main.OnRender()
 	if frame and frame:IsShown() then refreshActive() end
 end
 
--- Detail step-list font size — the Settings slider (ui_options) binds these.
 function Main.GetFontSize()
 	return fontSize()
 end

@@ -299,6 +299,96 @@ describe("Presenter.matrix — goal icon passthrough", function()
 	end)
 end)
 
+describe("Presenter.library — category/desc passthrough", function()
+	it("carries goal-level category + desc onto the entry", function()
+		local ns = harness()
+		local g = gCrests(); g.category = "Midnight • Currency"; g.desc = "Cap your crests."
+		ns.Goals.Store.install(g)
+		local entry = ns.Goals.Presenter.library({
+			row("g:crests", 1, "Cap", { done = false }),
+		}).available[1]
+		assert.equal("Midnight • Currency", entry.category)
+		assert.equal("Cap your crests.", entry.desc)
+	end)
+
+	it("carries per-step note + resets onto each step", function()
+		local ns = harness()
+		local g = gFarm(); g.steps[1].note = "Solo viable"; g.steps[1].resets = "weekly"
+		ns.Goals.Store.install(g)
+		local step = ns.Goals.Presenter.library({
+			row("g:farm", 1, "Kill LK", { done = false }),
+		}).available[1].steps[1]
+		assert.equal("Solo viable", step.note)
+		assert.equal("weekly", step.resets)
+	end)
+end)
+
+describe("Presenter.goalChars — per-goal character progress (detail panel)", function()
+	it("returns {} for an unknown goal id", function()
+		local ns = harness()
+		assert.same({}, ns.Goals.Presenter.goalChars({}, "g:nope"))
+	end)
+
+	it("current character first, carrying class + live cell state", function()
+		local ns = harness()
+		ns.Goals.Store.install(gFarm())   -- chars = "all"
+		local list = ns.Goals.Presenter.goalChars(
+			{ row("g:farm", 1, "Kill LK", { done = true }) }, "g:farm")
+		assert.equal(ME, list[1].key)
+		assert.equal("Main", list[1].name)
+		assert.equal("Realm", list[1].realm)
+		assert.equal("MAGE", list[1].class)
+		assert.is_true(list[1].current)
+		assert.equal("done", list[1].state)
+	end)
+
+	it("alts follow id-sorted, each with substrate-derived state + class", function()
+		local ns = harness()
+		ns.Goals.Store.install(gFarm())
+		seedAlt(ns, "Zed-Realm", { lockouts = { iccRow(false) } })   -- todo
+		seedAlt(ns, "Abe-Realm", { lockouts = { iccRow(true) } })    -- done
+		local list = ns.Goals.Presenter.goalChars(
+			{ row("g:farm", 1, "Kill LK", { done = false }) }, "g:farm")
+		assert.equal(ME, list[1].key)
+		assert.equal("Abe-Realm", list[2].key)
+		assert.equal("done", list[2].state)
+		assert.equal("MAGE", list[2].class)
+		assert.equal("Zed-Realm", list[3].key)
+		assert.equal("todo", list[3].state)
+	end)
+
+	it("excludes characters the goal is not assigned to", function()
+		local ns = harness()
+		ns.Goals.Store.install(gFarm())
+		ns.Goals.Store.setChars("g:farm", { [ME] = true })   -- only the main
+		seedAlt(ns, "Abe-Realm", { lockouts = { iccRow(false) } })
+		local list = ns.Goals.Presenter.goalChars(
+			{ row("g:farm", 1, "Kill LK", { done = false }) }, "g:farm")
+		assert.equal(1, #list)
+		assert.equal(ME, list[1].key)
+	end)
+
+	it("an assigned-but-unseen alt appears as nodata", function()
+		local ns = harness()
+		ns.Goals.Store.install(gFarm())
+		ns.Goals.Store.setChars("g:farm", { [ME] = true, ["Ghost-Realm"] = true })
+		local list = ns.Goals.Presenter.goalChars(
+			{ row("g:farm", 1, "Kill LK", { done = false }) }, "g:farm")
+		assert.equal("Ghost-Realm", list[2].key)
+		assert.equal("nodata", list[2].state)
+	end)
+
+	it("account-scope goal broadcasts the one answer to every assigned column", function()
+		local ns = harness()   -- mount 999 not collected → todo
+		ns.Goals.Store.install(gMount())
+		seedAlt(ns, "Abe-Realm", {})
+		local list = ns.Goals.Presenter.goalChars(
+			{ row("g:mount", 1, "Obtain", { done = false }) }, "g:mount")
+		assert.equal("todo", list[1].state)
+		assert.equal("todo", list[2].state)
+	end)
+end)
+
 describe("Presenter.library — the goals window's two sections", function()
 	local function ids(t)
 		local o = {}

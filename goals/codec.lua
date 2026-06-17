@@ -52,9 +52,11 @@ local function checkShape(goal)
 	if type(goal.rev) ~= "number" then return nil, "goal rev required" end
 	if type(goal.name) ~= "string" or goal.name == "" then return nil, "goal name required" end
 	if not VALID_SCOPE[goal.scope] then return nil, "goal scope must be 'account' or 'perchar'" end
-	-- Optional display fields (§2): icon = fileDataID, tooltip = free text.
+	-- Optional display fields (§2): icon = fileDataID, tooltip/desc/category = text.
 	if goal.icon ~= nil and type(goal.icon) ~= "number" then return nil, "goal icon must be a fileDataID" end
 	if goal.tooltip ~= nil and type(goal.tooltip) ~= "string" then return nil, "goal tooltip must be a string" end
+	if goal.desc ~= nil and type(goal.desc) ~= "string" then return nil, "goal desc must be a string" end
+	if goal.category ~= nil and type(goal.category) ~= "string" then return nil, "goal category must be a string" end
 	if type(goal.steps) ~= "table" then return nil, "goal steps required" end
 	if #goal.steps == 0 then return nil, "goal needs at least one step" end
 	for i = 1, #goal.steps do
