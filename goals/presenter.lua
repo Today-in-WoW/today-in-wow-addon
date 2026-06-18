@@ -389,4 +389,45 @@ function Presenter.goalChars(flatVM, goalId)
 	return out
 end
 
+-- The Browse Catalog tab's view-model from ns.Goals.Catalog. Pure shaping over
+-- the shipped catalog + installed state (no flatVM, no evaluation — the catalog
+-- only needs to know which entries are already installed). Returns {
+--   buckets = { { key, label, icon, desc, total, imported }, ... },  -- sidebar order
+--   byBucket = { [key] = { { id, name, icon, desc, tag, reward, popular,
+--                            scope, require, imported }, ... } },     -- catalog order
+-- }. `imported` = the goal id is in the Store; bucket counts aggregate it.
+function Presenter.catalog()
+	local Catalog = ns.Goals.Catalog
+	local buckets, byKey = {}, {}
+	for _, b in ipairs(Catalog.buckets()) do
+		local vm = { key = b.key, label = b.label, icon = b.icon, desc = b.desc,
+		             total = 0, imported = 0 }
+		buckets[#buckets + 1] = vm
+		byKey[b.key] = vm
+		byKey[b.key].entries = {}
+	end
+
+	for _, e in ipairs(Catalog.entries()) do
+		local b = byKey[e.bucket]
+		if b then
+			local g = e.goal
+			local imported = ns.Goals.Store.get(g.id) ~= nil
+			b.total = b.total + 1
+			if imported then b.imported = b.imported + 1 end
+			b.entries[#b.entries + 1] = {
+				id = g.id, name = g.name, icon = g.icon, desc = g.desc,
+				tag = e.tag, reward = e.reward, popular = e.popular,
+				scope = g.scope, require = g.require, imported = imported,
+			}
+		end
+	end
+
+	local byBucket = {}
+	for _, b in ipairs(buckets) do
+		byBucket[b.key] = b.entries
+		b.entries = nil
+	end
+	return { buckets = buckets, byBucket = byBucket }
+end
+
 return ns

@@ -45,6 +45,14 @@ local onItemDragStart, onItemDragStop   -- assigned below; builders wire them
 local dragState             -- active drag { id, pinned }, or nil
 local importFrame           -- import modal, built on first use
 
+-- Browse Catalog state + forward declarations.
+local catBucket             -- selected sidebar bucket key
+local catSelectedId         -- selected catalog goal id (drives the detail panel)
+local catSearch = ""        -- search-box filter text
+local catCards, catCardN = {}, 0   -- pooled catalog cards
+local refreshCatalog, selectCatalog, openAssign
+local assignFrame           -- §6a assignment modal, built on first use
+
 local WIDTH, HEIGHT = 900, 600
 local TOPBAR_H = 48         -- tab/import/close band height
 local FOOTER_H = 26         -- version + hint band height
@@ -86,8 +94,16 @@ local GREY   = { 0.52, 0.52, 0.55 }  -- not started / unknown
 local FAINT  = { 1, 1, 1, 0.07 }     -- separators / dividers
 local LABEL_RULE = { LABEL[1], LABEL[2], LABEL[3], 0.25 }  -- header trailing line
 
-local TABS = { "goals", "matrix" }
-local TAB_LABEL = { goals = "Goals", matrix = "Completion Matrix" }
+local TABS = { "goals", "catalog", "matrix" }
+local TAB_LABEL = { goals = "Goals", catalog = "Browse Catalog", matrix = "Completion Matrix" }
+
+-- Browse Catalog metrics (sidebar + card grid + detail).
+local C_SIDE_W   = 184   -- category sidebar width
+local C_DETAIL_W = 286   -- right detail-panel width
+local C_CARD_W   = 196   -- catalog card min width (reflows to fill the row)
+local C_CARD_H   = 140   -- catalog card height
+local C_CARD_GAP = 12    -- gap between cards
+local C_HEAD_H   = 92    -- center header band (title + subtitle + search)
 
 -- Goal-level status badge: aggregate state -> { text, color }.
 local BADGE = {
@@ -1120,9 +1136,468 @@ local function refreshMatrix()
 	M.empty:SetShown(#vm.goals == 0 or #vm.chars == 0)
 end
 
+-- ---------------------------------------------------------------------------
+-- Browse Catalog tab — a category sidebar, a searchable card grid of built-in
+-- goals (ns.Goals.Catalog via Presenter.catalog), and a detail panel. Importing
+-- a card opens the §6a assignment prompt (openAssign). Card/detail widgets are
+-- separate from the Goals tab's pools.
+-- ---------------------------------------------------------------------------
+local catCache              -- { byId = { [id] = entry } } from the last refresh
+
+-- Sidebar category button: icon + label + imported/total count; gold accent and
+-- text when selected, subtle highlight on hover.
+local function newCatBucket(parent)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetHeight(34)
+	local selbg = b:CreateTexture(nil, "BACKGROUND")
+	selbg:SetAllPoints(); selbg:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.08); selbg:Hide()
+	b.selbg = selbg
+	local accent = b:CreateTexture(nil, "ARTWORK")
+	accent:SetPoint("TOPLEFT"); accent:SetPoint("BOTTOMLEFT"); accent:SetWidth(2)
+	accent:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1); accent:Hide()
+	b.accent = accent
+	local hl = b:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.04)
+	local icon = b:CreateTexture(nil, "ARTWORK")
+	icon:SetSize(18, 18); icon:SetPoint("LEFT", 10, 0); icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	b.icon = icon
+	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetPoint("LEFT", icon, "RIGHT", 8, 0); label:SetJustifyH("LEFT"); b.label = label
+	local count = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	count:SetPoint("RIGHT", -10, 0); count:SetJustifyH("RIGHT"); b.count = count
+	return b
+end
+
+local function markCatBucket(b, on)
+	b.selbg:SetShown(on); b.accent:SetShown(on)
+	local c = on and GOLD or WHITE
+	b.label:SetTextColor(c[1], c[2], c[3])
+	local cc = on and GOLD or SUBTLE
+	b.count:SetTextColor(cc[1], cc[2], cc[3])
+end
+
+-- Catalog card selection styling: gold border + gold name when selected.
+local function markCatCard(c, on)
+	if on then
+		c:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.6)
+		c.nameFS:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	else
+		c:SetBackdropBorderColor(1, 1, 1, 0.07)
+		c.nameFS:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	end
+end
+
+-- A catalog card: icon + name + source tag, a flavor blurb, and a footer with
+-- the reward and either an Import button or an "Imported" check. Click selects
+-- the card (drives the detail panel); the Import button opens the assignment
+-- prompt.
+local function newCatCard(parent)
+	local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	b:SetSize(C_CARD_W, C_CARD_H)
+	b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropColor(1, 1, 1, 0.025)
+	b:SetBackdropBorderColor(1, 1, 1, 0.07)
+
+	local hl = b:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetPoint("TOPLEFT", 1, -1); hl:SetPoint("BOTTOMRIGHT", -1, 1); hl:SetColorTexture(1, 1, 1, 0.04)
+
+	local iconBorder = b:CreateTexture(nil, "BORDER")
+	iconBorder:SetSize(46, 46); iconBorder:SetColorTexture(0.30, 0.28, 0.26, 0.9)
+	local icon = b:CreateTexture(nil, "ARTWORK")
+	icon:SetSize(44, 44); icon:SetPoint("TOPLEFT", 12, -12); icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	iconBorder:SetPoint("CENTER", icon, "CENTER"); b.icon = icon
+
+	local name = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	name:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -1); name:SetPoint("RIGHT", b, "RIGHT", -10, 0)
+	name:SetJustifyH("LEFT"); name:SetWordWrap(false); name:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	b.nameFS = name
+
+	local tag = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	tag:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -4); tag:SetPoint("RIGHT", b, "RIGHT", -10, 0)
+	tag:SetJustifyH("LEFT"); tag:SetWordWrap(false); tag:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+	b.tag = tag
+
+	local desc = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	desc:SetPoint("TOPLEFT", icon, "BOTTOMLEFT", 0, -8); desc:SetPoint("RIGHT", b, "RIGHT", -10, 0)
+	desc:SetJustifyH("LEFT"); desc:SetWordWrap(true); if desc.SetMaxLines then desc:SetMaxLines(2) end
+	desc:SetTextColor(DESC[1], DESC[2], DESC[3]); b.desc = desc
+
+	local reward = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	reward:SetPoint("BOTTOMLEFT", 12, 12); reward:SetJustifyH("LEFT"); reward:SetWordWrap(false); b.reward = reward
+
+	-- Footer-right: an "Imported" check (when installed) ...
+	local owned = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	owned:SetPoint("BOTTOMRIGHT", -12, 11)
+	owned:SetText("|TInterface\\RaidFrame\\ReadyCheck-Ready:13:13|t Imported")
+	owned:SetTextColor(GREEN[1], GREEN[2], GREEN[3]); owned:Hide(); b.owned = owned
+
+	-- ... or an Import button (when available).
+	local imp = CreateFrame("Button", nil, b, "BackdropTemplate")
+	imp:SetSize(74, 22); imp:SetPoint("BOTTOMRIGHT", -10, 9)
+	imp:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	imp:SetBackdropColor(0.34, 0.10, 0.09, 1); imp:SetBackdropBorderColor(0.85, 0.35, 0.28, 0.9)
+	local impL = imp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	impL:SetPoint("CENTER"); impL:SetText("+  Import"); impL:SetTextColor(1, 0.88, 0.62)
+	imp:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(1, 0.5, 0.4, 1) end)
+	imp:SetScript("OnLeave", function(self) self:SetBackdropBorderColor(0.85, 0.35, 0.28, 0.9) end)
+	imp:SetScript("OnClick", function(self)
+		local goal = ns.Goals.Catalog.goal(self.goalId)
+		if goal then openAssign(goal) end
+	end)
+	b.imp = imp
+
+	b:RegisterForClicks("LeftButtonUp")
+	b:SetScript("OnClick", function(self) selectCatalog(self.goalId) end)
+	return b
+end
+
+local function configCatCard(b, e, selected)
+	b.goalId = e.id
+	b.imp.goalId = e.id
+	b.icon:SetTexture(e.icon or DEFAULT_ICON)
+	fitText(b.nameFS, e.name or "", b:GetWidth() - 44 - 34)
+	b.tag:SetText(e.tag or "")
+	b.desc:SetText(e.desc or "")
+	b.reward:SetText(e.reward or ""); b.reward:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	b.owned:SetShown(e.imported); b.imp:SetShown(not e.imported)
+	markCatCard(b, selected)
+end
+
+-- Right-hand detail for the selected catalog entry (top-down flow like the Goals
+-- detail). nil clears it to the hint.
+local function renderCatalogDetail(e)
+	local C = frame and frame.catalog
+	if not C then return end
+	if not e then
+		C.dIcon:Hide(); C.dIconBorder:Hide(); C.dName:Hide(); C.dTag:Hide()
+		C.dPopular:Hide(); C.dDivider:Hide(); C.dDesc:Hide()
+		for i = 1, #C.infoL do C.infoL[i]:Hide(); C.infoV[i]:Hide() end
+		C.dImport:Hide(); C.dOwned:Hide(); C.dHint:Show()
+		return
+	end
+	C.dHint:Hide()
+
+	C.dIcon:Show(); C.dIconBorder:Show(); C.dIcon:SetTexture(e.icon or DEFAULT_ICON)
+	C.dName:Show(); C.dName:SetText(e.name or "")
+	C.dTag:Show(); C.dTag:SetText(e.tag or "")
+
+	local headerH = math.max(50, (C.dName:GetStringHeight() or 16) + 6 + (C.dTag:GetStringHeight() or 12) + 4)
+	local y = -headerH - 8
+
+	if e.popular then
+		C.dPopular:ClearAllPoints(); C.dPopular:SetPoint("TOPLEFT", 0, y); C.dPopular:Show(); y = y - 26
+	else
+		C.dPopular:Hide()
+	end
+
+	C.dDivider:ClearAllPoints(); C.dDivider:SetPoint("TOPLEFT", 0, y)
+	C.dDivider:SetPoint("TOPRIGHT", C.detail, "TOPRIGHT", -2, y); C.dDivider:Show(); y = y - 12
+
+	C.dDesc:ClearAllPoints(); C.dDesc:SetPoint("TOPLEFT", 0, y); C.dDesc:SetWidth(C.detail:GetWidth() - 2)
+	C.dDesc:SetText(e.desc or ""); C.dDesc:Show()
+	y = y - math.ceil(C.dDesc:GetStringHeight()) - 16
+
+	local rows = {
+		{ "Reward", e.reward or "\226\128\148", WHITE },
+		{ "Source", e.tag or "\226\128\148", WHITE },
+		{ "Status", e.imported and "Imported" or "Available", e.imported and GREEN or SUBTLE },
+	}
+	for i, r in ipairs(rows) do
+		local lab, val = C.infoL[i], C.infoV[i]
+		lab:ClearAllPoints(); lab:SetPoint("TOPLEFT", 0, y); lab:SetText(r[1]); lab:Show()
+		val:ClearAllPoints(); val:SetPoint("TOPRIGHT", C.detail, "TOPRIGHT", -2, y)
+		val:SetText(r[2]); val:SetTextColor(r[3][1], r[3][2], r[3][3]); val:Show()
+		y = y - 22
+	end
+	y = y - 10
+
+	if e.imported then
+		C.dImport:Hide()
+		C.dOwned:ClearAllPoints(); C.dOwned:SetPoint("TOPLEFT", 0, y)
+		C.dOwned:SetPoint("TOPRIGHT", C.detail, "TOPRIGHT", -2, y); C.dOwned:Show()
+	else
+		C.dOwned:Hide()
+		C.dImport.goalId = e.id
+		C.dImport:ClearAllPoints(); C.dImport:SetPoint("TOPLEFT", 0, y)
+		C.dImport:SetPoint("TOPRIGHT", C.detail, "TOPRIGHT", -2, y); C.dImport:SetHeight(30); C.dImport:Show()
+	end
+end
+
+function selectCatalog(id)
+	catSelectedId = id
+	for i = 1, catCardN do markCatCard(catCards[i], catCards[i].goalId == id) end
+	renderCatalogDetail(catCache and catCache.byId[id] or nil)
+end
+
+-- ---------------------------------------------------------------------------
+-- §6a assignment prompt — choose who a freshly-imported catalog goal tracks:
+-- Everyone, this character only (disabled if it fails the goal-level require),
+-- or a chosen subset of the known characters.
+-- ---------------------------------------------------------------------------
+
+-- Class token for a charKey: live for the current character, substrate for alts.
+local function keyClass(key, current)
+	if key == current then return select(2, UnitClass("player")) end
+	local s = ns.Goals.Substrate.get(key)
+	return s and s.meta and s.meta.class
+end
+
+local function currentMeetsRequire(goal)
+	if goal.require and goal.require.level then
+		return (UnitLevel("player") or 0) >= goal.require.level
+	end
+	return true
+end
+
+-- A full-width choice button (title + sub line) for the assignment pick page.
+local function makeAssignChoice(parent)
+	local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropColor(1, 1, 1, 0.03); b:SetBackdropBorderColor(1, 1, 1, 0.12)
+	local hl = b:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.04)
+	local t = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	t:SetPoint("LEFT", 14, 7); t:SetTextColor(WHITE[1], WHITE[2], WHITE[3]); b.title = t
+	local s = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	s:SetPoint("LEFT", 14, -9); s:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3]); b.sub = s
+	b:SetScript("OnEnter", function(self)
+		if self:IsEnabled() then self:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.7); t:SetTextColor(1, 0.9, 0.6) end
+	end)
+	b:SetScript("OnLeave", function(self)
+		self:SetBackdropBorderColor(1, 1, 1, 0.12); t:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	end)
+	return b
+end
+
+-- A checkbox row (class-colored name + realm) for the "Choose characters…" list.
+local function makeCharCheck(parent)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetHeight(26)
+	local box = b:CreateTexture(nil, "ARTWORK"); box:SetSize(16, 16); box:SetPoint("LEFT", 2, 0); box:SetColorTexture(1, 1, 1, 0.08)
+	local check = b:CreateTexture(nil, "OVERLAY"); check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+	check:SetSize(16, 16); check:SetPoint("CENTER", box, "CENTER"); check:Hide(); b.check = check
+	local hl = b:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.04)
+	local name = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); name:SetPoint("LEFT", box, "RIGHT", 8, 0); name:SetJustifyH("LEFT"); b.nameFS = name
+	local realm = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); realm:SetPoint("LEFT", name, "RIGHT", 6, 0); realm:SetJustifyH("LEFT"); realm:SetTextColor(0.5, 0.5, 0.5); b.realm = realm
+	b:SetScript("OnClick", function(self)
+		assignFrame.sel[self.key] = (not assignFrame.sel[self.key]) or nil
+		self.check:SetShown(assignFrame.sel[self.key] == true)
+		assignFrame.updateConfirm()
+	end)
+	return b
+end
+
+local function buildAssign()
+	local f = CreateFrame("Frame", "TiWGoalAssign", UIParent, "BackdropTemplate")
+	f:SetSize(380, 380); f:SetPoint("CENTER")
+	f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
+	f:EnableMouse(true); f:SetMovable(true); f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8",
+		edgeSize = 1, insets = { left = 1, right = 1, top = 1, bottom = 1 } })
+	f:SetBackdropColor(0.06, 0.055, 0.065, 0.98); f:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.6)
+
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("TOP", 0, -14); title:SetText("Add Goal"); title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	local gname = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	gname:SetPoint("TOPLEFT", 18, -40); gname:SetPoint("TOPRIGHT", -18, -40)
+	gname:SetJustifyH("LEFT"); gname:SetWordWrap(true); gname:SetTextColor(WHITE[1], WHITE[2], WHITE[3]); f.gname = gname
+	local prompt = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	prompt:SetPoint("TOPLEFT", 18, -66); prompt:SetText("Which characters should track this goal?")
+
+	-- Pick page: the three choices.
+	local pick = CreateFrame("Frame", nil, f); f.pick = pick
+	pick:SetPoint("TOPLEFT", 18, -88); pick:SetPoint("TOPRIGHT", -18, -88); pick:SetHeight(170)
+	local everyone = makeAssignChoice(pick); everyone:SetHeight(44)
+	everyone:SetPoint("TOPLEFT"); everyone:SetPoint("TOPRIGHT")
+	everyone.title:SetText("Everyone"); everyone.sub:SetText("Track on all characters.")
+	local thisChar = makeAssignChoice(pick); thisChar:SetHeight(44)
+	thisChar:SetPoint("TOPLEFT", everyone, "BOTTOMLEFT", 0, -10); thisChar:SetPoint("TOPRIGHT", everyone, "BOTTOMRIGHT", 0, -10)
+	thisChar.title:SetText("This character only")
+	local choose = makeAssignChoice(pick); choose:SetHeight(44)
+	choose:SetPoint("TOPLEFT", thisChar, "BOTTOMLEFT", 0, -10); choose:SetPoint("TOPRIGHT", thisChar, "BOTTOMRIGHT", 0, -10)
+	choose.title:SetText("Choose characters\226\128\166"); choose.sub:SetText("Pick specific characters.")
+	f.thisChar = thisChar
+
+	-- List page: a checkbox list of known characters.
+	local list = CreateFrame("Frame", nil, f); f.list = list
+	list:SetPoint("TOPLEFT", 18, -88); list:SetPoint("BOTTOMRIGHT", -18, 48); list:Hide()
+	local lscroll = makeScroll(list)
+	lscroll.sf:SetPoint("TOPLEFT", 0, 0); lscroll.sf:SetPoint("BOTTOMRIGHT", -10, 0)
+	lscroll.sb:SetPoint("TOPRIGHT", 0, 0); lscroll.sb:SetPoint("BOTTOMRIGHT", 0, 0)
+	f.checks = {}
+
+	-- Bottom buttons.
+	local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	cancel:SetSize(100, 22); cancel:SetPoint("BOTTOMLEFT", 16, 14); cancel:SetText("Cancel")
+	cancel:SetScript("OnClick", function() f:Hide() end); f.cancel = cancel
+	local back = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	back:SetSize(100, 22); back:SetPoint("BOTTOMLEFT", 16, 14); back:SetText("Back"); back:Hide(); f.back = back
+	local confirm = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	confirm:SetSize(100, 22); confirm:SetPoint("BOTTOMRIGHT", -16, 14); confirm:SetText("Add"); confirm:Hide(); f.confirm = confirm
+
+	local function install(chars)
+		ns.Goals.Store.install(f.goal, { chars = chars })
+		f:Hide()
+		ensureEngine()
+		refreshCatalog()
+	end
+
+	function f.updateConfirm()
+		local any = false
+		for _, v in pairs(f.sel) do if v then any = true; break end end
+		if any then confirm:Enable() else confirm:Disable() end
+	end
+
+	local function showList()
+		pick:Hide(); list:Show(); cancel:Hide(); back:Show(); confirm:Show()
+		local current = ns.Goals.Substrate.charKey()
+		local keys = { current }
+		for _, k in ipairs(ns.Goals.Store.chars()) do if k ~= current then keys[#keys + 1] = k end end
+		f.sel = {}
+		for i, key in ipairs(keys) do
+			local row = f.checks[i]
+			if not row then row = makeCharCheck(lscroll.sc); f.checks[i] = row end
+			row.key = key; row.check:Hide()
+			row.nameFS:SetText(key:match("^[^-]+") or key)
+			local cr, cg, cb = classRGB(keyClass(key, current))
+			row.nameFS:SetTextColor(cr, cg, cb)
+			row.realm:SetText(key:match("%-(.+)$") or "")
+			row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, -(i - 1) * 28); row:SetPoint("RIGHT", lscroll.sc, "RIGHT", 0, 0)
+			row:Show()
+		end
+		for i = #keys + 1, #f.checks do f.checks[i]:Hide() end
+		lscroll.sc:SetWidth(lscroll.sf:GetWidth())
+		updateScroll(lscroll, #keys * 28 + 4)
+		f.updateConfirm()
+	end
+
+	everyone:SetScript("OnClick", function() install("all") end)
+	thisChar:SetScript("OnClick", function(self)
+		if not self:IsEnabled() then return end
+		install({ [ns.Goals.Substrate.charKey()] = true })
+	end)
+	choose:SetScript("OnClick", showList)
+	back:SetScript("OnClick", function()
+		list:Hide(); pick:Show(); back:Hide(); confirm:Hide(); cancel:Show()
+	end)
+	confirm:SetScript("OnClick", function()
+		local chars, any = {}, false
+		for k, v in pairs(f.sel) do if v then chars[k] = true; any = true end end
+		if any then install(chars) end
+	end)
+
+	table.insert(UISpecialFrames, "TiWGoalAssign")
+	assignFrame = f
+	return f
+end
+
+function openAssign(goal)
+	if not assignFrame then buildAssign() end
+	local f = assignFrame
+	f.goal = goal; f.sel = {}
+	f.list:Hide(); f.pick:Show(); f.back:Hide(); f.confirm:Hide(); f.cancel:Show()
+	f.gname:SetText(goal.name or "")
+	if currentMeetsRequire(goal) then
+		f.thisChar:Enable(); f.thisChar:SetAlpha(1)
+		f.thisChar.sub:SetText(ns.Goals.Substrate.charKey():match("^[^-]+") or "")
+		f.thisChar.sub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	else
+		f.thisChar:Disable(); f.thisChar:SetAlpha(0.45)
+		f.thisChar.sub:SetText("Requires level " .. goal.require.level)
+		f.thisChar.sub:SetTextColor(0.80, 0.40, 0.40)
+	end
+	f:Show(); f:Raise()
+end
+
+function refreshCatalog()
+	local C = frame and frame.catalog
+	if not C then return end
+	local vm = ns.Goals.Presenter.catalog()
+
+	-- Default / validate the selected bucket.
+	local bucketVM
+	for _, b in ipairs(vm.buckets) do if b.key == catBucket then bucketVM = b end end
+	if not bucketVM then
+		catBucket = vm.buckets[1] and vm.buckets[1].key
+		bucketVM = vm.buckets[1]
+	end
+
+	-- Sidebar buttons.
+	local bn = 0
+	for _, b in ipairs(vm.buckets) do
+		bn = bn + 1
+		local btn = C.buckets[bn]
+		if not btn then btn = newCatBucket(C.sidebar); C.buckets[bn] = btn end
+		btn.key = b.key
+		btn.icon:SetTexture(b.icon)
+		btn.label:SetText(b.label)
+		btn.count:SetText(b.imported .. "/" .. b.total)
+		markCatBucket(btn, b.key == catBucket)
+		btn:SetScript("OnClick", function(self)
+			if catBucket ~= self.key then
+				catBucket = self.key; catSelectedId = nil; refreshCatalog()
+			end
+		end)
+		btn:ClearAllPoints()
+		btn:SetPoint("TOPLEFT", C.sidebar, "TOPLEFT", 0, -22 - (bn - 1) * 38)
+		btn:SetPoint("RIGHT", C.sidebar, "RIGHT", -4, 0)
+		btn:Show()
+	end
+	for i = bn + 1, #C.buckets do C.buckets[i]:Hide() end
+
+	-- Center header.
+	C.title:SetText(bucketVM and bucketVM.label or "")
+	C.sub:SetText(bucketVM and bucketVM.desc or "")
+
+	-- Entries for the bucket, filtered by the search box.
+	local entries = vm.byBucket[catBucket] or {}
+	local q = catSearch:lower()
+	local shown = {}
+	catCache = { byId = {} }
+	for _, e in ipairs(entries) do
+		catCache.byId[e.id] = e
+		if q == "" or (e.name and e.name:lower():find(q, 1, true))
+			or (e.desc and e.desc:lower():find(q, 1, true)) then
+			shown[#shown + 1] = e
+		end
+	end
+
+	if catSelectedId and not catCache.byId[catSelectedId] then catSelectedId = nil end
+	if not catSelectedId and shown[1] then catSelectedId = shown[1].id end
+
+	-- Card grid, reflowed to fill the scroll width.
+	catCardN = 0
+	local cw = C.cardScroll.sf:GetWidth()
+	if cw < 1 then cw = 1 end
+	C.cardScroll.sc:SetWidth(cw)
+	local cols = math.max(1, math.floor((cw + C_CARD_GAP) / (C_CARD_W + C_CARD_GAP)))
+	local cardW = math.floor((cw - (cols - 1) * C_CARD_GAP) / cols)
+	for i, e in ipairs(shown) do
+		catCardN = catCardN + 1
+		local card = catCards[catCardN]
+		if not card then card = newCatCard(C.cardScroll.sc); catCards[catCardN] = card end
+		card:SetWidth(cardW)
+		local col = (i - 1) % cols
+		local rowi = math.floor((i - 1) / cols)
+		card:ClearAllPoints()
+		card:SetPoint("TOPLEFT", col * (cardW + C_CARD_GAP), -rowi * (C_CARD_H + C_CARD_GAP))
+		configCatCard(card, e, e.id == catSelectedId)
+		card:Show()
+	end
+	for i = catCardN + 1, #catCards do catCards[i]:Hide() end
+	updateScroll(C.cardScroll, math.ceil(#shown / cols) * (C_CARD_H + C_CARD_GAP) + 4)
+	C.empty:SetShown(#shown == 0)
+
+	renderCatalogDetail(catSelectedId and catCache.byId[catSelectedId] or nil)
+end
+
 local function refreshActive()
 	if not (frame and frame.tabs) then return end
-	if frame.tabs.matrix.selected then refreshMatrix() else refreshGoals() end
+	if frame.tabs.matrix.selected then refreshMatrix()
+	elseif frame.tabs.catalog.selected then refreshCatalog()
+	else refreshGoals() end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1521,6 +1996,124 @@ local function buildMatrixTab(pane)
 	frame.matrix = M
 end
 
+-- Browse Catalog tab: category sidebar (left), searchable card grid (center),
+-- and a detail panel (right), separated by faint dividers.
+local function buildCatalogTab(pane)
+	local C = {}
+
+	-- Left: category sidebar.
+	local sidebar = CreateFrame("Frame", nil, pane)
+	sidebar:SetPoint("TOPLEFT", 0, 0); sidebar:SetPoint("BOTTOMLEFT", 0, 0); sidebar:SetWidth(C_SIDE_W)
+	C.sidebar = sidebar
+	local catLabel = sidebar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	catLabel:SetPoint("TOPLEFT", 10, -4); catLabel:SetText("Categories")
+	catLabel:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+	C.buckets = {}
+
+	-- Right: detail panel (built first so the center can anchor to its left).
+	local detail = CreateFrame("Frame", nil, pane)
+	detail:SetPoint("TOPRIGHT", 0, 0); detail:SetPoint("BOTTOMRIGHT", 0, 0); detail:SetWidth(C_DETAIL_W)
+	C.detail = detail
+
+	-- Column dividers.
+	local div1 = pane:CreateTexture(nil, "ARTWORK"); div1:SetWidth(1)
+	div1:SetColorTexture(FAINT[1], FAINT[2], FAINT[3], FAINT[4])
+	div1:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 0, -2); div1:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMRIGHT", 0, 2)
+	local div2 = pane:CreateTexture(nil, "ARTWORK"); div2:SetWidth(1)
+	div2:SetColorTexture(FAINT[1], FAINT[2], FAINT[3], FAINT[4])
+	div2:SetPoint("TOPRIGHT", detail, "TOPLEFT", -8, -2); div2:SetPoint("BOTTOMRIGHT", detail, "BOTTOMLEFT", -8, 2)
+
+	-- Center: title + subtitle + search + card grid.
+	local center = CreateFrame("Frame", nil, pane)
+	center:SetPoint("TOPLEFT", C_SIDE_W + 16, 0); center:SetPoint("BOTTOMRIGHT", detail, "BOTTOMLEFT", -16, 0)
+	C.center = center
+
+	local title = center:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("TOPLEFT", 2, -2); title:SetFont("Fonts\\MORPHEUS.ttf", 22, "")
+	title:SetTextColor(GOLD[1], GOLD[2], GOLD[3]); C.title = title
+	local sub = center:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -4)
+	sub:SetPoint("RIGHT", center, "RIGHT", -10, 0)
+	do local sf, _, sfl = sub:GetFont(); sub:SetFont(sf, 12, sfl) end
+	sub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3]); sub:SetJustifyH("LEFT"); sub:SetWordWrap(true); C.sub = sub
+
+	-- Search box (filters the card grid by name/description).
+	local search = CreateFrame("EditBox", nil, center, "BackdropTemplate")
+	search:SetHeight(26); search:SetPoint("TOPLEFT", 2, -60); search:SetPoint("RIGHT", center, "RIGHT", -10, 0)
+	search:SetAutoFocus(false); search:SetFontObject("ChatFontNormal"); search:SetTextInsets(28, 8, 0, 0)
+	search:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	search:SetBackdropColor(1, 1, 1, 0.03); search:SetBackdropBorderColor(1, 1, 1, 0.10)
+	local mag = search:CreateTexture(nil, "ARTWORK"); mag:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+	mag:SetSize(14, 14); mag:SetPoint("LEFT", 8, 0); mag:SetVertexColor(0.6, 0.6, 0.6)
+	local ph = search:CreateFontString(nil, "OVERLAY", "GameFontDisable"); ph:SetPoint("LEFT", 28, 0); ph:SetText("Search...")
+	search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	search:SetScript("OnTextChanged", function(self)
+		ph:SetShown(self:GetText() == "")
+		catSearch = self:GetText() or ""
+		refreshCatalog()
+	end)
+	C.searchBox = search
+
+	C.cardScroll = makeScroll(center)
+	C.cardScroll.sf:SetPoint("TOPLEFT", 0, -C_HEAD_H); C.cardScroll.sf:SetPoint("BOTTOMRIGHT", center, "BOTTOMRIGHT", -10, 0)
+	C.cardScroll.sb:SetPoint("TOPRIGHT", center, "TOPRIGHT", -2, -C_HEAD_H); C.cardScroll.sb:SetPoint("BOTTOMRIGHT", center, "BOTTOMRIGHT", -2, 0)
+
+	local empty = center:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+	empty:SetPoint("CENTER", C.cardScroll.sf, "CENTER"); empty:SetText("No goals here yet."); empty:Hide()
+	C.empty = empty
+
+	-- Detail widgets (positioned by renderCatalogDetail).
+	local dIconBorder = detail:CreateTexture(nil, "BORDER"); dIconBorder:SetSize(50, 50); dIconBorder:SetColorTexture(0.30, 0.28, 0.26, 0.9)
+	local dIcon = detail:CreateTexture(nil, "ARTWORK"); dIcon:SetSize(48, 48); dIcon:SetPoint("TOPLEFT", 0, -2); dIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	dIconBorder:SetPoint("CENTER", dIcon, "CENTER"); C.dIcon, C.dIconBorder = dIcon, dIconBorder
+	local dName = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	dName:SetPoint("TOPLEFT", dIcon, "TOPRIGHT", 10, -1); dName:SetPoint("RIGHT", detail, "RIGHT", -2, 0)
+	dName:SetJustifyH("LEFT"); dName:SetWordWrap(true); if dName.SetMaxLines then dName:SetMaxLines(2) end
+	dName:SetTextColor(GOLD[1], GOLD[2], GOLD[3]); C.dName = dName
+	local dTag = detail:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	dTag:SetPoint("TOPLEFT", dName, "BOTTOMLEFT", 0, -4); dTag:SetJustifyH("LEFT")
+	dTag:SetTextColor(LABEL[1], LABEL[2], LABEL[3]); C.dTag = dTag
+
+	local dPopular = CreateFrame("Frame", nil, detail, "BackdropTemplate"); dPopular:SetSize(76, 18)
+	dPopular:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	dPopular:SetBackdropColor(GOLD[1], GOLD[2], GOLD[3], 0.12); dPopular:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.7)
+	local pl = dPopular:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); pl:SetPoint("CENTER"); pl:SetText("Popular"); pl:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	dPopular:Hide(); C.dPopular = dPopular
+
+	local dDivider = detail:CreateTexture(nil, "ARTWORK"); dDivider:SetHeight(1)
+	dDivider:SetColorTexture(FAINT[1], FAINT[2], FAINT[3], FAINT[4]); dDivider:Hide(); C.dDivider = dDivider
+
+	local dDesc = detail:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	dDesc:SetJustifyH("LEFT"); dDesc:SetWordWrap(true); dDesc:SetTextColor(DESC[1], DESC[2], DESC[3]); dDesc:Hide(); C.dDesc = dDesc
+
+	C.infoL, C.infoV = {}, {}
+	for i = 1, 3 do
+		local lab = detail:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); lab:SetJustifyH("LEFT")
+		lab:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3]); lab:Hide()
+		local val = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); val:SetJustifyH("RIGHT"); val:Hide()
+		C.infoL[i], C.infoV[i] = lab, val
+	end
+
+	local dImport = makeImportButton(detail); dImport:Hide()
+	dImport:SetScript("OnClick", function(self)
+		local goal = ns.Goals.Catalog.goal(self.goalId)
+		if goal then openAssign(goal) end
+	end)
+	C.dImport = dImport
+
+	local dOwned = CreateFrame("Frame", nil, detail, "BackdropTemplate"); dOwned:SetHeight(30)
+	dOwned:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	dOwned:SetBackdropColor(0.12, 0.20, 0.12, 0.5); dOwned:SetBackdropBorderColor(GREEN[1], GREEN[2], GREEN[3], 0.5)
+	local ol = dOwned:CreateFontString(nil, "OVERLAY", "GameFontNormal"); ol:SetPoint("CENTER")
+	ol:SetText("|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t Already in your goals"); ol:SetTextColor(GREEN[1], GREEN[2], GREEN[3])
+	dOwned:Hide(); C.dOwned = dOwned
+
+	local dHint = detail:CreateFontString(nil, "OVERLAY", "GameFontDisable"); dHint:SetPoint("CENTER"); dHint:SetText("Select a goal to preview it.")
+	C.dHint = dHint
+
+	frame.catalog = C
+end
+
 local function registerRemovePopup()
 	if not StaticPopupDialogs or StaticPopupDialogs["TIW_GOAL_REMOVE"] then return end
 	StaticPopupDialogs["TIW_GOAL_REMOVE"] = {
@@ -1663,6 +2256,7 @@ local function build()
 
 	frame = f
 	buildGoalsTab(f.panes.goals)
+	buildCatalogTab(f.panes.catalog)
 	buildMatrixTab(f.panes.matrix)
 	registerRemovePopup()
 

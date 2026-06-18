@@ -43,6 +43,7 @@ goals\store.lua
 goals\engine.lua
 goals\substrate.lua
 goals\offline.lua
+goals\catalog.lua
 goals\presenter.lua
 goals\ui_panel.lua
 goals\ui_matrix.lua
