@@ -152,11 +152,22 @@ local function currentResults(rows)
 	return results
 end
 
--- Current character's goal-level eligibility: live UnitLevel vs require.level.
+-- Does the live (current) character know the profession `id` (skillLineID)?
+-- skillLine is the 7th return of GetProfessionInfo.
+local function currentHasProfession(id)
+	if not GetProfessions or not GetProfessionInfo then return false end
+	local function chk(idx) return idx ~= nil and select(7, GetProfessionInfo(idx)) == id end
+	local p1, p2, arch, fish, cook = GetProfessions()
+	return chk(p1) or chk(p2) or chk(arch) or chk(fish) or chk(cook)
+end
+
+-- Current character's goal-level eligibility: live UnitLevel + professions vs
+-- `require` (v1: level + profession).
 local function currentEligible(goal)
-	if goal.require and goal.require.level then
-		return (UnitLevel("player") or 0) >= goal.require.level
-	end
+	local req = goal.require
+	if not req then return true end
+	if req.level and (UnitLevel("player") or 0) < req.level then return false end
+	if req.profession and not currentHasProfession(req.profession) then return false end
 	return true
 end
 

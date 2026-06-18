@@ -57,6 +57,9 @@ goals\evaluators\criteria.lua
 goals\evaluators\achievement.lua
 goals\evaluators\renown.lua
 goals\evaluators\reputation.lua
+goals\evaluators\questlog.lua
+goals\evaluators\vault.lua
+goals\evaluators\group.lua
 goals\dev.lua
 collectors\basics.lua
 collectors\level_up.lua

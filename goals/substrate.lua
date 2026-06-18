@@ -116,6 +116,22 @@ local function scanQuests()
 	return table.concat(C_QuestLog.GetAllCompletedQuestIDs() or {}, ",")
 end
 
+-- Known professions' skill-line IDs (sorted), for `require.profession` on alts.
+-- skillLine is the 7th return of GetProfessionInfo; empty list when unavailable.
+local function scanProfessions()
+	local out = {}
+	if not GetProfessions or not GetProfessionInfo then return out end
+	local function add(idx)
+		if not idx then return end
+		local skillLine = select(7, GetProfessionInfo(idx))
+		if skillLine then out[#out + 1] = skillLine end
+	end
+	local p1, p2, arch, fish, cook = GetProfessions()
+	add(p1); add(p2); add(arch); add(fish); add(cook)
+	table.sort(out)
+	return out
+end
+
 -- Full scan of the live character -> Store.writeSubstrate(charKey(), record).
 -- Record shape: see goal-format-v1 §6. Never errors — missing API namespaces
 -- yield empty sections; seen is always stamped.
@@ -125,7 +141,8 @@ function Substrate.capture()
 	local now = GetServerTime()
 	Store.writeSubstrate(key, {
 		seen       = now,
-		meta       = { level = UnitLevel("player"), class = select(2, UnitClass("player")) },
+		meta       = { level = UnitLevel("player"), class = select(2, UnitClass("player")),
+		               professions = scanProfessions() },
 		lockouts   = scanLockouts(now),
 		currencies = scanCurrencies(),
 		quests     = scanQuests(),

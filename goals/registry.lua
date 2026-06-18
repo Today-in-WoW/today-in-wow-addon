@@ -107,6 +107,27 @@ function Registry.checkParams(params, spec)
 	return true
 end
 
+-- Effective game events for a step's dirty-flag wiring. A plain step yields its
+-- evaluator's static events; a `group` step yields the UNION of its leaves'
+-- events (the group's own static list is empty — composition is per-instance).
+function Registry.eventsFor(step)
+	if step.evaluator ~= "group" then
+		local def = evaluators[step.evaluator]
+		return (def and def.events) or {}
+	end
+	local seen, out = {}, {}
+	local of = (step.params and step.params.of) or {}
+	for _, leaf in ipairs(of) do
+		local ldef = evaluators[leaf.evaluator]
+		if ldef and ldef.events then
+			for _, e in ipairs(ldef.events) do
+				if not seen[e] then seen[e] = true; out[#out + 1] = e end
+			end
+		end
+	end
+	return out
+end
+
 -- Capability check for a decoded goal: array of step indices whose evaluator
 -- is unknown or whose params fail validate. {} when fully supported.
 function Registry.unsupportedSteps(goal)

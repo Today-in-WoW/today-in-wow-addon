@@ -7,7 +7,7 @@ local _, ns = ...
 -- The display-side orchestrator for alts: walks a goal's steps, calls each
 -- evaluator with (params, charKey) — evaluators own the substrate branch —
 -- and applies the two pieces of goal-level knowledge evaluators don't have:
---   1. per-step `require.level` eligibility against substrate meta, and
+--   1. `require` eligibility (v1: level + profession) against substrate meta, and
 --   2. author-declared `resets` invalidation (§3): a substrate snapshot older
 --      than the last daily/weekly reset boundary renders the step confidently
 --      NOT done (the Tuesday-morning truth), never last week's checkmark.
@@ -19,6 +19,22 @@ local _, ns = ...
 ns.Goals = ns.Goals or {}
 local Offline = {}
 ns.Goals.Offline = Offline
+
+-- Does the substrate meta satisfy a `require` block? v1: level + profession.
+-- (§3 intrinsic eligibility, evaluated against the alt's last-known meta.)
+local function hasProfession(meta, id)
+	local list = meta and meta.professions
+	if type(list) ~= "table" then return false end
+	for _, p in ipairs(list) do if p == id then return true end end
+	return false
+end
+
+local function meetsRequire(req, meta)
+	if not req then return true end
+	if req.level and ((meta and meta.level) or 0) < req.level then return false end
+	if req.profession and not hasProfession(meta, req.profession) then return false end
+	return true
+end
 
 -- Epoch of the most recent weekly reset, computed from the live client:
 -- now + C_DateAndTime.GetSecondsUntilWeeklyReset() - 7*86400.
@@ -40,27 +56,24 @@ end
 --                                                  -- character once"
 --   { eligible = bool, seen = ts, steps = {        -- substrate exists
 --       { index, label, result },                  -- result per §5 conventions
---       { index, label, ineligible = true },       -- step require.level not met
+--       { index, label, ineligible = true },       -- step `require` not met
 --       ... } }
--- eligible = goal-level require.level vs meta.level (no require -> true;
--- missing meta.level counts as 0). Unknown evaluators yield a stale result
--- (the §4 unsupported path renders separately via state[id].unsupported).
+-- eligible = goal-level `require` (level + profession) vs meta (no require ->
+-- true; missing meta.level counts as 0, missing meta.professions as none).
+-- Unknown evaluators yield a stale result (the §4 unsupported path renders
+-- separately via state[id].unsupported).
 function Offline.goalFor(charKey, goal)
 	local rec = ns.Goals.Store.getSubstrate(charKey)
 	if not rec then return { noData = true, steps = {} } end
 
-	local level = (rec.meta and rec.meta.level) or 0
-	local eligible = true
-	if goal.require and goal.require.level then
-		eligible = level >= goal.require.level
-	end
+	local eligible = meetsRequire(goal.require, rec.meta)
 
 	local now = GetServerTime()
 	local steps = {}
 	for i = 1, #goal.steps do
 		local step = goal.steps[i]
 		local row = { index = i, label = step.label }
-		if step.require and step.require.level and level < step.require.level then
+		if step.require and not meetsRequire(step.require, rec.meta) then
 			row.ineligible = true
 		else
 			local def = ns.Goals.Registry.get(step.evaluator)
