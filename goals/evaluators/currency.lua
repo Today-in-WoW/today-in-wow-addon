@@ -5,7 +5,9 @@ local _, ns = ...
 --   currency (currencyID, required)
 --   amount (number)  — done when count >= amount
 --   cap (true)       — done at the total/season cap (totalEarned where flagged)
---   atMost (number)  — done when count <= atMost (atMost = 0 is "spent it all")
+--   atMost (number)  — done when count <= atMost (atMost = 0 is "spent it all");
+--                      binary (no progress/max) — a fraction toward a DECREASING
+--                      target reads backwards ("8/0" while spending down).
 --   weekly (true)    — done at the WEEKLY earnable cap (earned this week vs
 --                      maxWeeklyQuantity); unlike cap/amount it does NOT drop
 --                      when you spend, so "earn the weekly cap then spend it"
@@ -37,7 +39,7 @@ ns.Goals.Registry.register("currency", {
 			if not entry then
 				if params.cap or params.weekly then return { done = false, progress = 0 } end
 				if type(params.atMost) == "number" then
-					return { done = 0 <= params.atMost, progress = 0, max = params.atMost }
+					return { done = 0 <= params.atMost }
 				end
 				return { done = false, progress = 0, max = params.amount }
 			end
@@ -53,7 +55,7 @@ ns.Goals.Registry.register("currency", {
 				return { done = m > 0 and n >= m, progress = n, max = m }
 			end
 			if type(params.atMost) == "number" then
-				return { done = q <= params.atMost, progress = q, max = params.atMost }
+				return { done = q <= params.atMost }
 			end
 			if type(params.amount) ~= "number" then return { done = false } end
 			return { done = q >= params.amount, progress = q, max = params.amount }
@@ -77,7 +79,7 @@ ns.Goals.Registry.register("currency", {
 			return { done = m > 0 and n >= m, progress = n, max = m }
 		end
 		if type(params.atMost) == "number" then
-			return { done = q <= params.atMost, progress = q, max = params.atMost }
+			return { done = q <= params.atMost }
 		end
 		-- Defensive (§5: evaluate never errors): a params table that dodged
 		-- validate (e.g. cap=false) has no amount — answer un-done, don't compare

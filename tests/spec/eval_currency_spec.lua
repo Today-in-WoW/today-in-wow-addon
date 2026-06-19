@@ -284,19 +284,19 @@ describe("currency evaluate — atMost mode", function()
 	before_each(function() ev = harness() end)
 	after_each(function() _G.C_CurrencyInfo = nil end)
 
-	it("done when quantity <= atMost (spent all → 0 <= 0)", function()
+	it("done when quantity <= atMost (spent all → 0 <= 0); binary, no fraction", function()
 		_G.C_CurrencyInfo = { GetCurrencyInfo = function() return fakeInfo(0, 2000) end }
 		local r = ev.evaluate({ currency = 3376, atMost = 0 })
 		assert.is_true(r.done)
-		assert.equal(0, r.progress)
-		assert.equal(0, r.max)
+		assert.is_nil(r.progress)
+		assert.is_nil(r.max)
 	end)
 
-	it("not done while currency remains above atMost", function()
+	it("not done while currency remains above atMost (binary, no fraction)", function()
 		_G.C_CurrencyInfo = { GetCurrencyInfo = function() return fakeInfo(450, 2000) end }
 		local r = ev.evaluate({ currency = 3376, atMost = 0 })
 		assert.is_false(r.done)
-		assert.equal(450, r.progress)
+		assert.is_nil(r.progress)
 	end)
 end)
 
