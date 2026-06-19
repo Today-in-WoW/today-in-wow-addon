@@ -11,7 +11,7 @@ local function harness()
 	local ns = {}
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/catalog.lua",
-		"goals/presenter.lua",
+		"goals/catalog_professions.lua", "goals/presenter.lua",
 		"goals/evaluators/lockout.lua", "goals/evaluators/currency.lua",
 		"goals/evaluators/collected.lua", "goals/evaluators/flag.lua",
 		"goals/evaluators/questlog.lua", "goals/evaluators/group.lua",
@@ -39,7 +39,7 @@ describe("Catalog", function()
 		local ns = harness()
 		local keys = {}
 		for _, b in ipairs(ns.Goals.Catalog.buckets()) do keys[#keys + 1] = b.key end
-		assert.same({ "reputation", "open-world", "delves", "vault", "endgame", "housing" }, keys)
+		assert.same({ "reputation", "open-world", "delves", "vault", "endgame", "housing", "professions" }, keys)
 	end)
 
 	it("returns a goal table by id, nil for unknown", function()
@@ -126,5 +126,55 @@ describe("Presenter.catalog", function()
 			if x.id == entry.goal.id then e = x end
 		end
 		assert.is_true(e.imported)
+	end)
+end)
+
+-- Generated profession Knowledge-Point goals (catalog_professions.lua), surfaced
+-- through Catalog.entries() under the "professions" bucket. Assertions are shape-
+-- derived so they survive ID refreshes, but pin the build contract: two goals per
+-- profession per expansion, perchar, gated by require.profession.
+describe("Profession KP catalog", function()
+	local function profEntries(ns)
+		local out = {}
+		for _, e in ipairs(ns.Goals.Catalog.entries()) do
+			if e.bucket == "professions" then out[#out + 1] = e end
+		end
+		return out
+	end
+
+	it("ships 44 goals: 22 one-time + 22 weekly", function()
+		local ns = harness()
+		local profs = profEntries(ns)
+		assert.equal(44, #profs)
+		local onetime, weekly = 0, 0
+		for _, e in ipairs(profs) do
+			if e.goal.id:find("onetime", 1, true) then onetime = onetime + 1 end
+			if e.goal.id:find("weekly", 1, true) then weekly = weekly + 1 end
+		end
+		assert.equal(22, onetime)
+		assert.equal(22, weekly)
+	end)
+
+	it("every profession goal is perchar and gated by require.profession", function()
+		local ns = harness()
+		for _, e in ipairs(profEntries(ns)) do
+			assert.equal("perchar", e.goal.scope, e.goal.id .. ": scope")
+			assert.is_number(e.goal.require and e.goal.require.profession,
+				e.goal.id .. ": require.profession")
+		end
+	end)
+
+	it("weekly goals carry resets, one-time goals do not (except the currency step)", function()
+		local ns = harness()
+		for _, e in ipairs(profEntries(ns)) do
+			local weekly = e.goal.id:find("weekly", 1, true) ~= nil
+			for _, s in ipairs(e.goal.steps) do
+				if weekly and s.evaluator ~= "currency" then
+					assert.equal("weekly", s.resets, e.goal.id .. ": weekly step resets")
+				elseif not weekly then
+					assert.is_nil(s.resets, e.goal.id .. ": one-time step has no resets")
+				end
+			end
+		end
 	end)
 end)

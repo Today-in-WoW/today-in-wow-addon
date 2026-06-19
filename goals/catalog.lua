@@ -43,6 +43,8 @@ function Catalog.buckets()
 		  desc = "Sparks, Voidcores, and weekly choice events." },
 		{ key = "housing", label = "Housing", icon = "Interface\\Icons\\UI_HomeStone-64",
 		  desc = "Your weekly housing quest." },
+		{ key = "professions", label = "Professions", icon = "Interface\\Icons\\INV_Misc_Book_11",
+		  desc = "Weekly and one-time Knowledge Point sources for every profession." },
 	}
 end
 
@@ -94,7 +96,7 @@ function Catalog.entries()
 	local voidAssault   = { 94386, 94385 }
 	local worldBoss     = { 92560, 92034, 92636, 92123 }
 
-	return {
+	local list = {
 		-- 1. Weekly Dungeon Quest --------------------------------------------
 		{
 			bucket = "reputation", tag = "Midnight",
@@ -454,6 +456,16 @@ function Catalog.entries()
 			},
 		},
 	}
+
+	-- Generated profession Knowledge-Point goals (catalog_professions.lua) are
+	-- appended into the same list under the "professions" bucket.
+	if ns.Goals.ProfessionCatalog then
+		for _, e in ipairs(ns.Goals.ProfessionCatalog.entries()) do
+			list[#list + 1] = e
+		end
+	end
+
+	return list
 end
 
 -- The goal table for an id, or nil — used at import time (the view holds only
