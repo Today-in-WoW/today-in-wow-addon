@@ -5,7 +5,8 @@ local _, ns = ...
 --   track ("raid" | "mythic" | "world" | "any", required)
 --   slots (number, optional, default 1) — how many unlocked slots are needed
 --   ilvl  (number, optional) — per-slot quality floor on the reward level
--- progress = unlocked / slots. Per-character + weekly: live
+-- Each step is binary (slot unlocked or not), so no progress/max is surfaced.
+-- Per-character + weekly: live
 -- C_WeeklyRewards.GetActivities for the current char, the substrate `vault`
 -- section for offline alts (with `resets = "weekly"` invalidating a stale snap).
 
@@ -58,6 +59,6 @@ ns.Goals.Registry.register("vault", {
 		end
 		local slots = params.slots or 1
 		local unlocked = count(list, params)
-		return { done = unlocked >= slots, progress = math.min(unlocked, slots), max = slots }
+		return { done = unlocked >= slots }
 	end,
 })
