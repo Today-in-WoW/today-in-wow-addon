@@ -108,23 +108,25 @@ function Registry.checkParams(params, spec)
 end
 
 -- Effective game events for a step's dirty-flag wiring. A plain step yields its
--- evaluator's static events; a `group` step yields the UNION of its leaves'
--- events (the group's own static list is empty — composition is per-instance).
+-- evaluator's static events; a `group` yields the UNION of its leaves' events,
+-- recursing through nested groups (a group's own static list is empty —
+-- composition is per-instance).
 function Registry.eventsFor(step)
-	if step.evaluator ~= "group" then
-		local def = evaluators[step.evaluator]
-		return (def and def.events) or {}
-	end
 	local seen, out = {}, {}
-	local of = (step.params and step.params.of) or {}
-	for _, leaf in ipairs(of) do
-		local ldef = evaluators[leaf.evaluator]
-		if ldef and ldef.events then
-			for _, e in ipairs(ldef.events) do
-				if not seen[e] then seen[e] = true; out[#out + 1] = e end
+	local function collect(node)
+		if node.evaluator == "group" then
+			local of = (node.params and node.params.of) or {}
+			for _, leaf in ipairs(of) do collect(leaf) end
+		else
+			local def = evaluators[node.evaluator]
+			if def and def.events then
+				for _, e in ipairs(def.events) do
+					if not seen[e] then seen[e] = true; out[#out + 1] = e end
+				end
 			end
 		end
 	end
+	collect(step)
 	return out
 end
 

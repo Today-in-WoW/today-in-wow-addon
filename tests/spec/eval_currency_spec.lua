@@ -31,6 +31,15 @@ describe("currency validate — happy paths", function()
 	it("accepts currency + cap=true", function()
 		assert.is_true(ev.validate({ currency = 3008, cap = true }))
 	end)
+
+	it("accepts currency + atMost (spend-all)", function()
+		assert.is_true(ev.validate({ currency = 3376, atMost = 0 }))
+	end)
+
+	it("accepts currency + weekly=true; rejects weekly=false", function()
+		assert.is_true(ev.validate({ currency = 3376, weekly = true }))
+		assert.is_nil((ev.validate({ currency = 3376, weekly = false })))
+	end)
 end)
 
 describe("currency validate — required / type failures", function()
@@ -263,6 +272,67 @@ describe("currency evaluate — cap mode, useTotalEarnedForMaxQty", function()
 		assert.is_false(r.done)
 		assert.equal(2, r.progress)
 		assert.equal(10, r.max)
+	end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- evaluate — atMost mode (spend-all: done when quantity <= atMost)
+-- ---------------------------------------------------------------------------
+
+describe("currency evaluate — atMost mode", function()
+	local ev
+	before_each(function() ev = harness() end)
+	after_each(function() _G.C_CurrencyInfo = nil end)
+
+	it("done when quantity <= atMost (spent all → 0 <= 0)", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function() return fakeInfo(0, 2000) end }
+		local r = ev.evaluate({ currency = 3376, atMost = 0 })
+		assert.is_true(r.done)
+		assert.equal(0, r.progress)
+		assert.equal(0, r.max)
+	end)
+
+	it("not done while currency remains above atMost", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function() return fakeInfo(450, 2000) end }
+		local r = ev.evaluate({ currency = 3376, atMost = 0 })
+		assert.is_false(r.done)
+		assert.equal(450, r.progress)
+	end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- evaluate — weekly mode (weekly earnable cap; persists through spending)
+-- ---------------------------------------------------------------------------
+
+describe("currency evaluate — weekly mode", function()
+	local ev
+	before_each(function() ev = harness() end)
+	after_each(function() _G.C_CurrencyInfo = nil end)
+
+	it("done when earned-this-week >= maxWeeklyQuantity, regardless of spendable quantity", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 0, maxWeeklyQuantity = 8, quantityEarnedThisWeek = 8 }
+		end }
+		local r = ev.evaluate({ currency = 3376, weekly = true })
+		assert.is_true(r.done)        -- earned the cap even though quantity is 0 (spent)
+		assert.equal(8, r.progress)
+		assert.equal(8, r.max)
+	end)
+
+	it("not done while below the weekly cap", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 5, maxWeeklyQuantity = 8, quantityEarnedThisWeek = 5 }
+		end }
+		local r = ev.evaluate({ currency = 3376, weekly = true })
+		assert.is_false(r.done)
+		assert.equal(5, r.progress)
+	end)
+
+	it("maxWeeklyQuantity 0/absent → never done (no weekly cap)", function()
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function()
+			return { quantity = 99, quantityEarnedThisWeek = 99 }
+		end }
+		assert.is_false(ev.evaluate({ currency = 3376, weekly = true }).done)
 	end)
 end)
 

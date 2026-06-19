@@ -28,6 +28,7 @@ local function harness()
 	_G.GetSavedInstanceEncounterInfo = nil
 	_G.C_CurrencyInfo = nil
 	_G.C_QuestLog = nil
+	_G.C_WeeklyRewards = nil
 
 	local ns = {}
 	assert(loadfile("goals/registry.lua"))("TiW", ns)
@@ -74,6 +75,61 @@ end
 local function stubQuests(ids)
 	_G.C_QuestLog = { GetAllCompletedQuestIDs = function() return ids end }
 end
+
+-- Quest log with one header + two real quests; only 93784 is turn-in-ready.
+local function stubActiveQuests()
+	_G.C_QuestLog = {
+		GetNumQuestLogEntries = function() return 3 end,
+		GetInfo = function(i)
+			if i == 1 then return { isHeader = true } end
+			if i == 2 then return { isHeader = false, questID = 93784 } end
+			if i == 3 then return { isHeader = false, questID = 112 } end
+		end,
+		ReadyForTurnIn = function(id) return id == 93784 end,
+	}
+end
+
+local function stubVault()
+	_G.C_WeeklyRewards = { GetActivities = function()
+		return { { type = 1, index = 1, threshold = 2, progress = 2, level = 600 },
+		         { type = 3, index = 1, threshold = 4, progress = 1, level = 0 } }
+	end }
+end
+
+describe("Substrate.capture — questlog + vault sections", function()
+	it("questsActive lists in-log quest IDs; questsReady the turn-in-ready subset", function()
+		local ns = harness()
+		stubActiveQuests()
+		ns.Goals.Substrate.capture()
+		local rec = ns.Goals.Store.getSubstrate(KEY)
+		assert.equal("93784,112", rec.questsActive)
+		assert.equal("93784", rec.questsReady)
+	end)
+
+	it("no quest-log API → empty strings, never nil", function()
+		local ns = harness()
+		ns.Goals.Substrate.capture()
+		local rec = ns.Goals.Store.getSubstrate(KEY)
+		assert.equal("", rec.questsActive)
+		assert.equal("", rec.questsReady)
+	end)
+
+	it("vault captures the weekly-rewards activity scalars", function()
+		local ns = harness()
+		stubVault()
+		ns.Goals.Substrate.capture()
+		local rec = ns.Goals.Store.getSubstrate(KEY)
+		assert.equal(2, #rec.vault)
+		assert.same({ type = 1, index = 1, threshold = 2, progress = 2, level = 600 }, rec.vault[1])
+	end)
+
+	it("no weekly-rewards API → empty vault list", function()
+		local ns = harness()
+		ns.Goals.Substrate.capture()
+		local rec = ns.Goals.Store.getSubstrate(KEY)
+		assert.same({}, rec.vault)
+	end)
+end)
 
 -- ---------------------------------------------------------------------------
 -- charKey
@@ -227,10 +283,35 @@ describe("Substrate partial refreshes", function()
 		assert.equal("5", rec.quests)
 	end)
 
+	it("captureActiveQuests rebuilds only the active/ready quest sections", function()
+		local ns = harness()
+		stubQuests({ 5 })
+		ns.Goals.Substrate.capture()
+		stubActiveQuests()
+		ns.Goals.Substrate.captureActiveQuests()
+		local rec = ns.Goals.Store.getSubstrate(KEY)
+		assert.equal("93784,112", rec.questsActive)
+		assert.equal("93784", rec.questsReady)
+		assert.equal("5", rec.quests)   -- untouched
+	end)
+
+	it("captureVault rebuilds only the vault section", function()
+		local ns = harness()
+		stubQuests({ 5 })
+		ns.Goals.Substrate.capture()
+		stubVault()
+		ns.Goals.Substrate.captureVault()
+		local rec = ns.Goals.Store.getSubstrate(KEY)
+		assert.equal(2, #rec.vault)
+		assert.equal("5", rec.quests)   -- untouched
+	end)
+
 	it("partial refreshes are a no-op before any capture", function()
 		local ns = harness()
-		stubLockouts()
+		stubLockouts(); stubActiveQuests(); stubVault()
 		assert.is_true(pcall(ns.Goals.Substrate.captureLockouts))
+		assert.is_true(pcall(ns.Goals.Substrate.captureActiveQuests))
+		assert.is_true(pcall(ns.Goals.Substrate.captureVault))
 		assert.is_nil(ns.Goals.Store.getSubstrate(KEY))
 	end)
 
@@ -342,5 +423,23 @@ describe("Substrate event wiring", function()
 		mock.fireEvent("PLAYER_LOGIN")
 		mock.fireEvent("QUEST_TURNED_IN", 70123)
 		assert.equal("5,70123", ns.Goals.Store.getSubstrate(KEY).quests)
+	end)
+
+	it("WEEKLY_REWARDS_UPDATE refreshes the vault after the debounce", function()
+		local ns, mock = harness()
+		mock.fireEvent("PLAYER_LOGIN")
+		stubVault()
+		mock.fireEvent("WEEKLY_REWARDS_UPDATE")
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.equal(2, #ns.Goals.Store.getSubstrate(KEY).vault)
+	end)
+
+	it("a quest-log change refreshes questsActive after the debounce", function()
+		local ns, mock = harness()
+		mock.fireEvent("PLAYER_LOGIN")
+		stubActiveQuests()
+		mock.fireEvent("QUEST_ACCEPTED")
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.equal("93784,112", ns.Goals.Store.getSubstrate(KEY).questsActive)
 	end)
 end)

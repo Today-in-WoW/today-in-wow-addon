@@ -5,18 +5,21 @@ local _, ns = ...
 -- §5 "Offline characters" / §6 substrate)
 --
 -- Snapshots the RAW evaluator-relevant state of the logged-in character so
--- per-char evaluators (`lockout`, `currency`, per-char `flag`) can answer for
--- offline alts — retroactively: a goal installed mid-week evaluates against
--- every character's last-known substrate (the verdict isn't stored, the
--- ingredients are).
+-- per-char evaluators (`lockout`, `currency`, per-char `flag`, `questlog`,
+-- `vault`) can answer for offline alts — retroactively: a goal installed
+-- mid-week evaluates against every character's last-known substrate (the
+-- verdict isn't stored, the ingredients are).
 --
 -- Capture cadence: full capture at PLAYER_LOGIN, then cheap in-session
--- refreshes (a same-session ICC clear must be visible from the alt you log
--- next):
+-- refreshes (a same-session ICC clear / vault unlock must be visible from the
+-- alt you log next):
 --   UPDATE_INSTANCE_INFO / BOSS_KILL  -> lockouts section re-scan (~a dozen rows)
 --   CURRENCY_DISPLAY_UPDATE           -> currencies re-scan, debounced DEBOUNCE s
 --                                        (the event arrives in bursts)
 --   QUEST_TURNED_IN(questID)          -> incremental append to the quests string
+--   QUEST_ACCEPTED / QUEST_REMOVED /  -> questsActive/questsReady re-scan,
+--     UNIT_QUEST_LOG_CHANGED / turn-in    debounced
+--   WEEKLY_REWARDS_UPDATE             -> vault section re-scan, debounced
 --
 -- Persistence goes through Store.writeSubstrate — store.lua stays the sole
 -- writer of TiWDB.goals. Local functionality: never consent-gated, never
@@ -86,6 +89,8 @@ local function entryFor(CI, id)
 		totalEarned             = info.totalEarned,
 		useTotalEarnedForMaxQty = info.useTotalEarnedForMaxQty,
 		max                     = info.maxQuantity,
+		earnedThisWeek          = info.quantityEarnedThisWeek,
+		maxWeekly               = info.maxWeeklyQuantity,
 	}
 end
 
@@ -132,6 +137,40 @@ local function scanProfessions()
 	return out
 end
 
+-- In-log (accepted) quest IDs, and the turn-in-ready subset, each comma-joined.
+-- Feeds the `questlog` evaluator for offline alts; "" when the API is absent.
+-- Skips header rows. Active quests expire at reset — questlog steps carry
+-- `resets` so a pre-reset snapshot reads stale (§3), not a phantom "in log."
+local function scanActiveQuests()
+	local active, ready = {}, {}
+	local QL = C_QuestLog
+	if not (QL and QL.GetNumQuestLogEntries and QL.GetInfo) then return "", "" end
+	for i = 1, (QL.GetNumQuestLogEntries()) do
+		local info = QL.GetInfo(i)
+		if info and not info.isHeader and info.questID and info.questID > 0 then
+			active[#active + 1] = info.questID
+			if QL.ReadyForTurnIn and QL.ReadyForTurnIn(info.questID) then
+				ready[#ready + 1] = info.questID
+			end
+		end
+	end
+	return table.concat(active, ","), table.concat(ready, ",")
+end
+
+-- Great Vault slots (the cap-relevant scalars the `vault` evaluator reads):
+-- { type, index, threshold, progress, level } per activity. Empty when the
+-- C_WeeklyRewards namespace is unavailable.
+local function scanVault()
+	local out = {}
+	local WR = C_WeeklyRewards
+	if not (WR and WR.GetActivities) then return out end
+	for _, a in ipairs(WR.GetActivities() or {}) do
+		out[#out + 1] = { type = a.type, index = a.index, threshold = a.threshold,
+		                  progress = a.progress, level = a.level }
+	end
+	return out
+end
+
 -- Full scan of the live character -> Store.writeSubstrate(charKey(), record).
 -- Record shape: see goal-format-v1 §6. Never errors — missing API namespaces
 -- yield empty sections; seen is always stamped.
@@ -139,13 +178,17 @@ function Substrate.capture()
 	local t0 = debugprofilestop and debugprofilestop()
 	local key = Substrate.charKey()
 	local now = GetServerTime()
+	local active, ready = scanActiveQuests()
 	Store.writeSubstrate(key, {
-		seen       = now,
-		meta       = { level = UnitLevel("player"), class = select(2, UnitClass("player")),
-		               professions = scanProfessions() },
-		lockouts   = scanLockouts(now),
-		currencies = scanCurrencies(),
-		quests     = scanQuests(),
+		seen         = now,
+		meta         = { level = UnitLevel("player"), class = select(2, UnitClass("player")),
+		                 professions = scanProfessions() },
+		lockouts     = scanLockouts(now),
+		currencies   = scanCurrencies(),
+		quests       = scanQuests(),
+		questsActive = active,
+		questsReady  = ready,
+		vault        = scanVault(),
 	})
 	questSets[key] = nil
 	if ns.dbg and t0 then ns.dbg(string.format("substrate.capture %.1fms", debugprofilestop() - t0)) end
@@ -166,6 +209,22 @@ function Substrate.captureCurrencies()
 	local rec = Store.getSubstrate(key)
 	if not rec then return end
 	rec.currencies = scanCurrencies()
+	Store.writeSubstrate(key, rec)
+end
+
+function Substrate.captureActiveQuests()
+	local key = Substrate.charKey()
+	local rec = Store.getSubstrate(key)
+	if not rec then return end
+	rec.questsActive, rec.questsReady = scanActiveQuests()
+	Store.writeSubstrate(key, rec)
+end
+
+function Substrate.captureVault()
+	local key = Substrate.charKey()
+	local rec = Store.getSubstrate(key)
+	if not rec then return end
+	rec.vault = scanVault()
 	Store.writeSubstrate(key, rec)
 end
 
@@ -205,31 +264,43 @@ function Substrate.questSet(charKey)
 	return set
 end
 
--- Event wiring: PLAYER_LOGIN full capture + cheap in-session refreshes. Single
--- frame registered at file load, like core/session.lua.
-local currencyPending = false
+-- Event wiring: PLAYER_LOGIN full capture + cheap in-session section refreshes,
+-- so the cross-character view stays current without a relog. Single frame
+-- registered at file load, like core/session.lua. Bursty events (currency, quest
+-- log, weekly rewards) coalesce into one trailing capture per burst.
+local pending = {}
+local function debounce(kind, fn)
+	if pending[kind] then return end
+	pending[kind] = true
+	C_Timer.After(Substrate.DEBOUNCE, function()
+		pending[kind] = false
+		fn()
+	end)
+end
+
 local f = CreateFrame("Frame")
-f:RegisterEvent("PLAYER_LOGIN")
-f:RegisterEvent("UPDATE_INSTANCE_INFO")
-f:RegisterEvent("BOSS_KILL")
-f:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
-f:RegisterEvent("QUEST_TURNED_IN")
+for _, ev in ipairs({
+	"PLAYER_LOGIN", "UPDATE_INSTANCE_INFO", "BOSS_KILL", "CURRENCY_DISPLAY_UPDATE",
+	"QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED", "UNIT_QUEST_LOG_CHANGED",
+	"WEEKLY_REWARDS_UPDATE",
+}) do
+	f:RegisterEvent(ev)
+end
 f:SetScript("OnEvent", function(_, event, arg1)
 	if event == "PLAYER_LOGIN" then
 		Substrate.capture()
 	elseif event == "UPDATE_INSTANCE_INFO" or event == "BOSS_KILL" then
 		Substrate.captureLockouts()
 	elseif event == "CURRENCY_DISPLAY_UPDATE" then
-		-- The event arrives in bursts; one trailing capture per burst.
-		if not currencyPending then
-			currencyPending = true
-			C_Timer.After(Substrate.DEBOUNCE, function()
-				currencyPending = false
-				Substrate.captureCurrencies()
-			end)
-		end
+		debounce("currency", Substrate.captureCurrencies)
+	elseif event == "WEEKLY_REWARDS_UPDATE" then
+		debounce("vault", Substrate.captureVault)
+	elseif event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED"
+		or event == "UNIT_QUEST_LOG_CHANGED" then
+		debounce("quests", Substrate.captureActiveQuests)
 	elseif event == "QUEST_TURNED_IN" then
-		Substrate.noteQuestTurnedIn(arg1)
+		Substrate.noteQuestTurnedIn(arg1)            -- completed set (incremental)
+		debounce("quests", Substrate.captureActiveQuests)  -- it left the log
 	end
 end)
 

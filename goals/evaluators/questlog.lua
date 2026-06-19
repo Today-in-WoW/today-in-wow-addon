@@ -6,6 +6,9 @@ local _, ns = ...
 -- weekly" tracking. params:
 --   quest (questID, required)
 --   ready (boolean, optional) — narrow to objectives-complete / turn-in-ready.
+--   present (boolean, optional, default true) — set false to invert: done when
+--           the quest is NOT in the log. group{need=N, of=N× present=false}
+--           expresses "none of these in the log" (all minor quests cleared).
 -- Per-character: live C_QuestLog (IsOnQuest / ReadyForTurnIn); offline the
 -- substrate questsActive / questsReady sets. Active quests expire at reset, so a
 -- questlog step should carry `resets` (§3) — the offline orchestrator marks a
@@ -25,18 +28,19 @@ ns.Goals.Registry.register("questlog", {
 	validate = function(params)
 		return ns.Goals.Registry.checkParams(params, {
 			required = { quest = "number" },
-			optional = { ready = "boolean" },
+			optional = { ready = "boolean", present = "boolean" },
 		})
 	end,
 	evaluate = function(params, charKey)
+		local want = params.present ~= false   -- default: done when IN the log
 		if charKey then
 			-- Offline alt: a substrate that exists but lacks the quest answers
-			-- confident not-done (it isn't in their log); only a missing substrate
-			-- is unknown.
+			-- confident on presence (it isn't in their log); only a missing
+			-- substrate is unknown.
 			local rec = ns.Goals.Substrate and ns.Goals.Substrate.get(charKey)
 			if not rec then return { done = false, stale = true } end
 			local field = params.ready and rec.questsReady or rec.questsActive
-			return { done = idSet(field)[params.quest] == true }
+			return { done = (idSet(field)[params.quest] == true) == want }
 		end
 		local QL = C_QuestLog
 		local fn
@@ -44,6 +48,6 @@ ns.Goals.Registry.register("questlog", {
 			if params.ready then fn = QL.ReadyForTurnIn else fn = QL.IsOnQuest end
 		end
 		if not fn then return { done = false, stale = true } end
-		return { done = fn(params.quest) == true }
+		return { done = (fn(params.quest) == true) == want }
 	end,
 })

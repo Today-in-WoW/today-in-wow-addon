@@ -564,6 +564,18 @@ describe("Presenter.matrix — cell states", function()
 		assert.equal("done", vm.goals[1].cells[ME].state)
 		assert.equal("done", vm.goals[1].cells["Aaa-Realm"].state)
 	end)
+
+	it("account-scope goal locks out a known-ineligible (low-level) column; eligible columns still broadcast", function()
+		local ns = harness({ level = 90 })   -- current char meets require
+		local g = gMount(); g.require = { level = 90 }
+		seedAlt(ns, "Hi-Realm", { level = 90 })   -- eligible → gets the broadcast
+		seedAlt(ns, "Lo-Realm", { level = 80 })   -- below require → locked out
+		ns.Goals.Store.install(g)
+		local cells = (ns.Goals.Presenter.matrix({ row("g:mount", 1, "Obtain", { done = false }) })).goals[1].cells
+		assert.equal("todo", cells[ME].state)
+		assert.equal("todo", cells["Hi-Realm"].state)
+		assert.equal("ineligible", cells["Lo-Realm"].state)
+	end)
 end)
 
 describe("Presenter.matrix — partial / multi-step aggregate", function()

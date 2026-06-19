@@ -64,10 +64,28 @@ describe("group.validate", function()
 		assert.is_nil((ev(ns).validate({ need = 3, of = { flagLeaf(1), flagLeaf(2) } })))
 	end)
 
-	it("rejects a nested group (one level only)", function()
+	it("accepts ONE level of nesting (a group of sub-groups)", function()
 		local ns = harness()
-		local nested = { evaluator = "group", params = { need = 1, of = { flagLeaf(1) } } }
-		assert.is_nil((ev(ns).validate({ need = 1, of = { nested } })))
+		local subA = { evaluator = "group", params = { need = 1, of = { flagLeaf(1) } } }
+		local subB = { evaluator = "group", params = { need = 1, of = { currLeaf(5, 10) } } }
+		assert.is_true(ev(ns).validate({ need = 2, of = { subA, subB } }))
+	end)
+
+	it("rejects a SECOND level of nesting (group → group → group)", function()
+		local ns = harness()
+		local deep = { evaluator = "group", params = { need = 1, of = {
+			{ evaluator = "group", params = { need = 1, of = { flagLeaf(1) } } },
+		} } }
+		assert.is_nil((ev(ns).validate({ need = 1, of = { deep } })))
+	end)
+
+	it("propagates a bad leaf inside a nested group", function()
+		local ns = harness()
+		local sub = { evaluator = "group", params = { need = 1, of = { flagLeaf(1) } } }
+		local bad = { evaluator = "group", params = { need = 1, of = {
+			{ evaluator = "currency", params = { currency = 5 } },   -- no oneOf mode → invalid
+		} } }
+		assert.is_nil((ev(ns).validate({ need = 2, of = { sub, bad } })))
 	end)
 
 	it("rejects an unknown sub-evaluator", function()
@@ -193,5 +211,32 @@ describe("Registry.eventsFor", function()
 		assert.is_true(s["UPDATE_INSTANCE_INFO"])
 		assert.is_true(s["BOSS_KILL"])
 		assert.is_true(s["CURRENCY_DISPLAY_UPDATE"])
+	end)
+
+	it("recurses through a NESTED group to collect leaf events", function()
+		local ns = harness()
+		local step = { evaluator = "group", params = { need = 2, of = {
+			{ evaluator = "group", params = { need = 1, of = { flagLeaf(1) } } },
+			{ evaluator = "group", params = { need = 1, of = { currLeaf(5, 10) } } },
+		} } }
+		local s = asSet(ns.Goals.Registry.eventsFor(step))
+		assert.is_true(s["QUEST_TURNED_IN"])           -- from the nested flag leaf
+		assert.is_true(s["CURRENCY_DISPLAY_UPDATE"])    -- from the nested currency leaf
+	end)
+end)
+
+describe("group.evaluate — nested composition", function()
+	it("need=2 over two sub-groups is (A) AND (B)", function()
+		local ns = harness()
+		_G.C_QuestLog = { IsQuestFlaggedCompleted = function() return true end }   -- subA done
+		local function build(currAmt)
+			return { need = 2, of = {
+				{ evaluator = "group", params = { need = 1, of = { flagLeaf(1) } } },
+				{ evaluator = "group", params = { need = 1, of = { currLeaf(5, currAmt) } } },
+			} }
+		end
+		_G.C_CurrencyInfo = { GetCurrencyInfo = function() return { quantity = 3, maxQuantity = 0 } end }
+		assert.is_false(ev(ns).evaluate(build(10)).done)   -- subB short (3 < 10)
+		assert.is_true(ev(ns).evaluate(build(3)).done)     -- both sub-groups done
 	end)
 end)

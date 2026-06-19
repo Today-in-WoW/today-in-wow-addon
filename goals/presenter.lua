@@ -306,8 +306,14 @@ function Presenter.matrix(flatVM)
 				cells[key] = { state = "unassigned" }
 			elseif col.current or goal.scope == "account" then
 				-- Current column is the live truth; account goals broadcast that
-				-- one account-wide answer identically to every column.
-				cells[key] = currentCell
+				-- one account-wide answer identically to every column — except a
+				-- known-ineligible character, which is locked out of the goal.
+				if goal.scope == "account" and not col.current
+					and not ns.Goals.Offline.eligible(key, goal) then
+					cells[key] = { state = "ineligible" }
+				else
+					cells[key] = currentCell
+				end
 			else
 				local g = ns.Goals.Offline.goalFor(key, goal)
 				if g.noData then
@@ -371,7 +377,14 @@ function Presenter.goalChars(flatVM, goalId)
 	for _, key in ipairs(cols) do
 		local cell
 		if key == current or goal.scope == "account" then
-			cell = currentCell
+			-- Account-wide answer broadcasts, but a known-ineligible character is
+			-- locked out of the goal (same rule as the matrix).
+			if goal.scope == "account" and key ~= current
+				and not ns.Goals.Offline.eligible(key, goal) then
+				cell = { state = "ineligible" }
+			else
+				cell = currentCell
+			end
 		else
 			local g = ns.Goals.Offline.goalFor(key, goal)
 			if g.noData then

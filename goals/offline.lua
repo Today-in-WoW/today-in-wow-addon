@@ -36,6 +36,17 @@ local function meetsRequire(req, meta)
 	return true
 end
 
+-- Does an offline character meet a goal's `require`? Used by account-scope
+-- matrix columns: a known character that can't meet `require` is locked out of
+-- the goal regardless of the account-wide answer. Unknown (no substrate) → true:
+-- we never claim ineligible without evidence, so the broadcast still applies.
+function Offline.eligible(charKey, goal)
+	if not goal.require then return true end
+	local rec = ns.Goals.Store.getSubstrate(charKey)
+	if not rec then return true end
+	return meetsRequire(goal.require, rec.meta)
+end
+
 -- Epoch of the most recent weekly reset, computed from the live client:
 -- now + C_DateAndTime.GetSecondsUntilWeeklyReset() - 7*86400.
 -- nil when the API is unavailable (callers degrade to stale).

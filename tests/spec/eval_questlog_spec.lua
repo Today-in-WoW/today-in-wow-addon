@@ -39,11 +39,17 @@ end
 -- ---------------------------------------------------------------------------
 
 describe("questlog.validate", function()
-	it("accepts { quest }, { quest, ready=true/false }", function()
+	it("accepts { quest }, { quest, ready=true/false }, { quest, present=false }", function()
 		local ns = harness()
 		assert.is_true(ev(ns).validate({ quest = 93784 }))
 		assert.is_true(ev(ns).validate({ quest = 93784, ready = true }))
 		assert.is_true(ev(ns).validate({ quest = 93784, ready = false }))
+		assert.is_true(ev(ns).validate({ quest = 93784, present = false }))
+	end)
+
+	it("rejects a non-boolean present", function()
+		local ns = harness()
+		assert.is_nil((ev(ns).validate({ quest = 1, present = 1 })))
 	end)
 
 	it("rejects missing quest / unknown key / wrong types", function()
@@ -79,6 +85,14 @@ describe("questlog.evaluate — live", function()
 		}
 		assert.is_true(ev(ns).evaluate({ quest = 93784, ready = true }).done)
 		assert.is_false(onquest_called)
+	end)
+
+	it("present=false inverts: done when NOT on the quest (live)", function()
+		local ns = harness()
+		_G.C_QuestLog = { IsOnQuest = function() return false end }
+		assert.is_true(ev(ns).evaluate({ quest = 93784, present = false }).done)
+		_G.C_QuestLog = { IsOnQuest = function() return true end }
+		assert.is_false(ev(ns).evaluate({ quest = 93784, present = false }).done)
 	end)
 
 	it("C_QuestLog nil → stale", function()
@@ -133,5 +147,13 @@ describe("questlog.evaluate — substrate branch", function()
 		assert.is_false(ev(ns).evaluate({ quest = 93784, ready = true }, KEY).done)
 		seed(ns, { questsActive = "93784", questsReady = "93784" })
 		assert.is_true(ev(ns).evaluate({ quest = 93784, ready = true }, KEY).done)
+	end)
+
+	it("present=false inverts the substrate branch: absent → done, present → not", function()
+		local ns = harness()
+		seed(ns, { questsActive = "112" })
+		assert.is_true(ev(ns).evaluate({ quest = 93784, present = false }, KEY).done)
+		seed(ns, { questsActive = "93784,112" })
+		assert.is_false(ev(ns).evaluate({ quest = 93784, present = false }, KEY).done)
 	end)
 end)

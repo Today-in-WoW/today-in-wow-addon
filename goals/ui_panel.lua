@@ -228,7 +228,8 @@ local hCount, lCount = 0, 0      -- cursors into the pools per rebuild
 
 local function tooltipShow(owner, text)
 	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-	GameTooltip:SetText(text, 1, 1, 1, 1, true)
+	if ns.Goals.Links then ns.Goals.Links.setTooltip(GameTooltip, text)
+	else GameTooltip:SetText(text, 1, 1, 1, 1, true) end
 	GameTooltip:Show()
 end
 
@@ -282,7 +283,8 @@ local function newHeader()
 	end)
 	b:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:SetText(self.tooltip or self.name or "", 1, 1, 1, 1, true)
+		if ns.Goals.Links then ns.Goals.Links.setTooltip(GameTooltip, self.tooltip or self.name or "")
+		else GameTooltip:SetText(self.tooltip or self.name or "", 1, 1, 1, 1, true) end
 		GameTooltip:AddLine("Shift-click to unpin", 0.6, 0.6, 0.6)
 		GameTooltip:Show()
 	end)
@@ -337,6 +339,16 @@ local function acquireLine()
 	return fr
 end
 
+-- Resolve a goal/step icon onto a texture: a fileDataID (number) sets directly,
+-- an icon name (string) resolves under Interface\Icons\. Caller null-checks.
+local function setIcon(tex, icon)
+	if type(icon) == "string" then
+		tex:SetTexture("Interface\\Icons\\" .. icon)
+	else
+		tex:SetTexture(icon)
+	end
+end
+
 -- A goal header row: chevron + optional icon + "name  n/m". Returns its height.
 local function configHeader(b, g, y, contentW)
 	b.goalId = g.id
@@ -349,7 +361,7 @@ local function configHeader(b, g, y, contentW)
 
 	local labelX = CHEVRON_W + 2
 	if g.icon then
-		b.icon:SetTexture(g.icon); b.icon:Show()
+		setIcon(b.icon, g.icon); b.icon:Show()
 		labelX = CHEVRON_W + ICON + 4
 	else
 		b.icon:Hide()
@@ -382,7 +394,7 @@ local function configStep(fr, step, y, contentW)
 
 	local textX = INDENT
 	if step.icon then
-		fr.icon:SetTexture(step.icon); fr.icon:Show()
+		setIcon(fr.icon, step.icon); fr.icon:Show()
 		textX = INDENT + 16
 	else
 		fr.icon:Hide()
@@ -392,7 +404,8 @@ local function configStep(fr, step, y, contentW)
 	fr.text:ClearAllPoints()
 	fr.text:SetPoint("TOPLEFT", textX, 0)
 	fr.text:SetWidth(contentW - textX - 2)
-	fr.text:SetText(count .. tostring(step.label))
+	if ns.Goals.Links then ns.Goals.Links.render(fr, fr.text, count .. tostring(step.label))
+	else fr.text:SetText(count .. tostring(step.label)) end
 	if done then
 		fr.text:SetTextColor(0.55, 0.55, 0.55)
 	elseif r and r.stale then
@@ -604,6 +617,14 @@ local function build()
 	applyWidth()
 	applyBackground()
 	applyVisibility()   -- CreateFrame shows by default; respect the restored toggle / Edit Mode
+
+	-- Re-render when async item/entity names finish loading (link tokens).
+	if ns.Goals.Links then
+		ns.Goals.Links.RegisterRefresh(function()
+			if frame and frame:IsShown() then rebuild() end
+			if ns.Goals.UIMain and ns.Goals.UIMain.OnRender then ns.Goals.UIMain.OnRender() end
+		end)
+	end
 	return f
 end
 

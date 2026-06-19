@@ -33,7 +33,7 @@ read_globals = {
 	"GetAchievementNumCriteria", "GetAchievementCriteriaInfo", "GetAchievementCriteriaInfoByID",
 	"C_TransmogCollection", "C_HousingCatalog",
 	"GetProfessions", "GetProfessionInfo", "C_TradeSkillUI",
-	"C_CurrencyInfo", "C_WeeklyRewards",
+	"C_CurrencyInfo", "C_WeeklyRewards", "C_Spell",
 	"C_Reputation", "C_MajorFactions", "C_GossipInfo",
 	"RequestRaidInfo", "GetNumSavedInstances", "GetSavedInstanceInfo", "GetSavedInstanceEncounterInfo",
 	"GetNumSavedWorldBosses", "GetSavedWorldBossInfo", "GetInstanceInfo",

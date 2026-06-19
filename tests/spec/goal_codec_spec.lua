@@ -36,6 +36,25 @@ describe("goal codec §1 encoding", function()
 		end
 	end)
 
+	it("round-trips the v1 additions byte-perfectly (group nesting, questlog, vault, require.profession)", function()
+		local Codec = loadCodec()
+		local goal = {
+			v = 1, id = "tiw:complex", rev = 1, name = "Complex", scope = "perchar",
+			require = { level = 80, profession = 164 },
+			steps = {
+				{ label = "Pick up & finish a weekly", evaluator = "group",
+				  params = { need = 1, of = {
+					{ evaluator = "questlog", params = { quest = 93784, ready = true } },
+					{ evaluator = "flag", params = { quest = 93784 } },
+				  } }, resets = "weekly" },
+				{ label = "Unlock 2 vault slots", evaluator = "vault",
+				  params = { track = "any", slots = 2, ilvl = 600 } },
+			},
+		}
+		local str = assert(Codec.encode(goal))
+		assert.same(goal, (Codec.decode(str)))
+	end)
+
 	it("rejects non-strings and unrecognized strings with nil, err — never a Lua error", function()
 		local Codec = loadCodec()
 		for _, bad in ipairs({ 42, {}, "garbage", "" }) do
@@ -118,12 +137,22 @@ describe("goal codec §1 encoding", function()
 		end
 	end)
 
-	it("rejects a non-number icon and non-string tooltip, at goal and step level (§2/§3)", function()
+	it("accepts a string icon name (fileDataID or Interface\\Icons name), at goal and step level (§2/§3)", function()
+		local Codec = loadCodec()
+		local goal = fixtures().mount_account
+		goal.icon = "inv_1205_voidforge_sovereignvoidcores_midnight"
+		goal.steps[1].icon = "achievement_boss_lichking"
+		local back = Codec.decode(assert(Codec.encode(goal)))
+		assert.equal("inv_1205_voidforge_sovereignvoidcores_midnight", back.icon)
+		assert.equal("achievement_boss_lichking", back.steps[1].icon)
+	end)
+
+	it("rejects an invalid icon type and non-string tooltip, at goal and step level (§2/§3)", function()
 		local Codec = loadCodec()
 		local cases = {
-			function(g) g.icon = "path/to/icon" end,    -- goal icon must be fileDataID
+			function(g) g.icon = true end,              -- goal icon must be fileDataID or name
 			function(g) g.tooltip = 5 end,              -- goal tooltip must be string
-			function(g) g.steps[1].icon = true end,     -- step icon must be fileDataID
+			function(g) g.steps[1].icon = {} end,       -- step icon must be fileDataID or name
 			function(g) g.steps[1].tooltip = {} end,    -- step tooltip must be string
 		}
 		for _, mutate in ipairs(cases) do

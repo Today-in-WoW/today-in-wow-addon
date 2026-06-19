@@ -71,6 +71,16 @@ local DEFAULT_ICON = 134400     -- inv_misc_questionmark, per the brief
 local DEFAULT_FONT_SIZE = 13    -- detail step-list text size (Settings-adjustable)
 local MIN_FONT_SIZE, MAX_FONT_SIZE = 9, 20
 
+-- A goal/entry icon is a fileDataID (number) or an icon name (string, resolved
+-- under Interface\Icons\); nil falls back to the question-mark default.
+local function setIcon(tex, icon)
+	if type(icon) == "string" then
+		tex:SetTexture("Interface\\Icons\\" .. icon)
+	else
+		tex:SetTexture(icon or DEFAULT_ICON)
+	end
+end
+
 -- Completion Matrix grid metrics (characters down, goals across).
 local M_NAME_W = 196    -- frozen character column width (name + meta line)
 local M_COL_W  = 96     -- per-goal column width
@@ -308,7 +318,8 @@ end
 local function itemEnter(self)
 	if not self.tooltip then return end
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	GameTooltip:SetText(self.tooltip, 1, 1, 1, 1, true)
+	if ns.Goals.Links then ns.Goals.Links.setTooltip(GameTooltip, self.tooltip)
+	else GameTooltip:SetText(self.tooltip, 1, 1, 1, 1, true) end
 	GameTooltip:AddLine(self.pinned and "Shift-click to unpin" or "Shift-click to pin", 0.6, 0.6, 0.6)
 	GameTooltip:Show()
 end
@@ -470,7 +481,7 @@ local function layoutGrid(entries, startY, numCols, outItems)
 		local rowi = math.floor((i - 1) / numCols)
 		local c = acquireGrid()
 		c.goalId, c.pinned, c.tooltip = e.id, true, e.tooltip
-		c.icon:SetTexture(e.icon or DEFAULT_ICON)
+		setIcon(c.icon, e.icon)
 		c.name:SetText(e.name)
 		markGrid(c, e.id == selectedId)
 		c:SetAlpha(1)
@@ -488,9 +499,9 @@ local function layoutList(entries, startY, width, outItems)
 	for i, e in ipairs(entries) do
 		local r = acquireList()
 		r.goalId, r.pinned, r.tooltip = e.id, false, e.tooltip
-		r.icon:SetTexture(e.icon or DEFAULT_ICON)
+		setIcon(r.icon, e.icon)
 		r.nameFS:SetText(e.name)
-		r.cat:SetText(e.category and e.category:upper() or "")
+		r.cat:SetText(e.category or "")
 		markList(r, e.id == selectedId)
 		r:SetAlpha(1)
 		r:SetWidth(width)
@@ -675,7 +686,8 @@ local function configStep(fr, step, y, width, size, active)
 	fr.label:ClearAllPoints()
 	fr.label:SetPoint("TOPLEFT", size + 18, -1)
 	fr.label:SetWidth(width - size - 70)
-	fr.label:SetText(tostring(step.label))
+	if ns.Goals.Links then ns.Goals.Links.render(fr, fr.label, tostring(step.label))
+	else fr.label:SetText(tostring(step.label)) end
 	if done then fr.label:SetTextColor(0.55, 0.55, 0.55)
 	elseif active then fr.label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
 	elseif stale then fr.label:SetTextColor(AMBER[1], AMBER[2], AMBER[3])
@@ -777,7 +789,7 @@ function renderDetail(entry)
 	-- Header: title + category breadcrumb.
 	G.dTitle:SetText(entry.name); G.dTitle:Show()
 	if entry.category and entry.category ~= "" then
-		G.dCat:SetText(entry.category:upper()); G.dCat:Show()
+		G.dCat:SetText(entry.category); G.dCat:Show()
 	else
 		G.dCat:Hide()
 	end
@@ -800,7 +812,9 @@ function renderDetail(entry)
 	if entry.desc and entry.desc ~= "" then
 		G.dDesc:ClearAllPoints(); G.dDesc:SetPoint("TOPLEFT", 0, y)
 		G.dDesc:SetWidth(width)
-		G.dDesc:SetText(entry.desc); G.dDesc:Show()
+		if ns.Goals.Links then ns.Goals.Links.render(G.dDesc:GetParent(), G.dDesc, entry.desc)
+		else G.dDesc:SetText(entry.desc) end
+		G.dDesc:Show()
 		y = y - math.ceil(G.dDesc:GetStringHeight()) - 14
 	else
 		G.dDesc:Hide()
@@ -1089,7 +1103,7 @@ local function refreshMatrix()
 		end
 		h:SetSize(M_COL_W, M_HEAD_H)
 		h:ClearAllPoints(); h:SetPoint("TOPLEFT", (ci - 1) * M_COL_W, 0)
-		h.icon:SetTexture(g.icon or DEFAULT_ICON)
+		setIcon(h.icon, g.icon)
 		fitText(h.name, g.name or "", M_COL_W - 10)
 		h:Show()
 	end
@@ -1255,10 +1269,11 @@ end
 local function configCatCard(b, e, selected)
 	b.goalId = e.id
 	b.imp.goalId = e.id
-	b.icon:SetTexture(e.icon or DEFAULT_ICON)
+	setIcon(b.icon, e.icon)
 	fitText(b.nameFS, e.name or "", b:GetWidth() - 44 - 34)
 	b.tag:SetText(e.tag or "")
-	b.desc:SetText(e.desc or "")
+	if ns.Goals.Links then ns.Goals.Links.render(b, b.desc, e.desc or "")
+	else b.desc:SetText(e.desc or "") end
 	b.reward:SetText(e.reward or ""); b.reward:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
 	b.owned:SetShown(e.imported); b.imp:SetShown(not e.imported)
 	markCatCard(b, selected)
@@ -1278,7 +1293,7 @@ local function renderCatalogDetail(e)
 	end
 	C.dHint:Hide()
 
-	C.dIcon:Show(); C.dIconBorder:Show(); C.dIcon:SetTexture(e.icon or DEFAULT_ICON)
+	C.dIcon:Show(); C.dIconBorder:Show(); setIcon(C.dIcon, e.icon)
 	C.dName:Show(); C.dName:SetText(e.name or "")
 	C.dTag:Show(); C.dTag:SetText(e.tag or "")
 
@@ -1295,7 +1310,9 @@ local function renderCatalogDetail(e)
 	C.dDivider:SetPoint("TOPRIGHT", C.detail, "TOPRIGHT", -2, y); C.dDivider:Show(); y = y - 12
 
 	C.dDesc:ClearAllPoints(); C.dDesc:SetPoint("TOPLEFT", 0, y); C.dDesc:SetWidth(C.detail:GetWidth() - 2)
-	C.dDesc:SetText(e.desc or ""); C.dDesc:Show()
+	if ns.Goals.Links then ns.Goals.Links.render(C.dDesc:GetParent(), C.dDesc, e.desc or "")
+	else C.dDesc:SetText(e.desc or "") end
+	C.dDesc:Show()
 	y = y - math.ceil(C.dDesc:GetStringHeight()) - 16
 
 	local rows = {
@@ -1728,7 +1745,7 @@ local function makeTab(parent, key)
 
 	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	label:SetPoint("CENTER", 0, 0)
-	label:SetText(TAB_LABEL[key]:upper())
+	label:SetText(TAB_LABEL[key])
 	label:SetTextColor(0.55, 0.55, 0.58)
 	b.label = label
 	b:SetWidth(label:GetStringWidth() + 28)
@@ -1803,7 +1820,7 @@ local function buildGoalsTab(pane)
 	-- of the scroll child).
 	local function secLabel(text)
 		local fs = G.scroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		fs:SetText(text:upper()); fs:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+		fs:SetText(text); fs:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
 		return fs
 	end
 	local function secRule()

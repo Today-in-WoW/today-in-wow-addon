@@ -45,6 +45,7 @@ goals\substrate.lua
 goals\offline.lua
 goals\catalog.lua
 goals\presenter.lua
+goals\links.lua
 goals\ui_panel.lua
 goals\ui_matrix.lua
 goals\ui_options.lua

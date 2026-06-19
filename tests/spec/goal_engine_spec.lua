@@ -157,3 +157,47 @@ describe("engine render seam (display contract)", function()
 		assert.equal(base + 1, renders)             -- change → exactly one render
 	end)
 end)
+
+describe("engine goal-level done events", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	local function installGoalWithDone(ns, id, stepEval, doneEval)
+		ns.Goals.Store.install({
+			v = 1, id = id, rev = 1, name = id, scope = "account",
+			done = { evaluator = doneEval, params = {} },
+			steps = { { label = "step", evaluator = stepEval, params = {} } },
+		})
+	end
+
+	it("registers a done evaluator's events even when no step uses it", function()
+		local ns, mock = harness()
+		fakeEvaluator(ns, "step_ev", "EV_STEP")
+		fakeEvaluator(ns, "done_ev", "EV_DONE")
+		installGoalWithDone(ns, "tiw:a", "step_ev", "done_ev")
+		ns.Goals.Engine.Start()
+		assert.is_true(listening(mock, "EV_STEP"))
+		assert.is_true(listening(mock, "EV_DONE"))
+	end)
+
+	it("a done-only event that flips `done` forces a render", function()
+		local ns, mock = harness()
+		fakeEvaluator(ns, "step_ev", "EV_STEP")
+		local done = fakeEvaluator(ns, "done_ev", "EV_DONE")
+		installGoalWithDone(ns, "tiw:a", "step_ev", "done_ev")
+
+		local renders = 0
+		ns.Goals.Engine.SetRender(function() renders = renders + 1 end)
+		ns.Goals.Engine.Start()
+		mock.advance(1)                             -- initial pass renders once
+		local base = renders
+
+		mock.fireEvent("EV_DONE")                   -- done still false → no change
+		mock.advance(ns.Goals.Engine.DEBOUNCE)
+		assert.equal(base, renders)
+
+		done.done = true                            -- the done condition flips true
+		mock.fireEvent("EV_DONE")
+		mock.advance(ns.Goals.Engine.DEBOUNCE)
+		assert.equal(base + 1, renders)             -- done change → exactly one render
+	end)
+end)

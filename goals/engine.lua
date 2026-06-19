@@ -29,9 +29,10 @@ Engine.DEBOUNCE = 0.3   -- seconds after the last dirty mark before the pass
 
 local frame                 -- the single router frame
 local steps = {}            -- list of step refs for the ACTIVE goals
-local eventMap = {}         -- event name -> { stepRef, ... }
-local dirty = {}            -- set of step refs needing re-evaluation
-local results = {}          -- last result table per step ref (change detection)
+local doneRefs = {}         -- goal-level `done` refs (change-detection only)
+local eventMap = {}         -- event name -> { ref, ... } (step OR done refs)
+local dirty = {}            -- set of refs needing re-evaluation
+local results = {}          -- last result table per ref (change detection)
 local timerScheduled = false
 
 -- display layer plugs in here (swappable: themes / richer displays later).
@@ -41,6 +42,7 @@ end
 
 local function markAllDirty()
 	for i = 1, #steps do dirty[steps[i]] = true end
+	for i = 1, #doneRefs do dirty[doneRefs[i]] = true end
 end
 
 -- Two evaluator results are "the same" when nothing the display cares about
@@ -72,7 +74,11 @@ local function runPass()
 	local t0 = debugprofilestop and debugprofilestop()
 	local changed, n = false, 0
 	for ref in pairs(dirty) do
-		local res = ref.def.evaluate(ref.step.params, nil)
+		-- Done refs carry params directly; step refs read them off ref.step. A
+		-- changed result (a step OR a goal-level `done`) forces a render so the
+		-- presenter recomputes goalDone live.
+		local params = ref.isDone and ref.params or ref.step.params
+		local res = ref.def.evaluate(params, nil)
 		if not sameResult(results[ref], res) then changed = true end
 		results[ref] = res
 		n = n + 1
@@ -119,9 +125,19 @@ function Engine.Start()
 	frame:SetScript("OnEvent", onEvent)
 
 	steps = {}
+	doneRefs = {}
 	eventMap = {}
 	dirty = {}
 	results = {}
+
+	local function listen(ref, source)
+		for _, ev in ipairs(Registry.eventsFor(source)) do  -- group → union of leaves
+			eventMap[ev] = eventMap[ev] or {}
+			local list = eventMap[ev]
+			list[#list + 1] = ref
+			frame:RegisterEvent(ev)
+		end
+	end
 
 	for _, rec in ipairs(Store.list()) do
 		if rec.state.active then
@@ -132,13 +148,18 @@ function Engine.Start()
 				if def then
 					local ref = { id = rec.id, index = i, step = step, def = def }
 					steps[#steps + 1] = ref
-					for j = 1, #def.events do
-						local ev = def.events[j]
-						eventMap[ev] = eventMap[ev] or {}
-						local list = eventMap[ev]
-						list[#list + 1] = ref
-						frame:RegisterEvent(ev)
-					end
+					listen(ref, step)
+				end
+			end
+			-- Goal-level `done` may use an evaluator no step uses (e.g. a mount
+			-- collected check); register ITS events too so completion refreshes
+			-- live, not just on relog.
+			if goal.done then
+				local ddef = Registry.get(goal.done.evaluator)
+				if ddef then
+					local dref = { id = rec.id, isDone = true, params = goal.done.params, def = ddef }
+					doneRefs[#doneRefs + 1] = dref
+					listen(dref, goal.done)
 				end
 			end
 		end

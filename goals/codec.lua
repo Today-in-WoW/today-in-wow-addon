@@ -52,8 +52,8 @@ local function checkShape(goal)
 	if type(goal.rev) ~= "number" then return nil, "goal rev required" end
 	if type(goal.name) ~= "string" or goal.name == "" then return nil, "goal name required" end
 	if not VALID_SCOPE[goal.scope] then return nil, "goal scope must be 'account' or 'perchar'" end
-	-- Optional display fields (§2): icon = fileDataID, tooltip/desc/category = text.
-	if goal.icon ~= nil and type(goal.icon) ~= "number" then return nil, "goal icon must be a fileDataID" end
+	-- Optional display fields (§2): icon = fileDataID or icon name, tooltip/desc/category = text.
+	if goal.icon ~= nil and type(goal.icon) ~= "number" and type(goal.icon) ~= "string" then return nil, "goal icon must be a fileDataID or icon name" end
 	if goal.tooltip ~= nil and type(goal.tooltip) ~= "string" then return nil, "goal tooltip must be a string" end
 	if goal.desc ~= nil and type(goal.desc) ~= "string" then return nil, "goal desc must be a string" end
 	if goal.category ~= nil and type(goal.category) ~= "string" then return nil, "goal category must be a string" end
@@ -72,7 +72,7 @@ local function checkShape(goal)
 		if step.resets ~= nil and step.resets ~= "daily" and step.resets ~= "weekly" then
 			return nil, "step " .. i .. " resets must be 'daily' or 'weekly'"
 		end
-		if step.icon ~= nil and type(step.icon) ~= "number" then return nil, "step " .. i .. " icon must be a fileDataID" end
+		if step.icon ~= nil and type(step.icon) ~= "number" and type(step.icon) ~= "string" then return nil, "step " .. i .. " icon must be a fileDataID or icon name" end
 		if step.tooltip ~= nil and type(step.tooltip) ~= "string" then return nil, "step " .. i .. " tooltip must be a string" end
 	end
 	return true
