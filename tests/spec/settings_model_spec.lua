@@ -10,15 +10,15 @@ local function harness()
 	assert(loadfile("core/consent.lua"))("TiW", ns)
 	-- The model binds the checkbox/slider to the tracker + window; stub their
 	-- state so a set() here is observable without the in-game frames.
-	local state = { shown = false, font = 13 }
+	local state = { shown = false, scale = 1 }
 	ns.Goals = ns.Goals or {}
 	ns.Goals.UIPanel = {
 		IsShown = function() return state.shown end,
 		SetShown = function(v) state.shown = v and true or false end,
 	}
 	ns.Goals.UIMain = {
-		GetFontSize = function() return state.font end,
-		SetFontSize = function(v) state.font = v end,
+		GetWindowScale = function() return state.scale end,
+		SetWindowScale = function(v) state.scale = v end,
 	}
 	assert(loadfile("goals/settings_model.lua"))("TiW", ns)
 	return ns, state
@@ -34,7 +34,8 @@ describe("SettingsModel", function()
 		local model = ns.Goals.SettingsModel()
 		assert.is_table(byKey(model, "TIW_DATA_COLLECTION"))
 		assert.is_table(byKey(model, "TIW_SHOW_TRACKER"))
-		assert.is_table(byKey(model, "TIW_GOAL_FONT_SIZE"))
+		assert.is_table(byKey(model, "TIW_WINDOW_SCALE"))
+		assert.is_nil(byKey(model, "TIW_GOAL_FONT_SIZE"))   -- removed; Window scale supersedes it
 		-- at least one disclosure note is present
 		local notes = 0
 		for _, d in ipairs(model) do if d.kind == "note" then notes = notes + 1 end end
@@ -53,6 +54,16 @@ describe("SettingsModel", function()
 	it("labels the data-collection dropdown 'Collection Type'", function()
 		local ns = harness()
 		assert.equal("Collection Type", byKey(ns.Goals.SettingsModel(), "TIW_DATA_COLLECTION").label)
+	end)
+
+	it("window-scale get/set maps percent <-> scale factor", function()
+		local ns, state = harness()
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_WINDOW_SCALE")
+		assert.equal(100, d.get())          -- scale 1.0 -> 100%
+		d.set(150)
+		assert.equal(1.5, state.scale)      -- 150% -> 1.5
+		assert.equal(150, d.get())
+		assert.equal(80, d.min); assert.equal(150, d.max); assert.equal("%", d.unit)
 	end)
 
 	it("data-collection get/set is the consent gate", function()
@@ -75,24 +86,14 @@ describe("SettingsModel", function()
 		assert.is_true(d.get())
 	end)
 
-	it("font-size get/set drives the window font, with min/max/step", function()
-		local ns, state = harness()
-		local d = byKey(ns.Goals.SettingsModel(), "TIW_GOAL_FONT_SIZE")
-		assert.equal(13, d.get())
-		d.set(17)
-		assert.equal(17, state.font)
-		assert.equal(17, d.get())
-		assert.equal(9, d.min); assert.equal(20, d.max); assert.equal(1, d.step)
-	end)
-
 	it("two model() instances (the two surfaces) share state — mirrored always", function()
 		local ns = harness()
 		-- One surface changes a value; a freshly-built model (the OTHER surface)
 		-- reads exactly that value back through its own get().
-		byKey(ns.Goals.SettingsModel(), "TIW_GOAL_FONT_SIZE").set(11)
+		byKey(ns.Goals.SettingsModel(), "TIW_WINDOW_SCALE").set(120)
 		byKey(ns.Goals.SettingsModel(), "TIW_DATA_COLLECTION").set("generic")
 		local other = ns.Goals.SettingsModel()
-		assert.equal(11, byKey(other, "TIW_GOAL_FONT_SIZE").get())
+		assert.equal(120, byKey(other, "TIW_WINDOW_SCALE").get())
 		assert.equal("generic", byKey(other, "TIW_DATA_COLLECTION").get())
 	end)
 

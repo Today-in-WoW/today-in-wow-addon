@@ -70,8 +70,9 @@ local ROW_GAP = 4               -- gap between list rows
 local SEC_LABEL_H = 26          -- section-label row height
 local SCROLL_STEP = 32          -- pixels per mouse-wheel notch
 local DEFAULT_ICON = 134400     -- inv_misc_questionmark, per the brief
-local DEFAULT_FONT_SIZE = 13    -- detail step-list text size (Settings-adjustable)
-local MIN_FONT_SIZE, MAX_FONT_SIZE = 9, 20
+local DEFAULT_FONT_SIZE = 13    -- detail step-list base text size (scaled by window scale)
+local DEFAULT_WINDOW_SCALE = 1  -- whole-window scale (Settings-adjustable)
+local MIN_WINDOW_SCALE, MAX_WINDOW_SCALE = 0.8, 1.5
 
 -- A goal/entry icon is a fileDataID (number) or an icon name (string, resolved
 -- under Interface\Icons\); nil falls back to the question-mark default.
@@ -164,7 +165,7 @@ local function classRGB(token)
 	return WHITE[1], WHITE[2], WHITE[3]
 end
 
--- Persisted window state { tab, point, x, y, width, height, fontSize }.
+-- Persisted window state { tab, left, top, width, height, scale }.
 local function winCfg()
 	_G.TiWDB = _G.TiWDB or {}
 	TiWDB.settings = TiWDB.settings or {}
@@ -172,8 +173,14 @@ local function winCfg()
 	return TiWDB.settings.window
 end
 
+-- Detail step-list base text size. Fixed now (Window scale enlarges it with the
+-- rest of the window) — kept as a function so configStep stays unchanged.
 local function fontSize()
-	return winCfg().fontSize or DEFAULT_FONT_SIZE
+	return DEFAULT_FONT_SIZE
+end
+
+local function winScale()
+	return winCfg().scale or DEFAULT_WINDOW_SCALE
 end
 
 -- Ensure the goal Engine is running and caching the flat view-model (the tabs
@@ -2411,15 +2418,23 @@ local function newSettingSlider(parent, d)
 	local thumb = slider:CreateTexture(nil, "OVERLAY")
 	thumb:SetSize(10, 16); thumb:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.9)
 	slider:SetThumbTexture(thumb)
+	local unit = d.unit or ""
 	local applying = false
+	local pending   -- deferred value, applied on mouse-release (d.defer)
 	slider:SetScript("OnValueChanged", function(_, v)
-		v = math.floor(v + 0.5); val:SetText(tostring(v))
-		if not applying then d.set(v) end
+		v = math.floor(v + 0.5); val:SetText(tostring(v) .. unit)
+		if applying then return end
+		if d.defer then pending = v else d.set(v) end
+	end)
+	-- Deferred sliders apply on release: the window resizes under the slider, so
+	-- setting live would chase the moving thumb and keep re-resizing.
+	slider:SetScript("OnMouseUp", function()
+		if pending ~= nil then d.set(pending); pending = nil end
 	end)
 	local c = {}
 	function c:refresh()
 		applying = true; slider:SetValue(d.get()); applying = false
-		val:SetText(tostring(d.get()))
+		val:SetText(tostring(d.get()) .. unit)
 	end
 	function c:layout(width, y)
 		label:ClearAllPoints(); label:SetPoint("TOPLEFT", 0, y)
@@ -2479,6 +2494,7 @@ local function build()
 
 	local f = CreateFrame("Frame", "TiWMainWindow", UIParent, "BackdropTemplate")
 	f:SetSize(winCfg().width or WIDTH, winCfg().height or HEIGHT)
+	f:SetScale(winScale())   -- whole-window scale (set before applyPosition)
 	f:SetFrameStrata("HIGH")
 	f:SetToplevel(true)
 	f:SetResizable(true)
@@ -2654,8 +2670,9 @@ end
 function Main.ResetWindow()
 	local c = winCfg()
 	c.left, c.top, c.point, c.x, c.y = nil, nil, nil, nil, nil
-	c.width, c.height = nil, nil
+	c.width, c.height, c.scale = nil, nil, nil
 	if frame then
+		frame:SetScale(DEFAULT_WINDOW_SCALE)
 		frame:SetSize(WIDTH, HEIGHT)
 		frame:ClearAllPoints()
 		frame:SetPoint("CENTER")
@@ -2670,14 +2687,30 @@ function Main.OnRender()
 	if frame and frame:IsShown() then refreshActive() end
 end
 
-function Main.GetFontSize()
-	return fontSize()
+function Main.GetWindowScale()
+	return winScale()
 end
 
-function Main.SetFontSize(px)
-	px = math.max(MIN_FONT_SIZE, math.min(MAX_FONT_SIZE, math.floor((px or DEFAULT_FONT_SIZE) + 0.5)))
-	winCfg().fontSize = px
-	if frame and frame:IsShown() then refreshGoals() end
+-- Scale the whole window (all text + chrome) via frame:SetScale. Anchor offsets
+-- live in the frame's own (rescaled) coordinate space, so we re-anchor by the
+-- old/new ratio to keep the on-screen top-left fixed instead of drifting.
+function Main.SetWindowScale(s)
+	s = math.max(MIN_WINDOW_SCALE, math.min(MAX_WINDOW_SCALE, s or DEFAULT_WINDOW_SCALE))
+	local c = winCfg()
+	c.scale = s
+	if frame then
+		local old = frame:GetScale() or 1
+		local left, top = frame:GetLeft(), frame:GetTop()
+		frame:SetScale(s)
+		if left and top then
+			local ratio = old / s
+			frame:ClearAllPoints()
+			frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left * ratio, top * ratio)
+			c.left, c.top = left * ratio, top * ratio
+		end
+		relayoutGoals()
+		refreshActive()
+	end
 end
 
 -- AddOn Compartment click handler (declared in the .toc by name). Blizzard calls

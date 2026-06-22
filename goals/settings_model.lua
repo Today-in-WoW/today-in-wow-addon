@@ -58,11 +58,13 @@ function ns.Goals.SettingsModel()
 
 		{ kind = "header", text = "Style Settings" },
 		{
-			kind = "slider", key = "TIW_GOAL_FONT_SIZE", label = "Goal window font size",
-			tooltip = "Text size for the goal window's step lists.",
-			min = 9, max = 20, step = 1,
-			get = function() return ns.Goals.UIMain.GetFontSize() end,
-			set = function(v) ns.Goals.UIMain.SetFontSize(v) end,
+			-- defer = apply only on release (the window resizes under the slider,
+			-- so a live set would chase the moving thumb).
+			kind = "slider", key = "TIW_WINDOW_SCALE", label = "Window scale", unit = "%",
+			tooltip = "Scale the entire Today in WoW window, including all text.",
+			min = 80, max = 150, step = 5, defer = true,
+			get = function() return math.floor(ns.Goals.UIMain.GetWindowScale() * 100 + 0.5) end,
+			set = function(v) ns.Goals.UIMain.SetWindowScale(v / 100) end,
 		},
 
 		{ kind = "header", text = "Data Settings" },
