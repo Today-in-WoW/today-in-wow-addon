@@ -39,7 +39,7 @@ describe("Catalog", function()
 		local ns = harness()
 		local keys = {}
 		for _, b in ipairs(ns.Goals.Catalog.buckets()) do keys[#keys + 1] = b.key end
-		assert.same({ "reputation", "open-world", "delves", "vault", "endgame", "housing", "professions" }, keys)
+		assert.same({ "reputation", "open-world", "world-events", "delves", "vault", "endgame", "housing", "professions" }, keys)
 	end)
 
 	it("returns a goal table by id, nil for unknown", function()

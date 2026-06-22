@@ -35,6 +35,8 @@ function Catalog.buckets()
 		  desc = "Weekly quests and renown grinds across the worlds." },
 		{ key = "open-world", label = "Open World", icon = "Interface\\Icons\\Achievement_Zone_Ohnahranplains",
 		  desc = "World quests, assaults, and ritual sites out in the world." },
+		{ key = "world-events", label = "World Events", icon = "Interface\\Icons\\spell_holiday_midsummerfire",
+		  desc = "Seasonal holidays and bonus weeks — shown while the event is live." },
 		{ key = "delves", label = "Delves", icon = "Interface\\Icons\\ui_delves",
 		  desc = "Bountiful delve rewards and season-track progress." },
 		{ key = "vault", label = "Great Vault", icon = "Interface\\Icons\\Achievement_RaidPrimalist_Raid",
@@ -452,6 +454,28 @@ function Catalog.entries()
 					  params = { track = "world", slots = 2 }, resets = "weekly", require = { level = 90 } },
 					{ label = "Complete 8 World Activities", evaluator = "vault",
 					  params = { track = "world", slots = 3 }, resets = "weekly", require = { level = 90 } },
+				},
+			},
+		},
+
+		-- 18. Defeat Ahune (Midsummer) ---------------------------------------
+		{
+			bucket = "world-events", tag = "Midsummer Fire Festival",
+			reward = "Sun Festival's Painted Roc", popular = true,
+			goal = {
+				v = 1, id = "tiw:defeat-ahune", rev = 1,
+				name = "Defeat Ahune",
+				category = "World Events",
+				desc = "During Midsummer Fire Festival, enter the dungeon finder version of Slave Pens to defeat Lord Ahune. Once a day, per battle.net account, you may find special loot inside [item=117394], including [item=275464].",
+				icon = "spell_frost_summonwaterelemental",
+				tooltip = "[item=117394]",
+				scope = "account",
+				date = { event = 341 },   -- Midsummer Fire Festival
+				steps = {
+					{ label = "Loot [item=117394] from Lord Ahune.", evaluator = "flag",
+					  params = { quest = 97111, account = true }, resets = "daily",
+					  note = "Quest only completes upon opening the bag. You may peek inside multiple before taking any loot from it.",
+					  icon = "inv_misc_bag_17", tooltip = "[item=117394]" },
 				},
 			},
 		},

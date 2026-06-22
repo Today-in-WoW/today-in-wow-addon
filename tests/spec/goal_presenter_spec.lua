@@ -32,7 +32,7 @@ local function harness(cfg)
 	local ns = {}
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/substrate.lua",
-		"goals/offline.lua", "goals/presenter.lua",
+		"goals/offline.lua", "goals/season.lua", "goals/presenter.lua",
 		"goals/evaluators/lockout.lua", "goals/evaluators/currency.lua",
 		"goals/evaluators/flag.lua", "goals/evaluators/collected.lua",
 	}) do
@@ -58,6 +58,11 @@ end
 local function gMount()   -- account, single collected step
 	return { v = 1, id = "g:mount", rev = 1, name = "Collect Mount", scope = "account",
 		steps = { { label = "Obtain", evaluator = "collected", params = { mount = 999 } } } }
+end
+local function gSeasonal(date)  -- account, gated by a `date` window
+	return { v = 1, id = "g:seasonal", rev = 1, name = "Seasonal", scope = "account",
+		date = date,
+		steps = { { label = "Do it", evaluator = "collected", params = { mount = 555 } } } }
 end
 
 -- Substrate seeding for alts -------------------------------------------------
@@ -125,6 +130,30 @@ describe("Presenter.pinned — selection & grouping", function()
 		local S = ns.Goals.Store
 		S.install(gCrests()); S.setPinned("g:crests", true); S.setActive("g:crests", false)
 		assert.same({}, ns.Goals.Presenter.pinned({}).goals)
+	end)
+
+	it("a pinned goal OUT OF SEASON (date window) is excluded", function()
+		local ns = harness()
+		_G.C_DateAndTime.GetCurrentCalendarTime = function()
+			return { year = 2026, month = 8, monthDay = 1 }
+		end
+		local S = ns.Goals.Store
+		S.install(gSeasonal({ from = "2026-06-21", to = "2026-07-05" }))
+		S.setPinned("g:seasonal", true)
+		assert.same({}, ns.Goals.Presenter.pinned({}).goals)
+	end)
+
+	it("a pinned goal IN SEASON is included", function()
+		local ns = harness()
+		_G.C_DateAndTime.GetCurrentCalendarTime = function()
+			return { year = 2026, month = 6, monthDay = 25 }
+		end
+		local S = ns.Goals.Store
+		S.install(gSeasonal({ from = "2026-06-21", to = "2026-07-05" }))
+		S.setPinned("g:seasonal", true)
+		local vm = ns.Goals.Presenter.pinned({ row("g:seasonal", 1, "Do it", { done = false }) })
+		assert.equal(1, #vm.goals)
+		assert.equal("g:seasonal", vm.goals[1].id)
 	end)
 
 	it("groups flatVM rows into a goal's steps in index order, carrying name + scope", function()

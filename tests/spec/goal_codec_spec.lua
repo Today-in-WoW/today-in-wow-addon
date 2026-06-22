@@ -240,6 +240,51 @@ describe("goal codec §2/§3 shape", function()
 	end)
 end)
 
+describe("goal codec §2 date (seasonal gate)", function()
+	local function withDate(date)
+		local g = fixtures().invincible_farm
+		g.date = date
+		return g
+	end
+
+	it("round-trips each date mode byte-perfectly", function()
+		local Codec = loadCodec()
+		for _, date in ipairs({
+			{ event = 341 },
+			{ from = "06-21", to = "07-05" },             -- annual (no year)
+			{ from = "2026-06-21", to = "2026-07-05" },   -- absolute (with year)
+			{ from = "12-16", to = "01-02" },             -- wraps the year boundary
+		}) do
+			local g = withDate(date)
+			assert.same(g, (Codec.decode(assert(Codec.encode(g)))))
+		end
+	end)
+
+	it("a goal with no date is valid (date is optional)", function()
+		local Codec = loadCodec()
+		assert.is_table((Codec.decode(rawEncode(fixtures().invincible_farm))))
+	end)
+
+	it("rejects malformed date fields", function()
+		local Codec = loadCodec()
+		local cases = {
+			"not-a-table",
+			{ event = "341" },                              -- event must be a number
+			{ event = 341, from = "06-21", to = "07-05" },  -- not both modes
+			{ from = "06-21" },                             -- needs both from and to
+			{ from = "06-21", to = "2026-07-05" },          -- mixed formats
+			{ from = "13-40", to = "06-21" },               -- invalid month/day
+			{ from = "june", to = "july" },                 -- unparseable
+			{ season = "summer" },                          -- unknown key
+		}
+		for i, date in ipairs(cases) do
+			local got, err = Codec.decode(rawEncode(withDate(date)))
+			assert.is_nil(got, "case " .. i)
+			assert.is_string(err, "case " .. i)
+		end
+	end)
+end)
+
 describe("goal codec §8 guardrails", function()
 	it("rejects oversized input before inflating (MAX_INPUT)", function()
 		local Codec = loadCodec()

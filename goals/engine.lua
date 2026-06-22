@@ -69,6 +69,13 @@ local function buildViewModel()
 	return vm
 end
 
+-- Re-render the current view-model WITHOUT re-evaluating — for when something
+-- outside the evaluators changed what the display shows (a seasonal `date` gate
+-- flipping pinned-list membership), so the step results are identical.
+function Engine.rerender()
+	if Engine._render then Engine._render(buildViewModel()) end
+end
+
 -- The debounced pass: evaluate DIRTY steps only, render iff a result changed.
 local function runPass()
 	local t0 = debugprofilestop and debugprofilestop()

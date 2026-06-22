@@ -22,7 +22,7 @@ read_globals = {
 	"GetNumAvailableQuests", "GetAvailableQuestID", "GetNumActiveQuests", "GetActiveQuestID",
 	"C_TaskQuest", "C_QuestInfoSystem", "HaveQuestData", "HaveQuestRewardData", "GetQuestLogRewardMoney",
 	"GetNumQuestLogRewards", "GetQuestLogRewardInfo",
-	"C_EventScheduler", "C_AreaPoiInfo",
+	"C_EventScheduler", "C_AreaPoiInfo", "C_Calendar",
 	"C_UIWidgetManager", "C_DateAndTime", "Enum",
 	"WorldMapFrame", "hooksecurefunc", "EventUtil", "CovenantMissionFrame",
 	"C_Item", "C_ToyBox",

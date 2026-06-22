@@ -42,6 +42,52 @@ end
 
 local VALID_SCOPE = { account = true, perchar = true }
 
+-- "MM-DD" -> "annual", m, d ; "YYYY-MM-DD" -> "absolute", m, d ; else nil.
+local function ymdKind(s)
+	if type(s) ~= "string" then return nil end
+	local m, d = s:match("^(%d%d)%-(%d%d)$")
+	if m then return "annual", tonumber(m), tonumber(d) end
+	local _, m2, d2 = s:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+	if m2 then return "absolute", tonumber(m2), tonumber(d2) end
+	return nil
+end
+
+-- §2 optional seasonal gate. Exactly one mode: { event = N } OR a { from, to }
+-- window. Window strings are "MM-DD" (annual, recurs) or "YYYY-MM-DD" (absolute);
+-- from and to must share a format. Strict keys (§4). Gates pinned-list
+-- visibility only — never import/eligibility.
+local function checkDate(d)
+	if type(d) ~= "table" then return nil, "goal date must be a table" end
+	for k in pairs(d) do
+		if k ~= "event" and k ~= "from" and k ~= "to" then
+			return nil, "goal date has an unknown key '" .. tostring(k) .. "'"
+		end
+	end
+	local hasEvent, hasWindow = d.event ~= nil, (d.from ~= nil or d.to ~= nil)
+	if hasEvent and hasWindow then
+		return nil, "goal date is an event or a from/to window, not both"
+	end
+	if hasEvent then
+		if type(d.event) ~= "number" then return nil, "goal date event must be a number" end
+		return true
+	end
+	if not (d.from and d.to) then
+		return nil, "goal date needs an event, or both from and to"
+	end
+	local kf, mf, df = ymdKind(d.from)
+	local kt, mt, dt = ymdKind(d.to)
+	if not kf or not kt then
+		return nil, "goal date from/to must be 'MM-DD' or 'YYYY-MM-DD'"
+	end
+	if kf ~= kt then
+		return nil, "goal date from/to must share a format (both with or both without a year)"
+	end
+	if mf < 1 or mf > 12 or df < 1 or df > 31 or mt < 1 or mt > 12 or dt < 1 or dt > 31 then
+		return nil, "goal date from/to has an invalid month or day"
+	end
+	return true
+end
+
 -- The shape gate shared by encode and decode: we never emit a string we would
 -- reject. Required fields + types per §2/§3; capability (which evaluators
 -- exist) is NOT checked here — that's Registry.unsupportedSteps at install.
@@ -57,6 +103,10 @@ local function checkShape(goal)
 	if goal.tooltip ~= nil and type(goal.tooltip) ~= "string" then return nil, "goal tooltip must be a string" end
 	if goal.desc ~= nil and type(goal.desc) ~= "string" then return nil, "goal desc must be a string" end
 	if goal.category ~= nil and type(goal.category) ~= "string" then return nil, "goal category must be a string" end
+	if goal.date ~= nil then
+		local dok, derr = checkDate(goal.date)
+		if not dok then return nil, derr end
+	end
 	if type(goal.steps) ~= "table" then return nil, "goal steps required" end
 	if #goal.steps == 0 then return nil, "goal needs at least one step" end
 	for i = 1, #goal.steps do

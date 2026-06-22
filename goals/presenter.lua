@@ -211,14 +211,23 @@ local function nextAltFor(goal, st, goalDone, current)
 	end
 end
 
+-- A goal's optional `date` gate hides it from the pinned list while out of
+-- season (goal-format-v1 §2). Import/eligibility are unaffected — only the
+-- always-on panel honors it. No Season module (some specs) → no gate.
+local function inSeason(goal)
+	local S = ns.Goals.Season
+	if not S then return true end
+	return S.active(goal.date)
+end
+
 -- The always-on panel. Returns { goals = { <goalEntry> + nextAlt, ... } } —
--- pinned && active goals only, in display order (Store.ordered).
+-- pinned && active && in-season goals only, in display order (Store.ordered).
 function Presenter.pinned(flatVM)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
 	local out = { goals = {} }
 	for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
-		if rec.state.active then
+		if rec.state.active and inSeason(rec.goal) then
 			local goal = rec.goal
 			local goalDone = goalLevelDone(goal)
 			local entry = goalEntry(goal, byId[goal.id], goalDone)

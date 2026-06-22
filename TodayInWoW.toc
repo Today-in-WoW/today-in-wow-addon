@@ -45,6 +45,7 @@ goals\substrate.lua
 goals\offline.lua
 goals\catalog.lua
 goals\catalog_professions.lua
+goals\season.lua
 goals\presenter.lua
 goals\links.lua
 goals\ui_panel.lua
