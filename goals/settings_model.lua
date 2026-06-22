@@ -41,6 +41,32 @@ local CONSENT_OPTIONS = {
 -- Points layout at Edit Mode rather than duplicating position/size sliders.
 local EDITMODE_NOTE = "Tracker position and size are set in Edit Mode (Game Menu -> Edit Mode -> Today in WoW)."
 
+-- Persisted boolean display prefs (default ON). Stored under TiWDB.settings.prefs
+-- and read by the presenter (goals/presenter.lua) to shape the tracker. Lazy
+-- TiWDB access (the SV-timing rule); safe headless (TiWDB is just a global table).
+local PREF_DEFAULT = { hideCompletedSteps = true, hideCompletedGoals = true }
+
+local function prefStore()
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	TiWDB.settings.prefs = TiWDB.settings.prefs or {}
+	return TiWDB.settings.prefs
+end
+
+-- Current value of a boolean pref, falling back to its default when unset.
+function ns.Goals.GetPref(key)
+	local v = prefStore()[key]
+	if v == nil then return PREF_DEFAULT[key] end
+	return v
+end
+
+-- Persist a boolean pref and re-render the tracker so the change shows at once
+-- (display-only change — no re-evaluation, like the seasonal gate flip).
+function ns.Goals.SetPref(key, v)
+	prefStore()[key] = not not v
+	if ns.Goals.Engine and ns.Goals.Engine.rerender then ns.Goals.Engine.rerender() end
+end
+
 -- A fresh list per call (callers decorate entries with their own widgets).
 -- `header` entries group the settings into categories (rendered as section
 -- headers by both surfaces). Data collection sits last under its own category:
@@ -53,6 +79,19 @@ function ns.Goals.SettingsModel()
 			tooltip = "Show or hide the Today in WoW goal tracker.",
 			get = function() return ns.Goals.UIPanel.IsShown() end,
 			set = function(v) ns.Goals.UIPanel.SetShown(v) end,
+		},
+		{
+			kind = "checkbox", key = "TIW_HIDE_DONE_STEPS", label = "Hide completed steps",
+			tooltip = "On the tracker, hide a goal's finished steps (the goal's count still shows the total).",
+			get = function() return ns.Goals.GetPref("hideCompletedSteps") end,
+			set = function(v) ns.Goals.SetPref("hideCompletedSteps", v) end,
+		},
+		{
+			kind = "checkbox", key = "TIW_HIDE_DONE_GOALS", label = "Hide completed goals",
+			tooltip = "On the tracker, hide a goal once it's complete (unless another character still needs it). "
+				.. "It stays pinned and returns when one of its steps resets.",
+			get = function() return ns.Goals.GetPref("hideCompletedGoals") end,
+			set = function(v) ns.Goals.SetPref("hideCompletedGoals", v) end,
 		},
 		{ kind = "note", text = EDITMODE_NOTE },
 

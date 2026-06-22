@@ -35,7 +35,7 @@ function Catalog.buckets()
 		  desc = "Weekly quests and renown grinds across the worlds." },
 		{ key = "open-world", label = "Open World", icon = "Interface\\Icons\\Achievement_Zone_Ohnahranplains",
 		  desc = "World quests, assaults, and ritual sites out in the world." },
-		{ key = "world-events", label = "World Events", icon = "Interface\\Icons\\spell_holiday_midsummerfire",
+		{ key = "world-events", label = "World Events", icon = "Interface\\Icons\\achievement_bg_masterofallbgs",
 		  desc = "Seasonal holidays and bonus weeks — shown while the event is live." },
 		{ key = "delves", label = "Delves", icon = "Interface\\Icons\\ui_delves",
 		  desc = "Bountiful delve rewards and season-track progress." },

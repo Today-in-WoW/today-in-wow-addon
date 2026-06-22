@@ -220,11 +220,35 @@ local function inSeason(goal)
 	return S.active(goal.date)
 end
 
+-- Display prefs that shape the pinned HUD (goals/settings_model.lua owns them).
+-- Absent accessor (some specs don't load the model) → no hiding, so raw shaping
+-- specs see every step/goal.
+local function pref(key)
+	local G = ns.Goals
+	if G.GetPref then return G.GetPref(key) end
+	return false
+end
+
+-- Drop a goal's completed steps, keeping the unfinished ones. The header's
+-- aggregate (done/total) is computed before this, so the count stays full.
+local function dropDoneSteps(entry)
+	local kept = {}
+	for _, s in ipairs(entry.steps) do
+		if not (s.result and s.result.done) then kept[#kept + 1] = s end
+	end
+	entry.steps = kept
+end
+
 -- The always-on panel. Returns { goals = { <goalEntry> + nextAlt, ... } } —
 -- pinned && active && in-season goals only, in display order (Store.ordered).
+-- Two display prefs trim it: "Hide completed goals" drops a done goal that has
+-- no next-character nudge (it stays pinned, returns when a step resets); "Hide
+-- completed steps" renders only a goal's unfinished step lines.
 function Presenter.pinned(flatVM)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
+	local hideGoals = pref("hideCompletedGoals")
+	local hideSteps = pref("hideCompletedSteps")
 	local out = { goals = {} }
 	for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
 		if rec.state.active and inSeason(rec.goal) then
@@ -232,7 +256,10 @@ function Presenter.pinned(flatVM)
 			local goalDone = goalLevelDone(goal)
 			local entry = goalEntry(goal, byId[goal.id], goalDone)
 			entry.nextAlt = nextAltFor(goal, rec.state, goalDone, current)
-			out.goals[#out.goals + 1] = entry
+			if not (hideGoals and entry.state == "done" and not entry.nextAlt) then
+				if hideSteps then dropDoneSteps(entry) end
+				out.goals[#out.goals + 1] = entry
+			end
 		end
 	end
 	return out

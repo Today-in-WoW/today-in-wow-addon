@@ -29,17 +29,34 @@ local function byKey(model, key)
 end
 
 describe("SettingsModel", function()
-	it("exposes the three addon settings, in panel order with the notes", function()
+	it("exposes the addon settings, in panel order with the notes", function()
 		local ns = harness()
 		local model = ns.Goals.SettingsModel()
 		assert.is_table(byKey(model, "TIW_DATA_COLLECTION"))
 		assert.is_table(byKey(model, "TIW_SHOW_TRACKER"))
+		assert.is_table(byKey(model, "TIW_HIDE_DONE_STEPS"))
+		assert.is_table(byKey(model, "TIW_HIDE_DONE_GOALS"))
 		assert.is_table(byKey(model, "TIW_WINDOW_SCALE"))
 		assert.is_nil(byKey(model, "TIW_GOAL_FONT_SIZE"))   -- removed; Window scale supersedes it
 		-- at least one disclosure note is present
 		local notes = 0
 		for _, d in ipairs(model) do if d.kind == "note" then notes = notes + 1 end end
 		assert.is_true(notes >= 1)
+	end)
+
+	it("the two tracker prefs default ON and round-trip through TiWDB", function()
+		local ns = harness()
+		assert.is_true(ns.Goals.GetPref("hideCompletedSteps"))
+		assert.is_true(ns.Goals.GetPref("hideCompletedGoals"))
+
+		local steps = byKey(ns.Goals.SettingsModel(), "TIW_HIDE_DONE_STEPS")
+		local goals = byKey(ns.Goals.SettingsModel(), "TIW_HIDE_DONE_GOALS")
+		assert.is_true(steps.get())          -- bound to the same default-ON pref
+		steps.set(false); goals.set(false)
+		assert.is_false(ns.Goals.GetPref("hideCompletedSteps"))
+		assert.is_false(ns.Goals.GetPref("hideCompletedGoals"))
+		-- a freshly-built model (the other surface) reads the new value back
+		assert.is_false(byKey(ns.Goals.SettingsModel(), "TIW_HIDE_DONE_STEPS").get())
 	end)
 
 	it("groups settings under the three category headers, in order", function()

@@ -2295,9 +2295,12 @@ local function newSettingDropdown(parent, d)
 	local cur = field:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	cur:SetPoint("LEFT", 8, 0); cur:SetJustifyH("LEFT")
 	cur:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
-	local arrow = field:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	arrow:SetPoint("RIGHT", -8, -1); arrow:SetText("\226\150\188")   -- ▼
-	arrow:SetTextColor(0.7, 0.7, 0.72)
+	-- A texture, not a glyph: the ▼ codepoint isn't in WoW's default font and
+	-- renders as a tofu box. This is the same arrow Blizzard dropdowns use.
+	local arrow = field:CreateTexture(nil, "OVERLAY")
+	arrow:SetPoint("RIGHT", -6, -1); arrow:SetSize(16, 16)
+	arrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
+	arrow:SetVertexColor(0.7, 0.7, 0.72)
 
 	-- Overlay list + a full-screen catcher behind it (outside-click closes).
 	local catcher = CreateFrame("Button", nil, UIParent)
@@ -2407,7 +2410,7 @@ local function newSettingSlider(parent, d)
 	label:SetJustifyH("LEFT"); label:SetText(d.label)
 	label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
 	local val = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	val:SetJustifyH("RIGHT"); val:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	val:SetJustifyH("LEFT"); val:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
 	local slider = CreateFrame("Slider", nil, parent)
 	slider:SetOrientation("HORIZONTAL"); slider:SetHeight(12)
 	slider:SetMinMaxValues(d.min, d.max); slider:SetValueStep(d.step)
@@ -2437,9 +2440,10 @@ local function newSettingSlider(parent, d)
 		val:SetText(tostring(d.get()) .. unit)
 	end
 	function c:layout(width, y)
+		local sw = math.min(280, width)   -- fixed-ish track, not the whole column
 		label:ClearAllPoints(); label:SetPoint("TOPLEFT", 0, y)
-		val:ClearAllPoints(); val:SetPoint("TOPRIGHT", 0, y)
-		slider:ClearAllPoints(); slider:SetPoint("TOPLEFT", 0, y - 20); slider:SetWidth(width)
+		slider:ClearAllPoints(); slider:SetPoint("TOPLEFT", 0, y - 20); slider:SetWidth(sw)
+		val:ClearAllPoints(); val:SetPoint("LEFT", slider, "RIGHT", 8, 0)
 		return 38
 	end
 	return c

@@ -280,6 +280,60 @@ describe("Presenter.pinned — nextAlt hint", function()
 	end)
 end)
 
+describe("Presenter.pinned — completed-step/goal hiding (display prefs)", function()
+	local function gTwo()
+		return { v = 1, id = "g:two", rev = 1, name = "Two Steps", scope = "perchar",
+			steps = {
+				{ label = "A", evaluator = "flag", params = { quest = 1 } },
+				{ label = "B", evaluator = "flag", params = { quest = 2 } },
+			} }
+	end
+
+	it("hideCompletedSteps renders only unfinished steps; header count stays full", function()
+		local ns = harness()
+		ns.Goals.GetPref = function(k) return k == "hideCompletedSteps" end
+		local S = ns.Goals.Store
+		S.install(gTwo()); S.setPinned("g:two", true)
+		local g = ns.Goals.Presenter.pinned({
+			row("g:two", 1, "A", { done = true }),
+			row("g:two", 2, "B", { done = false }),
+		}).goals[1]
+		assert.equal(1, #g.steps)
+		assert.equal("B", g.steps[1].label)
+		assert.equal(1, g.done)   -- aggregate header count is unchanged
+		assert.equal(2, g.total)
+	end)
+
+	it("hideCompletedGoals drops a done goal with no next-character nudge", function()
+		local ns = harness()
+		ns.Goals.GetPref = function(k) return k == "hideCompletedGoals" end
+		local S = ns.Goals.Store
+		S.install(gFarm()); S.setPinned("g:farm", true)   -- no alts → nextAlt nil
+		assert.same({}, ns.Goals.Presenter.pinned({
+			row("g:farm", 1, "Kill LK", { done = true }) }).goals)
+	end)
+
+	it("hideCompletedGoals keeps a done goal another character still needs", function()
+		local ns = harness()
+		ns.Goals.GetPref = function(k) return k == "hideCompletedGoals" end
+		local S = ns.Goals.Store
+		S.install(gFarm()); S.setPinned("g:farm", true)
+		seedAlt(ns, "Bbb-Realm", { lockouts = { iccRow(false) } })   -- still needs it
+		local vm = ns.Goals.Presenter.pinned({ row("g:farm", 1, "Kill LK", { done = true }) })
+		assert.equal(1, #vm.goals)
+		assert.equal("Bbb-Realm", vm.goals[1].nextAlt)
+	end)
+
+	it("no pref accessor → nothing hidden (raw shaping for other specs)", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gFarm()); S.setPinned("g:farm", true)
+		local vm = ns.Goals.Presenter.pinned({ row("g:farm", 1, "Kill LK", { done = true }) })
+		assert.equal(1, #vm.goals)            -- done goal still present
+		assert.equal(1, #vm.goals[1].steps)   -- done step still present
+	end)
+end)
+
 -- ===========================================================================
 -- Presenter.matrix
 -- ===========================================================================
