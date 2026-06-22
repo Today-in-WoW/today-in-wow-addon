@@ -41,6 +41,8 @@ local listRows, listN = {}, 0    -- pooled available list rows
 local cardParent            -- the scroll child the cards/rows live under
 local LEFT_W                -- left (Active Pursuits) region width, computed live
 local refreshGoals, selectGoal, renderDetail
+local refreshSettings       -- assigned below; the Settings tab (cogwheel) refresh
+local closeOpenDropdown     -- closes the open settings dropdown (overlay), if any
 local onItemDragStart, onItemDragStop   -- assigned below; builders wire them
 local dragState             -- active drag { id, pinned }, or nil
 local importFrame           -- import modal, built on first use
@@ -184,11 +186,21 @@ local function ensureEngine()
 	end
 end
 
+-- Position is stored as a single TOP-LEFT anchor (left/top, UIParent-relative) so
+-- move and resize share one stable corner anchor — resizing a CENTER-anchored
+-- frame from BOTTOMRIGHT makes it grow at 2× and jump. Legacy point/x/y is
+-- honored until the next move/resize rewrites it as left/top.
 local function applyPosition()
 	if not frame then return end
 	local c = winCfg()
 	frame:ClearAllPoints()
-	frame:SetPoint(c.point or "CENTER", UIParent, c.point or "CENTER", c.x or 0, c.y or 0)
+	if c.left and c.top then
+		frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", c.left, c.top)
+	elseif c.point then
+		frame:SetPoint(c.point, UIParent, c.point, c.x or 0, c.y or 0)
+	else
+		frame:SetPoint("CENTER")
+	end
 end
 
 -- The addon version string for the footer ("TODAY IN WOW  •  V1.2.3").
@@ -294,6 +306,25 @@ local function makeClose(parent)
 	x:SetTextColor(0.6, 0.6, 0.62)
 	b:SetScript("OnEnter", function() x:SetTextColor(1, 0.85, 0.4) end)
 	b:SetScript("OnLeave", function() x:SetTextColor(0.6, 0.6, 0.62) end)
+	return b
+end
+
+-- A gear button (opens the Settings view). Greys idle, brightens on hover, and
+-- holds gold while the Settings view is active (b:SetActive(true)).
+local function makeCog(parent)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetSize(24, 24)
+	local tex = b:CreateTexture(nil, "ARTWORK")
+	tex:SetPoint("CENTER"); tex:SetSize(16, 16)
+	tex:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+	tex:SetVertexColor(0.6, 0.6, 0.62)
+	local function idle() return b.active and GOLD or { 0.6, 0.6, 0.62 } end
+	b:SetScript("OnEnter", function() tex:SetVertexColor(1, 0.85, 0.4) end)
+	b:SetScript("OnLeave", function() local c = idle(); tex:SetVertexColor(c[1], c[2], c[3]) end)
+	function b:SetActive(on)
+		self.active = on
+		local c = idle(); tex:SetVertexColor(c[1], c[2], c[3])
+	end
 	return b
 end
 
@@ -1612,7 +1643,8 @@ end
 
 local function refreshActive()
 	if not (frame and frame.tabs) then return end
-	if frame.tabs.matrix.selected then refreshMatrix()
+	if frame.panes.settings and frame.panes.settings:IsShown() then refreshSettings()
+	elseif frame.tabs.matrix.selected then refreshMatrix()
 	elseif frame.tabs.catalog.selected then refreshCatalog()
 	else refreshGoals() end
 end
@@ -1723,11 +1755,16 @@ end
 -- ---------------------------------------------------------------------------
 -- Tabs.
 -- ---------------------------------------------------------------------------
+-- "settings" is a view opened by the cogwheel, not a tab in the left tab row, so
+-- it has no TAB_LABEL entry: when active, every tab is deselected and the
+-- settings pane shows instead.
 function selectTab(key)
 	if not frame then return end
-	if not TAB_LABEL[key] then key = "goals" end
+	if closeOpenDropdown then closeOpenDropdown() end
+	local isSettings = (key == "settings")
+	if not isSettings and not TAB_LABEL[key] then key = "goals" end
 	for _, k in ipairs(TABS) do
-		local on = (k == key)
+		local on = (not isSettings) and (k == key)
 		local b = frame.tabs[k]
 		b.selected = on
 		b.underline:SetShown(on)
@@ -1735,6 +1772,8 @@ function selectTab(key)
 		b.label:SetTextColor(c[1], c[2], c[3])
 		frame.panes[k]:SetShown(on)
 	end
+	frame.panes.settings:SetShown(isSettings)
+	if frame.cog then frame.cog:SetActive(isSettings) end
 	winCfg().tab = key
 	if frame:IsShown() then refreshActive() end
 end
@@ -2186,6 +2225,255 @@ local function relayoutGoals()
 	G.dScroll.sc:SetWidth(G.dScroll.sf:GetWidth())
 end
 
+-- ---------------------------------------------------------------------------
+-- Settings tab (cogwheel) — renders the shared settings model
+-- (goals/settings_model.lua) as custom dark-theme controls. Each control binds
+-- to the model's get/set, the same closures the Blizzard panel uses, so the two
+-- surfaces are always mirrored; each control's :refresh() re-reads get() so the
+-- tab reflects a change made from the other surface whenever it's shown.
+-- Every control returns { refresh, layout(width, y) -> height }.
+-- ---------------------------------------------------------------------------
+local SET_HEADER_H = 44   -- settings header band (title + subtitle)
+local SET_GAP = 14        -- vertical gap between controls
+
+-- A category header: warm-gold title with a trailing rule (the section divider,
+-- like the Active Pursuits labels). Marked isHeader so the column adds space above.
+local function newSettingHeader(parent, text)
+	local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	fs:SetText(text); fs:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
+	local rule = parent:CreateTexture(nil, "ARTWORK")
+	rule:SetHeight(1)
+	rule:SetColorTexture(LABEL_RULE[1], LABEL_RULE[2], LABEL_RULE[3], LABEL_RULE[4])
+	local c = { isHeader = true }
+	function c:refresh() end
+	function c:layout(width, y)
+		fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", 0, y)
+		rule:ClearAllPoints()
+		rule:SetPoint("LEFT", fs, "RIGHT", 10, -1)
+		rule:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+		return math.ceil(fs:GetStringHeight()) + 6
+	end
+	return c
+end
+
+-- A muted wrapped disclosure line.
+local function newSettingNote(parent, text)
+	local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	fs:SetJustifyH("LEFT"); fs:SetWordWrap(true); fs:SetText(text)
+	fs:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	local c = {}
+	function c:refresh() end
+	function c:layout(width, y)
+		fs:SetWidth(width)
+		fs:ClearAllPoints(); fs:SetPoint("TOPLEFT", 0, y)
+		return math.ceil(fs:GetStringHeight()) + 2
+	end
+	return c
+end
+
+-- A custom dark-theme dropdown (the data-collection control): a field showing
+-- the current option, a popup list of options, and each option's description as
+-- a hover tooltip. A full-screen click-catcher closes it on any outside click.
+local DD_ROW_H = 22
+local function newSettingDropdown(parent, d)
+	local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetJustifyH("LEFT"); label:SetText(d.label)
+	label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+
+	local field = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	field:SetHeight(24)
+	field:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	field:SetBackdropColor(1, 1, 1, 0.05); field:SetBackdropBorderColor(1, 1, 1, 0.18)
+	local cur = field:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	cur:SetPoint("LEFT", 8, 0); cur:SetJustifyH("LEFT")
+	cur:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	local arrow = field:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	arrow:SetPoint("RIGHT", -8, -1); arrow:SetText("\226\150\188")   -- ▼
+	arrow:SetTextColor(0.7, 0.7, 0.72)
+
+	-- Overlay list + a full-screen catcher behind it (outside-click closes).
+	local catcher = CreateFrame("Button", nil, UIParent)
+	catcher:SetAllPoints(UIParent); catcher:SetFrameStrata("FULLSCREEN_DIALOG"); catcher:Hide()
+	local list = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	list:SetFrameStrata("FULLSCREEN_DIALOG")
+	list:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	list:SetBackdropColor(0.07, 0.065, 0.08, 0.98)
+	list:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.4)
+	list:Hide()
+
+	local function close()
+		list:Hide(); catcher:Hide()
+		if closeOpenDropdown == close then closeOpenDropdown = nil end
+	end
+	catcher:SetScript("OnClick", close)
+
+	local rows = {}
+	for i, opt in ipairs(d.options) do
+		local row = CreateFrame("Button", nil, list)
+		row:SetHeight(DD_ROW_H)
+		local hl = row:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints()
+		hl:SetColorTexture(1, 1, 1, 0.06)
+		local t = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		t:SetPoint("LEFT", 8, 0); t:SetJustifyH("LEFT"); t:SetText(opt.label)
+		row.text, row.opt = t, opt
+		row:SetScript("OnEnter", function()
+			GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+			GameTooltip:SetText(opt.label, 1, 1, 1)
+			GameTooltip:AddLine(opt.desc, 0.8, 0.8, 0.8, true)
+			GameTooltip:Show()
+		end)
+		row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		row:SetScript("OnClick", function() d.set(opt.value); close(); refreshSettings() end)
+		rows[i] = row
+	end
+
+	local function open()
+		local w = field:GetWidth()
+		list:SetWidth(w); list:SetHeight(#rows * DD_ROW_H + 8)
+		list:ClearAllPoints(); list:SetPoint("TOPLEFT", field, "BOTTOMLEFT", 0, -2)
+		local sel = d.get()
+		for i, row in ipairs(rows) do
+			local on = row.opt.value == sel
+			row.text:SetTextColor(on and GOLD[1] or WHITE[1], on and GOLD[2] or WHITE[2], on and GOLD[3] or WHITE[3])
+			row:ClearAllPoints()
+			row:SetPoint("TOPLEFT", 4, -4 - (i - 1) * DD_ROW_H)
+			row:SetPoint("RIGHT", list, "RIGHT", -4, 0)
+		end
+		catcher:Show(); list:Show()
+		list:SetFrameLevel(catcher:GetFrameLevel() + 10)
+		closeOpenDropdown = close
+	end
+	field:SetScript("OnEnter", function() field:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.6) end)
+	field:SetScript("OnLeave", function() field:SetBackdropBorderColor(1, 1, 1, 0.18) end)
+	field:SetScript("OnClick", function() if list:IsShown() then close() else open() end end)
+
+	local c = {}
+	function c:refresh()
+		local o = ns.Goals.SettingsOption(d, d.get())
+		cur:SetText(o and o.label or "")
+		if list:IsShown() then close() end   -- never leave a stale-positioned list
+	end
+	function c:layout(width, y)
+		label:ClearAllPoints(); label:SetPoint("TOPLEFT", 0, y)
+		field:ClearAllPoints(); field:SetPoint("TOPLEFT", 0, y - 20)
+		field:SetWidth(math.min(280, width))
+		return 46
+	end
+	return c
+end
+
+-- A custom checkbox: bordered box + check texture + label, tooltip on hover.
+local function newSettingCheck(parent, d)
+	local box = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	box:SetSize(20, 20)
+	box:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	box:SetBackdropColor(1, 1, 1, 0.04); box:SetBackdropBorderColor(1, 1, 1, 0.2)
+	local check = box:CreateTexture(nil, "OVERLAY")
+	check:SetPoint("CENTER"); check:SetSize(20, 20)
+	check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+	local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetJustifyH("LEFT"); label:SetText(d.label)
+	label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	box:SetScript("OnClick", function() d.set(not d.get()); refreshSettings() end)
+	box:SetScript("OnEnter", function()
+		if not d.tooltip then return end
+		GameTooltip:SetOwner(box, "ANCHOR_RIGHT")
+		GameTooltip:SetText(d.tooltip, 1, 1, 1, 1, true); GameTooltip:Show()
+	end)
+	box:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	local c = {}
+	function c:refresh() check:SetShown(d.get() and true or false) end
+	function c:layout(width, y)
+		box:ClearAllPoints(); box:SetPoint("TOPLEFT", 0, y)
+		label:ClearAllPoints(); label:SetPoint("LEFT", box, "RIGHT", 8, 0); label:SetWidth(width - 30)
+		return 20
+	end
+	return c
+end
+
+-- A horizontal slider with a live value readout (the font-size control).
+local function newSettingSlider(parent, d)
+	local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetJustifyH("LEFT"); label:SetText(d.label)
+	label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	local val = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	val:SetJustifyH("RIGHT"); val:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	local slider = CreateFrame("Slider", nil, parent)
+	slider:SetOrientation("HORIZONTAL"); slider:SetHeight(12)
+	slider:SetMinMaxValues(d.min, d.max); slider:SetValueStep(d.step)
+	slider:SetObeyStepOnDrag(true)
+	local track = slider:CreateTexture(nil, "BACKGROUND")
+	track:SetPoint("LEFT"); track:SetPoint("RIGHT"); track:SetHeight(4)
+	track:SetColorTexture(1, 1, 1, 0.08)
+	local thumb = slider:CreateTexture(nil, "OVERLAY")
+	thumb:SetSize(10, 16); thumb:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.9)
+	slider:SetThumbTexture(thumb)
+	local applying = false
+	slider:SetScript("OnValueChanged", function(_, v)
+		v = math.floor(v + 0.5); val:SetText(tostring(v))
+		if not applying then d.set(v) end
+	end)
+	local c = {}
+	function c:refresh()
+		applying = true; slider:SetValue(d.get()); applying = false
+		val:SetText(tostring(d.get()))
+	end
+	function c:layout(width, y)
+		label:ClearAllPoints(); label:SetPoint("TOPLEFT", 0, y)
+		val:ClearAllPoints(); val:SetPoint("TOPRIGHT", 0, y)
+		slider:ClearAllPoints(); slider:SetPoint("TOPLEFT", 0, y - 20); slider:SetWidth(width)
+		return 38
+	end
+	return c
+end
+
+local function buildSettingsTab(pane)
+	local S = { controls = {} }
+
+	local title = pane:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("TOPLEFT", 2, -2)
+	title:SetFont("Fonts\\MORPHEUS.ttf", 22, "")
+	title:SetText("Settings"); title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+
+	S.scroll = makeScroll(pane)
+	S.scroll.sf:SetPoint("TOPLEFT", 0, -SET_HEADER_H)
+	S.scroll.sf:SetPoint("BOTTOMRIGHT", -12, 0)
+	S.scroll.sb:SetPoint("TOPRIGHT", 0, -SET_HEADER_H)
+	S.scroll.sb:SetPoint("BOTTOMRIGHT", 0, 0)
+
+	frame.settings = S
+
+	for _, d in ipairs(ns.Goals.SettingsModel and ns.Goals.SettingsModel() or {}) do
+		local ctrl
+		if d.kind == "dropdown" then ctrl = newSettingDropdown(S.scroll.sc, d)
+		elseif d.kind == "checkbox" then ctrl = newSettingCheck(S.scroll.sc, d)
+		elseif d.kind == "slider" then ctrl = newSettingSlider(S.scroll.sc, d)
+		elseif d.kind == "header" then ctrl = newSettingHeader(S.scroll.sc, d.text)
+		elseif d.kind == "note" then ctrl = newSettingNote(S.scroll.sc, d.text) end
+		if ctrl then S.controls[#S.controls + 1] = ctrl end
+	end
+end
+
+-- Re-read every control from the model's get() and re-lay the column. Called
+-- whenever the Settings view is shown or the window resizes, so it always
+-- reflects the current state (incl. changes made via the Blizzard panel).
+function refreshSettings()
+	local S = frame and frame.settings
+	if not S then return end
+	local width = math.max(50, S.scroll.sf:GetWidth())
+	S.scroll.sc:SetWidth(width)
+	local y = -4
+	for i, ctrl in ipairs(S.controls) do
+		if ctrl.isHeader and i > 1 then y = y - 12 end   -- breathing room above a category
+		ctrl:refresh()
+		y = y - ctrl:layout(width, y) - SET_GAP
+	end
+	updateScroll(S.scroll, -y + 6)
+end
+
 local function build()
 	if frame then return frame end
 
@@ -2199,9 +2487,11 @@ local function build()
 	f:SetScript("OnDragStart", f.StartMoving)
 	f:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
-		local point, _, _, x, y = self:GetPoint()
-		local c = winCfg()
-		c.point, c.x, c.y = point, x, y
+		local left, top = self:GetLeft(), self:GetTop()
+		if left and top then
+			local c = winCfg()
+			c.left, c.top = left, top
+		end
 	end)
 
 	if f.SetBackdrop then
@@ -2239,8 +2529,13 @@ local function build()
 	close:SetPoint("TOPRIGHT", -8, -((TOPBAR_H - 24) / 2))
 	close:SetScript("OnClick", function() f:Hide() end)
 
+	local cog = makeCog(f)
+	cog:SetPoint("RIGHT", close, "LEFT", -6, 0)
+	cog:SetScript("OnClick", function() selectTab("settings") end)
+	f.cog = cog
+
 	local importBtn = makeImportButton(f)
-	importBtn:SetPoint("RIGHT", close, "LEFT", -8, 0)
+	importBtn:SetPoint("RIGHT", cog, "LEFT", -10, 0)
 	importBtn:SetScript("OnClick", openImport)
 
 	local topRule = hLine(f, FAINT)
@@ -2271,10 +2566,18 @@ local function build()
 		f.panes[k] = p
 	end
 
+	-- Settings pane: a sibling of the tab panes, opened by the cogwheel.
+	local settingsPane = CreateFrame("Frame", nil, f)
+	settingsPane:SetPoint("TOPLEFT", PANE_PAD, -(TOPBAR_H + 10))
+	settingsPane:SetPoint("BOTTOMRIGHT", -PANE_PAD, FOOTER_H + 6)
+	settingsPane:Hide()
+	f.panes.settings = settingsPane
+
 	frame = f
 	buildGoalsTab(f.panes.goals)
 	buildCatalogTab(f.panes.catalog)
 	buildMatrixTab(f.panes.matrix)
+	buildSettingsTab(f.panes.settings)
 	registerRemovePopup()
 
 	-- Resize handle (bottom-right corner).
@@ -2286,11 +2589,25 @@ local function build()
 	grabber:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	grabber:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 	grabber:GetNormalTexture():SetAlpha(0.5)
-	grabber:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
+	grabber:SetScript("OnMouseDown", function()
+		-- Pin a single TOP-LEFT anchor at the current position before sizing, so
+		-- resizing from BOTTOMRIGHT keeps TOP-LEFT fixed instead of fighting a
+		-- CENTER anchor (which grows the frame at 2× and makes it jump on capture).
+		-- Read the rect BEFORE ClearAllPoints — an unanchored frame returns nil,
+		-- which would pin TOP-LEFT to the screen corner and drop the window away.
+		local left, top = f:GetLeft(), f:GetTop()
+		if left and top then
+			f:ClearAllPoints()
+			f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+		end
+		f:StartSizing("BOTTOMRIGHT")
+	end)
 	grabber:SetScript("OnMouseUp", function()
 		f:StopMovingOrSizing()
 		local c = winCfg()
 		c.width, c.height = math.floor(f:GetWidth()), math.floor(f:GetHeight())
+		local left, top = f:GetLeft(), f:GetTop()
+		if left and top then c.left, c.top = left, top end
 	end)
 	f.grabber = grabber
 
@@ -2299,6 +2616,10 @@ local function build()
 		relayoutGoals()
 		refreshActive()
 	end)
+
+	-- A settings dropdown is an overlay parented to UIParent, so closing the
+	-- window (Escape / ×) must dismiss it too.
+	f:HookScript("OnHide", function() if closeOpenDropdown then closeOpenDropdown() end end)
 
 	table.insert(UISpecialFrames, "TiWMainWindow")
 	applyPosition()
@@ -2324,6 +2645,22 @@ function Main.Toggle()
 		frame:Hide()
 	else
 		Main.Open()
+	end
+end
+
+-- /tiw window reset — drop saved geometry and restore the default size, centered.
+-- Recovers a window that's been dragged/resized off-screen. Leaves the other
+-- window settings (last tab, font size) untouched.
+function Main.ResetWindow()
+	local c = winCfg()
+	c.left, c.top, c.point, c.x, c.y = nil, nil, nil, nil, nil
+	c.width, c.height = nil, nil
+	if frame then
+		frame:SetSize(WIDTH, HEIGHT)
+		frame:ClearAllPoints()
+		frame:SetPoint("CENTER")
+		relayoutGoals()
+		refreshActive()
 	end
 end
 

@@ -5,13 +5,13 @@ local _, ns = ...
 --
 -- UI wiring only — the consent logic lives in core/consent.lua. Two pieces:
 --
---   A. An options panel built on the modern Settings API: a "Data collection"
---      dropdown bound to Consent.get/Consent.set (the three states, each option
---      describing what it shares — and that "Everything" bundles the anonymous
---      generic contribution, per the consent model: that bundling must be
---      STATED, never silent) and a "Show goal tracker" checkbox bound to the
---      tracker's Panel.IsShown/Panel.SetShown. Tracker position/size live in
---      Edit Mode, so a static line points there rather than duplicating sliders.
+--   A. An options panel built on the modern Settings API, rendered from the
+--      shared settings model (goals/settings_model.lua) so this panel and the
+--      in-app Settings tab show the exact same set bound to the same get/set —
+--      they can never diverge. The model defines the "Data collection" dropdown
+--      (Consent.get/set), the "Show goal tracker" checkbox (Panel show state),
+--      the font-size slider, and the disclosure notes (the "Everything" bundling
+--      must be STATED, and layout points at Edit Mode, never duplicated here).
 --
 --   B. A one-time StaticPopup at PLAYER_LOGIN (Consent.shouldPrompt) asking how
 --      much to share. Each of its three choice buttons sets consent AND calls
@@ -32,117 +32,51 @@ ns.Goals.UIOptions = Options
 local Consent = ns.Consent
 
 local categoryID            -- Settings category id, set on build; /tiw options opens it
-local consentSetting        -- proxy setting handle (used to revert on a failed set)
 
--- The three consent states as dropdown rows: value -> label + the per-option
--- description (shown as the option's tooltip and the dropdown's live tooltip).
--- "Everything" spells out the bundled generic contribution — the disclosure the
--- consent model requires.
-local CONSENT_OPTIONS = {
-	{
-		value = "none", label = "Off",
-		desc = "Nothing leaves your client, your data stays private.",
-	},
-	{
-		value = "generic", label = "Generic only",
-		desc = "Shares anonymous world data only (world quests, events, delves, rare kills,"
-			.. "quests seen) with no character identity. Your personal progress stays local.",
-	},
-	{
-		value = "everything", label = "Everything",
-		desc = "Also shares your personal character sync (progress, collections, currencies) "
-			.. "AND the anonymous generic world contribution. This is required if you're using "
-			.. "the character tracking features on the site.",
-	},
-}
-
--- Always-visible disclosure under the dropdown (a section line), restating the
--- bundling so it is stated without needing to hover an option.
-local BUNDLE_NOTE = "\"Everything\" also sends the anonymous \"Generic only\" world contribution."
-local EDITMODE_NOTE = "Tracker position and size are set in Edit Mode (Game Menu -> Edit Mode -> Today in WoW)."
-
--- Current state's description, for the dropdown's live tooltip (updates as the
--- selection changes).
-local function consentDesc()
-	local cur = Consent.get()
-	for _, o in ipairs(CONSENT_OPTIONS) do
-		if o.value == cur then return o.desc end
-	end
-	return ""
-end
-
--- Apply a dropdown choice. Consent.set validates, purges on downgrade, and
--- rotates the session; it only fails on an invalid state (the dropdown can't
--- produce one), so the revert is belt-and-suspenders.
-local function setConsent(value)
-	local ok = Consent.set(value)
-	if not ok and consentSetting then
-		consentSetting:SetValue(Consent.get())
+-- One always-visible disclosure line in the panel (section header initializer).
+local function addNote(category, text)
+	if CreateSettingsListSectionHeaderInitializer and category.GetLayout then
+		category:GetLayout():AddInitializer(CreateSettingsListSectionHeaderInitializer(text))
 	end
 end
 
--- The dropdown's option container: one row per state, each carrying its
--- description as a tooltip.
-local function consentOptions()
-	local container = Settings.CreateControlTextContainer()
-	for _, o in ipairs(CONSENT_OPTIONS) do
-		container:Add(o.value, o.label, o.desc)
-	end
-	return container:GetData()
-end
-
--- Build the Settings category (in-game only — Settings is nil headless).
+-- Build the Settings category (in-game only — Settings is nil headless) from the
+-- shared model (goals/settings_model.lua), so this panel and the in-app Settings
+-- tab render the exact same set bound to the exact same get/set.
 local function buildOptions()
 	if not Settings or categoryID then return end
 
 	local category = Settings.RegisterVerticalLayoutCategory("Today in WoW")
 
-	-- Data collection: a proxy setting bound straight to the consent gate.
-	do
-		local setting = Settings.RegisterProxySetting(
-			category, "TIW_DATA_COLLECTION",
-			Settings.VarType.String, "Data collection",
-			Consent.get(), Consent.get, setConsent)
-		consentSetting = setting
-		Settings.CreateDropdown(category, setting, consentOptions, consentDesc)
-	end
-
-	-- The bundling disclosure as an always-visible line below the dropdown.
-	if CreateSettingsListSectionHeaderInitializer and category.GetLayout then
-		category:GetLayout():AddInitializer(CreateSettingsListSectionHeaderInitializer(BUNDLE_NOTE))
-	end
-
-	-- Show goal tracker: bound to the tracker's persisted show state.
-	do
-		local function getShown() return ns.Goals.UIPanel.IsShown() end
-		local function setShown(v) ns.Goals.UIPanel.SetShown(v) end
-		local setting = Settings.RegisterProxySetting(
-			category, "TIW_SHOW_TRACKER",
-			Settings.VarType.Boolean, "Show goal tracker",
-			false, getShown, setShown)
-		Settings.CreateCheckbox(category, setting,
-			"Show or hide the Today in WoW goal tracker.")
-	end
-
-	-- Goal window font size: a slider bound to the main window's step-list size.
-	if Settings.CreateSliderOptions and ns.Goals.UIMain then
-		local function getSize() return ns.Goals.UIMain.GetFontSize() end
-		local function setSize(v) ns.Goals.UIMain.SetFontSize(v) end
-		local setting = Settings.RegisterProxySetting(
-			category, "TIW_GOAL_FONT_SIZE",
-			Settings.VarType.Number, "Goal window font size",
-			ns.Goals.UIMain.GetFontSize(), getSize, setSize)
-		local options = Settings.CreateSliderOptions(9, 20, 1)
-		if MinimalSliderWithSteppersMixin then
-			options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+	for _, d in ipairs(ns.Goals.SettingsModel()) do
+		if d.kind == "dropdown" then
+			local setting = Settings.RegisterProxySetting(category, d.key,
+				Settings.VarType.String, d.label, d.get(), d.get, d.set)
+			local function options()
+				local c = Settings.CreateControlTextContainer()
+				for _, o in ipairs(d.options) do c:Add(o.value, o.label, o.desc) end
+				return c:GetData()
+			end
+			local function liveDesc()
+				local o = ns.Goals.SettingsOption(d, d.get())
+				return o and o.desc or ""
+			end
+			Settings.CreateDropdown(category, setting, options, liveDesc)
+		elseif d.kind == "checkbox" then
+			local setting = Settings.RegisterProxySetting(category, d.key,
+				Settings.VarType.Boolean, d.label, d.get(), d.get, d.set)
+			Settings.CreateCheckbox(category, setting, d.tooltip)
+		elseif d.kind == "slider" and Settings.CreateSliderOptions then
+			local setting = Settings.RegisterProxySetting(category, d.key,
+				Settings.VarType.Number, d.label, d.get(), d.get, d.set)
+			local options = Settings.CreateSliderOptions(d.min, d.max, d.step)
+			if MinimalSliderWithSteppersMixin then
+				options:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+			end
+			Settings.CreateSlider(category, setting, options, d.tooltip)
+		elseif d.kind == "header" or d.kind == "note" then
+			addNote(category, d.text)
 		end
-		Settings.CreateSlider(category, setting, options,
-			"Text size for the goal window's step lists.")
-	end
-
-	-- Layout lives in Edit Mode, not here.
-	if CreateSettingsListSectionHeaderInitializer and category.GetLayout then
-		category:GetLayout():AddInitializer(CreateSettingsListSectionHeaderInitializer(EDITMODE_NOTE))
 	end
 
 	Settings.RegisterAddOnCategory(category)

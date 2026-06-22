@@ -617,6 +617,17 @@ SlashCmdList["TIW"] = function(msg)
 		else
 			out("options panel not loaded")
 		end
+	elseif cmd == "window" then
+		if arg == "reset" then
+			if ns.Goals and ns.Goals.UIMain and ns.Goals.UIMain.ResetWindow then
+				ns.Goals.UIMain.ResetWindow()
+				out("window reset to default size and position")
+			else
+				out("main window not loaded")
+			end
+		else
+			out("usage: /tiw window reset")
+		end
 	elseif cmd == "log" then
 		logReport(arg)
 	elseif msg == "wq" then
@@ -632,7 +643,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
 	end
 end
 

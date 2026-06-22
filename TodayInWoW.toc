@@ -48,6 +48,7 @@ goals\catalog_professions.lua
 goals\season.lua
 goals\presenter.lua
 goals\links.lua
+goals\settings_model.lua
 goals\ui_panel.lua
 goals\ui_matrix.lua
 goals\ui_options.lua
