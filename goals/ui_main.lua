@@ -1497,6 +1497,7 @@ local function buildAssign()
 		f:Hide()
 		ensureEngine()
 		refreshCatalog()
+		if f.onDone then f.onDone(f.goal) end
 	end
 
 	function f.updateConfirm()
@@ -1548,10 +1549,12 @@ local function buildAssign()
 	return f
 end
 
-function openAssign(goal)
+-- opts.onDone(goal) runs after a successful install (e.g. text-import pins to top).
+function openAssign(goal, opts)
 	if not assignFrame then buildAssign() end
 	local f = assignFrame
 	f.goal = goal; f.sel = {}
+	f.onDone = opts and opts.onDone or nil
 	f.list:Hide(); f.pick:Show(); f.back:Hide(); f.confirm:Hide(); f.cancel:Show()
 	f.gname:SetText(goal.name or "")
 	if currentMeetsRequire(goal) then
@@ -1724,6 +1727,17 @@ local function buildImport()
 	validateBtn:SetText("Validate")
 	validateBtn:SetScript("OnClick", validate)
 
+	-- Pin a goal and float it to the top of the pinned section: setSectionOrder
+	-- renumbers the listed ids 1..N and sets pinned=true, so prepending the new id
+	-- to the current pinned order both pins it and makes it first.
+	local function pinToTop(id)
+		local ids = { id }
+		for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
+			if rec.id ~= id then ids[#ids + 1] = rec.id end
+		end
+		ns.Goals.Store.setSectionOrder(true, ids)
+	end
+
 	local importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 	importBtn:SetSize(100, 22)
 	importBtn:SetPoint("BOTTOMRIGHT", -120, 14)
@@ -1731,11 +1745,14 @@ local function buildImport()
 	importBtn:SetScript("OnClick", function()
 		local goal = f.pending or validate()
 		if not goal then return end
-		ns.Goals.Store.install(goal)
 		f:Hide()
-		ensureEngine()
-		refreshGoals()
-		selectGoal(goal.id)
+		-- Ask who should track it (same prompt as catalog import), then pin to top.
+		openAssign(goal, { onDone = function(g)
+			pinToTop(g.id)
+			ensureEngine()
+			refreshGoals()
+			selectGoal(g.id)
+		end })
 	end)
 
 	local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
