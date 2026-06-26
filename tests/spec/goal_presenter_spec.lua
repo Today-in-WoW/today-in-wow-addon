@@ -313,15 +313,16 @@ describe("Presenter.pinned — completed-step/goal hiding (display prefs)", func
 			row("g:farm", 1, "Kill LK", { done = true }) }).goals)
 	end)
 
-	it("hideCompletedGoals keeps a done goal another character still needs", function()
+	it("hideCompletedGoals drops a done goal even when another character still needs it", function()
 		local ns = harness()
 		ns.Goals.GetPref = function(k) return k == "hideCompletedGoals" end
 		local S = ns.Goals.Store
 		S.install(gFarm()); S.setPinned("g:farm", true)
-		seedAlt(ns, "Bbb-Realm", { lockouts = { iccRow(false) } })   -- still needs it
-		local vm = ns.Goals.Presenter.pinned({ row("g:farm", 1, "Kill LK", { done = true }) })
-		assert.equal(1, #vm.goals)
-		assert.equal("Bbb-Realm", vm.goals[1].nextAlt)
+		seedAlt(ns, "Bbb-Realm", { lockouts = { iccRow(false) } })   -- alt still needs it
+		-- done on the CURRENT character -> hidden from the HUD regardless of alts
+		-- (per-character status still shows in the main window's matrix/detail).
+		assert.same({}, ns.Goals.Presenter.pinned({
+			row("g:farm", 1, "Kill LK", { done = true }) }).goals)
 	end)
 
 	it("no pref accessor → nothing hidden (raw shaping for other specs)", function()

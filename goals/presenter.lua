@@ -241,9 +241,9 @@ end
 
 -- The always-on panel. Returns { goals = { <goalEntry> + nextAlt, ... } } —
 -- pinned && active && in-season goals only, in display order (Store.ordered).
--- Two display prefs trim it: "Hide completed goals" drops a done goal that has
--- no next-character nudge (it stays pinned, returns when a step resets); "Hide
--- completed steps" renders only a goal's unfinished step lines.
+-- Two display prefs trim it: "Hide completed goals" drops a goal once it's done
+-- on the CURRENT character (it stays pinned and returns when a step resets);
+-- "Hide completed steps" renders only a goal's unfinished step lines.
 function Presenter.pinned(flatVM)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
@@ -256,7 +256,7 @@ function Presenter.pinned(flatVM)
 			local goalDone = goalLevelDone(goal)
 			local entry = goalEntry(goal, byId[goal.id], goalDone)
 			entry.nextAlt = nextAltFor(goal, rec.state, goalDone, current)
-			if not (hideGoals and entry.state == "done" and not entry.nextAlt) then
+			if not (hideGoals and entry.state == "done") then
 				if hideSteps then dropDoneSteps(entry) end
 				out.goals[#out.goals + 1] = entry
 			end

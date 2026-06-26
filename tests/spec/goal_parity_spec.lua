@@ -81,3 +81,30 @@ describe("goal codec <-> backend parity (shared vectors)", function()
 		end)
 	end
 end)
+
+describe("goal pack bundle codec (Phase 3 §5)", function()
+	local Codec = loadCodec()
+
+	it("round-trips a bundle of the valid goals", function()
+		local goals = {}
+		for _, goal in ipairs(vectors.valid) do goals[#goals + 1] = strip(goal) end
+		local bundle = { v = 1, id = "pack:test", rev = 2, name = "Test Pack", goals = goals }
+		local str, err = Codec.encodeBundle(bundle)
+		assert.is_string(str, tostring(err))
+		assert.is_truthy(str:find("^!TIWGP:1!"))
+		assert.same(bundle, (Codec.decodeBundle(str)))
+	end)
+
+	it("rejects a bundle with no goals", function()
+		local str, err = Codec.encodeBundle({ v = 1, id = "pack:x", rev = 1, name = "X", goals = {} })
+		assert.is_nil(str)
+		assert.is_truthy(err:find("at least one goal", 1, true))
+	end)
+
+	it("rejects a single-goal string in the bundle decoder", function()
+		local goalStr = Codec.encode(strip(vectors.valid[1]))
+		local b, err = Codec.decodeBundle(goalStr)
+		assert.is_nil(b)
+		assert.is_truthy(err:find("not a pack string", 1, true))
+	end)
+end)

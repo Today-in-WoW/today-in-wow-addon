@@ -1493,11 +1493,15 @@ local function buildAssign()
 	confirm:SetSize(100, 22); confirm:SetPoint("BOTTOMRIGHT", -16, 14); confirm:SetText("Add"); confirm:Hide(); f.confirm = confirm
 
 	local function install(chars)
-		ns.Goals.Store.install(f.goal, { chars = chars })
+		if f.goals then                       -- bundle: one choice, every member goal
+			for _, g in ipairs(f.goals) do ns.Goals.Store.install(g, { chars = chars }) end
+		else
+			ns.Goals.Store.install(f.goal, { chars = chars })
+		end
 		f:Hide()
 		ensureEngine()
 		refreshCatalog()
-		if f.onDone then f.onDone(f.goal) end
+		if f.onDone then f.onDone() end
 	end
 
 	function f.updateConfirm()
@@ -1549,15 +1553,20 @@ local function buildAssign()
 	return f
 end
 
--- opts.onDone(goal) runs after a successful install (e.g. text-import pins to top).
+-- Open the §6a assignment prompt. Single goal: openAssign(goal, opts). Pack:
+-- openAssign(nil, { goals = {...}, label = "...", onDone = ... }) — one character
+-- choice applied to every member goal. opts.onDone() runs after a successful install.
 function openAssign(goal, opts)
 	if not assignFrame then buildAssign() end
 	local f = assignFrame
-	f.goal = goal; f.sel = {}
-	f.onDone = opts and opts.onDone or nil
+	opts = opts or {}
+	f.goal = goal; f.goals = opts.goals; f.sel = {}
+	f.onDone = opts.onDone
 	f.list:Hide(); f.pick:Show(); f.back:Hide(); f.confirm:Hide(); f.cancel:Show()
-	f.gname:SetText(goal.name or "")
-	if currentMeetsRequire(goal) then
+	f.gname:SetText(opts.label or (goal and goal.name) or "")
+	-- A pack mixes goals with different requirements; gate "this character" only
+	-- for a single goal (per-goal eligibility still applies at evaluation time).
+	if f.goals or currentMeetsRequire(goal) then
 		f.thisChar:Enable(); f.thisChar:SetAlpha(1)
 		f.thisChar.sub:SetText(ns.Goals.Substrate.charKey():match("^[^-]+") or "")
 		f.thisChar.sub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
@@ -1708,17 +1717,34 @@ local function buildImport()
 	status:SetJustifyH("LEFT")
 	f.status = status
 
+	local BULLET = "  \226\128\162  "
+	-- Decode either a single goal (!TIWG:) or a pack bundle (!TIWGP:), routing on
+	-- the prefix so the box accepts both and rejects anything else cleanly.
 	local function validate()
-		local goal, err = ns.Goals.Codec.decode(f.edit:GetText())
+		local text = (f.edit:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if text:match("^!TIWGP:") then
+			local bundle, err = ns.Goals.Codec.decodeBundle(text)
+			if not bundle then
+				f.pending = nil
+				f.status:SetText("|cffff5050" .. tostring(err) .. "|r")
+				return nil
+			end
+			f.pending = { kind = "bundle", bundle = bundle }
+			local n = #bundle.goals
+			f.status:SetText("|cff40ff40Pack: " .. tostring(bundle.name or bundle.id)
+				.. BULLET .. n .. " goal" .. (n == 1 and "" or "s") .. "|r")
+			return f.pending
+		end
+		local goal, err = ns.Goals.Codec.decode(text)
 		if not goal then
 			f.pending = nil
 			f.status:SetText("|cffff5050" .. tostring(err) .. "|r")
 			return nil
 		end
-		f.pending = goal
+		f.pending = { kind = "goal", goal = goal }
 		f.status:SetText("|cff40ff40Goal: " .. tostring(goal.name)
-			.. "  \226\128\162  " .. #goal.steps .. " step" .. (#goal.steps == 1 and "" or "s") .. "|r")
-		return goal
+			.. BULLET .. #goal.steps .. " step" .. (#goal.steps == 1 and "" or "s") .. "|r")
+		return f.pending
 	end
 
 	local validateBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -1727,15 +1753,20 @@ local function buildImport()
 	validateBtn:SetText("Validate")
 	validateBtn:SetScript("OnClick", validate)
 
-	-- Pin a goal and float it to the top of the pinned section: setSectionOrder
-	-- renumbers the listed ids 1..N and sets pinned=true, so prepending the new id
-	-- to the current pinned order both pins it and makes it first.
-	local function pinToTop(id)
-		local ids = { id }
-		for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
-			if rec.id ~= id then ids[#ids + 1] = rec.id end
+	-- Float one or more just-imported goals to the top of the pinned section, in
+	-- the given order: setSectionOrder renumbers the listed ids 1..N and sets
+	-- pinned=true, so prepending the new ids to the current pinned order both pins
+	-- them and makes them first. Accepts a single id or an ordered list.
+	local function pinToTop(idOrList)
+		local newIds = type(idOrList) == "table" and idOrList or { idOrList }
+		local order, seen = {}, {}
+		for _, id in ipairs(newIds) do
+			if not seen[id] then order[#order + 1] = id; seen[id] = true end
 		end
-		ns.Goals.Store.setSectionOrder(true, ids)
+		for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
+			if not seen[rec.id] then order[#order + 1] = rec.id end
+		end
+		ns.Goals.Store.setSectionOrder(true, order)
 	end
 
 	local importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -1743,16 +1774,33 @@ local function buildImport()
 	importBtn:SetPoint("BOTTOMRIGHT", -120, 14)
 	importBtn:SetText("Import")
 	importBtn:SetScript("OnClick", function()
-		local goal = f.pending or validate()
-		if not goal then return end
+		local p = f.pending or validate()
+		if not p then return end
 		f:Hide()
-		-- Ask who should track it (same prompt as catalog import), then pin to top.
-		openAssign(goal, { onDone = function(g)
-			pinToTop(g.id)
-			ensureEngine()
-			refreshGoals()
-			selectGoal(g.id)
-		end })
+		if p.kind == "bundle" then
+			-- One assignment choice for the whole pack, then pin its goals to the top
+			-- (in pack order) and show the first, matching single-goal import.
+			local b = p.bundle
+			openAssign(nil, {
+				goals = b.goals,
+				label = tostring(b.name or b.id) .. " (" .. #b.goals .. " goals)",
+				onDone = function()
+					local ids = {}
+					for _, g in ipairs(b.goals) do ids[#ids + 1] = g.id end
+					pinToTop(ids)
+					refreshGoals()
+					if b.goals[1] then selectGoal(b.goals[1].id) end
+				end,
+			})
+		else
+			-- Single goal: ask who should track it, then pin it to the top.
+			local goal = p.goal
+			openAssign(goal, { onDone = function()
+				pinToTop(goal.id)
+				refreshGoals()
+				selectGoal(goal.id)
+			end })
+		end
 	end)
 
 	local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")

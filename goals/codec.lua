@@ -27,11 +27,13 @@ ns.Goals = ns.Goals or {}
 local Codec = {}
 ns.Goals.Codec = Codec
 
-Codec.FORMAT      = 1                          -- transport version (prefix)
-Codec.PREFIX      = "!TIWG:" .. Codec.FORMAT .. "!"
-Codec.MAX_INPUT   = 64 * 1024                  -- pasted chars, checked pre-inflate
-Codec.MAX_DECODED = 1024 * 1024                -- serialized bytes, checked post-inflate
-Codec.MAX_STEPS   = 1000                       -- steps per goal
+Codec.FORMAT       = 1                          -- transport version (prefix)
+Codec.PREFIX       = "!TIWG:" .. Codec.FORMAT .. "!"
+Codec.PREFIX_PACK  = "!TIWGP:" .. Codec.FORMAT .. "!"   -- pack bundle (multi-goal)
+Codec.MAX_INPUT    = 64 * 1024                  -- pasted chars, checked pre-inflate
+Codec.MAX_DECODED  = 1024 * 1024                -- serialized bytes, checked post-inflate
+Codec.MAX_STEPS    = 1000                       -- steps per goal
+Codec.MAX_PACK_GOALS = 50                       -- goals per pack bundle
 
 -- Resolve the embedded libs via LibStub (same pipeline as core/export.lua).
 local function libs()
@@ -128,6 +130,26 @@ local function checkShape(goal)
 	return true
 end
 
+-- A pack bundle { v, id, rev, name?, goals[] } (goal-format-v1 §5 / bundle
+-- envelope). Mirrors the backend's validate_bundle: wrapper fields + every member
+-- goal must pass checkShape. Never emit/accept a bundle a per-goal install rejects.
+local function checkBundleShape(b)
+	if type(b) ~= "table" then return nil, "not a pack table" end
+	if b.v ~= Codec.FORMAT then return nil, "unsupported pack schema version" end
+	if type(b.id) ~= "string" or b.id == "" then return nil, "pack id required" end
+	if type(b.rev) ~= "number" then return nil, "pack rev required" end
+	if b.name ~= nil and type(b.name) ~= "string" then return nil, "pack name must be a string" end
+	if type(b.goals) ~= "table" then return nil, "pack goals required" end
+	if #b.goals == 0 then return nil, "pack needs at least one goal" end
+	if #b.goals > Codec.MAX_PACK_GOALS then return nil, "pack has too many goals" end
+	for i = 1, #b.goals do
+		local gok, gerr = checkShape(b.goals[i])
+		if not gok then return nil, "pack goal " .. i .. ": " .. gerr end
+		if #b.goals[i].steps > Codec.MAX_STEPS then return nil, "pack goal " .. i .. " has too many steps" end
+	end
+	return true
+end
+
 -- goal table -> "!TIWG:1!…" string, or nil, err (shape failure / libs missing).
 function Codec.encode(goal)
 	local ok, err = checkShape(goal)
@@ -165,6 +187,45 @@ function Codec.decode(str)
 	if #goal.steps > Codec.MAX_STEPS then return nil, "goal has too many steps" end
 
 	return goal
+end
+
+-- pack bundle -> "!TIWGP:1!…" string, or nil, err. (Symmetry with the backend;
+-- the addon usually only decodes, but this keeps round-trip parity testable.)
+function Codec.encodeBundle(bundle)
+	local ok, err = checkBundleShape(bundle)
+	if not ok then return nil, err end
+	local Ace, LD = libs()
+	if not (Ace and LD) then return nil, "goal libs unavailable" end
+	return Codec.PREFIX_PACK .. LD:EncodeForPrint(LD:CompressDeflate(Ace:Serialize(bundle)))
+end
+
+-- "!TIWGP:1!…" string -> pack bundle table, or nil, err. Same guardrails as the
+-- single-goal path; install is per-member (caller loops Store.install), so the
+-- single-goal idempotency/dedup/capability rules all apply unchanged.
+function Codec.decodeBundle(str)
+	if type(str) ~= "string" then return nil, "not a pack string" end
+	if #str > Codec.MAX_INPUT then return nil, "pack string too large to import" end
+
+	local ver, body = str:match("^!TIWGP:(%d+)!(.*)$")
+	if not ver then return nil, "not a pack string" end
+	if tonumber(ver) ~= Codec.FORMAT then return nil, "unsupported pack transport version " .. ver end
+
+	local Ace, LD = libs()
+	if not (Ace and LD) then return nil, "goal libs unavailable" end
+
+	local compressed = LD:DecodeForPrint(body)
+	if not compressed then return nil, "pack string decode failed" end
+	local serialized = LD:DecompressDeflate(compressed)
+	if not serialized then return nil, "pack string decompress failed" end
+	if #serialized > Codec.MAX_DECODED then return nil, "pack too large to import" end
+
+	local ok, bundle = Ace:Deserialize(serialized)
+	if not ok then return nil, "pack deserialize failed" end
+
+	local sok, serr = checkBundleShape(bundle)
+	if not sok then return nil, serr end
+
+	return bundle
 end
 
 return ns
