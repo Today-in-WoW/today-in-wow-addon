@@ -1,499 +1,6975 @@
 local _, ns = ...
 
 -- ===========================================================================
--- goals/catalog.lua  ·  the built-in goal catalog (Browse Catalog tab)
+-- goals/catalog.lua  ·  GENERATED -- do not edit by hand.
 --
--- The curated, addon-shipped goals the Browse Catalog tab lets players install
--- with one click. Each entry pairs a goal-format-v1 table (the same shape an
--- import string carries — docs/addon/goal-format-v1.md) with browse-only
--- metadata the goal table deliberately does NOT carry:
---
---   bucket  — sidebar category key (one of Catalog.buckets())
---   tag     — source line shown under the name ("Wrath • ICC")
---   reward  — one-line reward summary ("Mount: Invincible")
---   popular — optional featured flag (renders a "Popular" badge)
---
--- These live on the entry, not in the goal string: they are our curation
--- taxonomy, not something a shared/exported goal should carry. Importing an
--- entry installs entry.goal through ns.Goals.Store (Presenter.catalog shapes
--- the view; ui_main renders it and runs the §6a assignment prompt on import).
---
--- This is the curated v1 set (goal-format-v1 §7), grown one written-down goal
--- at a time. The metadata fields above are where each goal's bucket / tag /
--- reward land; the goal table itself carries the evaluators.
+-- Emitted from the Goal Repository DB by tools/build_catalog.py, which fetches
+-- GET /api/goals/catalog-export from production and serializes the fl_shipped
+-- goals + activity buckets into the addon's Catalog contract. Curate goals on the
+-- site, then regenerate -- .github/workflows/update-catalog.yml does this on a
+-- schedule and opens a PR. See docs (goal-repository-plan.md §8) in the site repo.
 -- ===========================================================================
 
 ns.Goals = ns.Goals or {}
 local Catalog = {}
 ns.Goals.Catalog = Catalog
 
--- Sidebar categories, in display order. icon is a texture path / fileDataID
--- (placeholder art — swap for final icons later).
 function Catalog.buckets()
 	return {
-		{ key = "reputation", label = "Reputation", icon = "Interface\\Icons\\Achievement_Reputation_01",
-		  desc = "Weekly quests and renown grinds across the worlds." },
-		{ key = "open-world", label = "Open World", icon = "Interface\\Icons\\Achievement_Zone_Ohnahranplains",
-		  desc = "World quests, assaults, and ritual sites out in the world." },
-		{ key = "world-events", label = "World Events", icon = "Interface\\Icons\\achievement_bg_masterofallbgs",
-		  desc = "Seasonal holidays and bonus weeks — shown while the event is live." },
-		{ key = "delves", label = "Delves", icon = "Interface\\Icons\\ui_delves",
-		  desc = "Bountiful delve rewards and season-track progress." },
-		{ key = "vault", label = "Great Vault", icon = "Interface\\Icons\\Achievement_RaidPrimalist_Raid",
-		  desc = "Fill your weekly vault slots from raid, Mythic+, and the world." },
-		{ key = "endgame", label = "Endgame", icon = "Interface\\Icons\\Item_SparkofRagnoros",
-		  desc = "Sparks, Voidcores, and weekly choice events." },
-		{ key = "housing", label = "Housing", icon = "Interface\\Icons\\UI_HomeStone-64",
-		  desc = "Your weekly housing quest." },
-		{ key = "professions", label = "Professions", icon = "Interface\\Icons\\INV_Misc_Book_11",
-		  desc = "Weekly and one-time Knowledge Point sources for every profession." },
-	}
-end
-
--- Build a list of leaves { evaluator, params = { quest = id, <extra> } } from
--- quest IDs — the "one of these N quests" shape used by group steps / `done`.
--- `extra` merges into every leaf's params (e.g. { present = false } for "none").
-local function questLeaves(evaluator, ids, extra)
-	local of = {}
-	for i = 1, #ids do
-		local params = { quest = ids[i] }
-		if extra then for k, v in pairs(extra) do params[k] = v end end
-		of[i] = { evaluator = evaluator, params = params }
-	end
-	return of
-end
-
--- A weekly group step: ≥`need` of the quest IDs satisfy `evaluator`, resets
--- weekly, gated at level 90 (the common shape across this set).
-local function weeklyStep(label, evaluator, need, ids, extra)
-	return { label = label, evaluator = "group",
-	         params = { need = need, of = questLeaves(evaluator, ids, extra) },
-	         resets = "weekly", require = { level = 90 } }
-end
-
--- Catalog entries (fresh tables per call). entry.goal is a goal-format-v1 table.
-function Catalog.entries()
-	local dungeonQuests = { 93752, 93753, 93751, 93758, 93754, 93756, 93755, 93757 }
-	local soireeWeekly  = { 90573, 90574, 90575, 90576 }
-	local soireeMinor   = {
-		91983, 91990, 91991, 91989, 91988, 91987, 91986, 91985, 91984,
-		91979, 91978, 91977, 91976, 91975, 91974, 91973, 91972, 91971,
-		91992, 91993, 91994, 91995, 91996, 91997, 91999, 92000, 92001,
-		92002, 92003, 92004, 92005, 92006, 92007, 89276, 89277, 89278,
-		89314, 89311, 89307, 89285, 90573, 90574, 90575, 90576,
-	}
-	local preyQuests = {
-		91269, 91268, 91267, 91266, 91265, 91264, 91263, 91262, 91261, 91260,
-		91259, 91258, 91257, 91256, 91255, 91254, 91253, 91252, 91251, 91250,
-		91249, 91248, 91247, 91246, 91245, 91244, 91243, 91242, 91241, 91240,
-		91239, 91238, 91237, 91236, 91235, 91234, 91233, 91232, 91231, 91230,
-		91229, 91228, 91227, 91226, 91225, 91224, 91223, 91222, 91221, 91220,
-		91219, 91218, 91217, 91216, 91215, 91214, 91213, 91212, 91211, 91210,
-	}
-	local choiceQuests = {
-		93767, 94457, 93909, 93911, 93769, 96727, 93910,
-		93912, 95843, 93889, 93892, 95842, 93913, 93766,
-	}
-	local housingWeekly = { 95413, 95416, 95440, 95438 }
-	local voidAssault   = { 94386, 94385 }
-	local worldBoss     = { 92560, 92034, 92636, 92123 }
-
-	local list = {
-		-- 1. Weekly Dungeon Quest --------------------------------------------
 		{
-			bucket = "reputation", tag = "Midnight",
+			desc = "Weekly quests and renown grinds across the worlds.",
+			icon = "Interface\\Icons\\Achievement_Reputation_01",
+			key = "reputation",
+			label = "Reputation",
+		},
+		{
+			desc = "World quests, assaults, and ritual sites out in the world.",
+			icon = "Interface\\Icons\\Achievement_Zone_Ohnahranplains",
+			key = "open-world",
+			label = "Open World",
+		},
+		{
+			desc = "Seasonal holidays and bonus weeks — shown while the event is live.",
+			icon = "Interface\\Icons\\achievement_bg_masterofallbgs",
+			key = "world-events",
+			label = "World Events",
+		},
+		{
+			desc = "Bountiful delve rewards and season-track progress.",
+			icon = "Interface\\Icons\\ui_delves",
+			key = "delves",
+			label = "Delves",
+		},
+		{
+			desc = "Fill your weekly vault slots from raid, Mythic+, and the world.",
+			icon = "Interface\\Icons\\Achievement_RaidPrimalist_Raid",
+			key = "vault",
+			label = "Great Vault",
+		},
+		{
+			desc = "Sparks, Voidcores, and weekly choice events.",
+			icon = "Interface\\Icons\\Item_SparkofRagnoros",
+			key = "endgame",
+			label = "Endgame",
+		},
+		{
+			desc = "Your weekly housing quest.",
+			icon = "Interface\\Icons\\UI_HomeStone-64",
+			key = "housing",
+			label = "Housing",
+		},
+		{
+			desc = "Weekly and one-time Knowledge Point sources for every profession.",
+			icon = "Interface\\Icons\\INV_Misc_Book_11",
+			key = "professions",
+			label = "Professions",
+		},
+	}
+end
+
+function Catalog.entries()
+	return {
+		{
+			bucket = "reputation",
 			goal = {
-				v = 1, id = "tiw:weekly-dungeon-quest", rev = 1,
-				name = "Weekly Dungeon Quest",
 				category = "Reputation",
 				desc = "Complete the Dungeon Quest available this week.",
-				icon = "inv_1205_voidforge_sovereignvoidcores_midnight",
-				scope = "account",
-				-- Goal-level `done` flips the moment any rotating quest is turned in,
-				-- so the "obtained" step reverting on turn-in never blocks completion.
-				done = { evaluator = "group",
-				         params = { need = 1, of = questLeaves("flag", dungeonQuests) } },
-				steps = {
-					weeklyStep("Obtain the weekly dungeon quest.", "questlog", 1, dungeonQuests),
-					weeklyStep("Complete the weekly dungeon quest.", "flag", 1, dungeonQuests),
+				done = {
+					evaluator = "group",
+					params = {
+						need = 1,
+						of = {
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93752,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93753,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93751,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93758,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93754,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93756,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93755,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93757,
+								},
+							},
+						},
+					},
 				},
+				icon = "inv_1205_voidforge_sovereignvoidcores_midnight",
+				id = "tiw:weekly-dungeon-quest",
+				name = "Weekly Dungeon Quest",
+				rev = 1,
+				scope = "account",
+				steps = {
+					{
+						evaluator = "group",
+						label = "Obtain the weekly dungeon quest.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93752,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93753,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93751,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93758,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93754,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93756,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93755,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93757,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Complete the weekly dungeon quest.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93752,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93753,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93751,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93758,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93754,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93756,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93755,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93757,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+				},
+				v = 1,
 			},
+			tag = "Midnight",
 		},
-
-		-- 2. Soiree ----------------------------------------------------------
 		{
-			bucket = "reputation", tag = "Eversong Woods",
+			bucket = "reputation",
 			goal = {
-				v = 1, id = "tiw:soiree", rev = 1,
-				name = "Soiree",
 				category = "Reputation",
 				desc = "Complete the weekly quests for the Soiree.",
-				icon = 7505700,
-				scope = "account",
-				-- Approximation (no clean per-quest minor signal): done when the
-				-- fortify weekly is completed AND no minor quests remain in the log.
-				done = { evaluator = "group", params = { need = 2, of = {
-					{ evaluator = "group", params = { need = 1, of = questLeaves("flag", soireeWeekly) } },
-					{ evaluator = "group", params = { need = #soireeMinor,
-						of = questLeaves("questlog", soireeMinor, { present = false }) } },
-				} } },
-				steps = {
-					weeklyStep("Pick-up weekly quests.", "questlog", 1, soireeWeekly),
-					weeklyStep("Complete Fortify Runestones.", "flag", 1, soireeWeekly),
-					-- "Minor quests cleared" = none of these in the log (completed or
-					-- never picked up): every leaf must be absent → need = #of.
-					weeklyStep("Complete Minor Quests.", "questlog", #soireeMinor, soireeMinor,
-						{ present = false }),
+				done = {
+					evaluator = "group",
+					params = {
+						need = 2,
+						of = {
+							{
+								evaluator = "group",
+								params = {
+									need = 1,
+									of = {
+										{
+											evaluator = "flag",
+											params = {
+												quest = 90573,
+											},
+										},
+										{
+											evaluator = "flag",
+											params = {
+												quest = 90574,
+											},
+										},
+										{
+											evaluator = "flag",
+											params = {
+												quest = 90575,
+											},
+										},
+										{
+											evaluator = "flag",
+											params = {
+												quest = 90576,
+											},
+										},
+									},
+								},
+							},
+							{
+								evaluator = "group",
+								params = {
+									need = 44,
+									of = {
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91983,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91990,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91991,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91989,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91988,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91987,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91986,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91985,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91984,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91979,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91978,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91977,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91976,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91975,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91974,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91973,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91972,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91971,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91992,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91993,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91994,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91995,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91996,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91997,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 91999,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92000,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92001,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92002,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92003,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92004,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92005,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92006,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 92007,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89276,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89277,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89278,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89314,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89311,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89307,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 89285,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 90573,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 90574,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 90575,
+											},
+										},
+										{
+											evaluator = "questlog",
+											params = {
+												present = false,
+												quest = 90576,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
 				},
+				icon = 7505700,
+				id = "tiw:soiree",
+				name = "Soiree",
+				rev = 1,
+				scope = "account",
+				steps = {
+					{
+						evaluator = "group",
+						label = "Pick-up weekly quests.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 90573,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 90574,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 90575,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 90576,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Complete Fortify Runestones.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 90573,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 90574,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 90575,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 90576,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Complete Minor Quests.",
+						params = {
+							need = 44,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91983,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91990,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91991,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91989,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91988,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91987,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91986,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91985,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91984,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91979,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91978,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91977,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91976,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91975,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91974,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91973,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91972,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91971,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91992,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91993,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91994,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91995,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91996,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91997,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 91999,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92000,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92001,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92002,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92003,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92004,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92005,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92006,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 92007,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89276,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89277,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89278,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89314,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89311,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89307,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 89285,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 90573,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 90574,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 90575,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										present = false,
+										quest = 90576,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+				},
+				v = 1,
 			},
+			tag = "Eversong Woods",
 		},
-
-		-- 3. Abundance -------------------------------------------------------
 		{
 			bucket = "open-world",
 			goal = {
-				v = 1, id = "tiw:abundance", rev = 1,
-				name = "Abundance",
 				category = "Open World",
 				desc = "Obtain and spend all Dundun Shards.",
 				icon = "inv_rat2undermine_radioactive",
+				id = "tiw:abundance",
+				name = "Abundance",
+				rev = 1,
 				scope = "perchar",
 				steps = {
-					{ label = "Reach the weekly cap on [currency=3376].", evaluator = "currency",
-					  params = { currency = 3376, weekly = true },
-					  resets = "weekly", require = { level = 80 } },
-					{ label = "Spend all [currency=3376].", evaluator = "currency",
-					  params = { currency = 3376, atMost = 0 },
-					  resets = "weekly", require = { level = 80 } },
+					{
+						evaluator = "currency",
+						label = "Reach the weekly cap on [currency=3376].",
+						params = {
+							currency = 3376,
+							weekly = true,
+						},
+						require = {
+							level = 80,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Spend all [currency=3376].",
+						params = {
+							atMost = 0,
+							currency = 3376,
+						},
+						require = {
+							level = 80,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 4. Prey Quests -----------------------------------------------------
 		{
 			bucket = "reputation",
 			goal = {
-				v = 1, id = "tiw:prey-quests", rev = 1,
-				name = "Prey Quests",
 				category = "Reputation",
 				desc = "Complete four Prey quests in the week to max out reputation gains.",
 				icon = "ui_prey",
+				id = "tiw:prey-quests",
+				name = "Prey Quests",
+				rev = 1,
 				scope = "account",
 				steps = {
-					weeklyStep("Complete four Prey Quests.", "flag", 4, preyQuests),
+					{
+						evaluator = "group",
+						label = "Complete four Prey Quests.",
+						params = {
+							need = 4,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91269,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91268,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91267,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91266,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91265,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91264,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91263,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91262,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91261,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91260,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91259,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91258,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91257,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91256,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91255,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91254,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91253,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91252,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91251,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91250,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91249,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91248,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91247,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91246,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91245,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91244,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91243,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91242,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91241,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91240,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91239,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91238,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91237,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91236,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91235,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91234,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91233,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91232,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91231,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91230,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91229,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91228,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91227,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91226,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91225,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91224,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91223,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91222,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91221,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91220,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91219,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91218,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91217,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91216,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91215,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91214,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91213,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91212,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91211,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 91210,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 5. Stormarion Assault ----------------------------------------------
 		{
 			bucket = "reputation",
 			goal = {
-				v = 1, id = "tiw:stormarion-assault", rev = 1,
-				name = "Stormarion Assault",
 				category = "Reputation",
 				desc = "Complete the two World Quests with rewards for Stormarion Assault.",
 				icon = "inv12_stormarioncore",
+				id = "tiw:stormarion-assault",
+				name = "Stormarion Assault",
+				rev = 1,
 				scope = "account",
 				steps = {
-					{ label = "Complete the first Stormarion Assault world quest.",
-					  evaluator = "flag", params = { quest = 90962 },
-					  resets = "weekly", require = { level = 90 } },
-					{ label = "Complete the second Stormarion Assault world quest.",
-					  evaluator = "flag", params = { quest = 94581 },
-					  resets = "weekly", require = { level = 90 } },
+					{
+						evaluator = "flag",
+						label = "Complete the first Stormarion Assault world quest.",
+						params = {
+							quest = 90962,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Complete the second Stormarion Assault world quest.",
+						params = {
+							quest = 94581,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 6. Weekly Choice Event ---------------------------------------------
 		{
 			bucket = "endgame",
 			goal = {
-				v = 1, id = "tiw:weekly-choice-event", rev = 1,
-				name = "Weekly Choice Event",
 				category = "Endgame",
 				desc = "Weekly Event is the primary source for Sparks.",
+				done = {
+					evaluator = "group",
+					params = {
+						need = 1,
+						of = {
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93767,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 94457,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93909,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93911,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93769,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 96727,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93910,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93912,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 95843,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93889,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93892,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 95842,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93913,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93766,
+								},
+							},
+						},
+					},
+				},
 				icon = "item_sparkofragnoros",
+				id = "tiw:weekly-choice-event",
+				name = "Weekly Choice Event",
+				rev = 1,
 				scope = "perchar",
-				done = { evaluator = "group",
-				         params = { need = 1, of = questLeaves("flag", choiceQuests) } },
 				steps = {
-					weeklyStep("Pick one of the Weekly Quests.", "questlog", 1, choiceQuests),
-					weeklyStep("Complete the chosen weekly quest.", "flag", 1, choiceQuests),
+					{
+						evaluator = "group",
+						label = "Pick one of the Weekly Quests.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93767,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 94457,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93909,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93911,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93769,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 96727,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93910,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93912,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 95843,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93889,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93892,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 95842,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93913,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93766,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Complete the chosen weekly quest.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93767,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94457,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93909,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93911,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93769,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96727,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93910,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93912,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95843,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93889,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93892,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95842,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93913,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93766,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 7. Delve Weekly Drop -----------------------------------------------
 		{
 			bucket = "delves",
 			goal = {
-				v = 1, id = "tiw:delve-weekly-drop", rev = 1,
-				name = "Delve Weekly Drop",
 				category = "Reputation",
-				desc = "Obtain all the extra Reputation drops from Bountiful Delves. These only "
-					.. "drop from the Bountiful Chest and require spending a key to open.",
+				desc = "Obtain all the extra Reputation drops from Bountiful Delves. These only drop from the Bountiful Chest and require spending a key to open.",
 				icon = "ui_delves",
+				id = "tiw:delve-weekly-drop",
+				name = "Delve Weekly Drop",
+				rev = 1,
 				scope = "account",
 				steps = {
-					{ label = "Amani Tribe Reputation.", evaluator = "flag",
-					  params = { quest = 93819 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Singularity Reputation.", evaluator = "flag",
-					  params = { quest = 93820 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Silvermoon Court Reputation.", evaluator = "flag",
-					  params = { quest = 93821 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Hara'ti Reputation.", evaluator = "flag",
-					  params = { quest = 93822 }, resets = "weekly", require = { level = 90 } },
+					{
+						evaluator = "flag",
+						label = "Amani Tribe Reputation.",
+						params = {
+							quest = 93819,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Singularity Reputation.",
+						params = {
+							quest = 93820,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Silvermoon Court Reputation.",
+						params = {
+							quest = 93821,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Hara'ti Reputation.",
+						params = {
+							quest = 93822,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 8. Delve Season Credit ---------------------------------------------
 		{
 			bucket = "delves",
 			goal = {
-				v = 1, id = "tiw:delve-season-credit", rev = 1,
-				name = "Delve Season Credit",
 				category = "Reputation",
-				desc = "Once a week you may obtain a [item=262586] from completing a delve. "
-					.. "Turning it in rewards +1500 towards the Delve Journey for the Season.",
-				icon = "inv_112_arcane_orb",
-				tooltip = "[quest=93784]",
-				scope = "account",
-				done = { evaluator = "flag", params = { quest = 93784 } },
-				steps = {
-					{ label = "Obtain [item=262586].", evaluator = "questlog",
-					  params = { quest = 93784 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Turn in [quest=93784] at Delve Headquarters.", evaluator = "flag",
-					  params = { quest = 93784 }, resets = "weekly", require = { level = 90 } },
+				desc = "Once a week you may obtain a [item=262586] from completing a delve. Turning it in rewards +1500 towards the Delve Journey for the Season.",
+				done = {
+					evaluator = "flag",
+					params = {
+						quest = 93784,
+					},
 				},
+				icon = "inv_112_arcane_orb",
+				id = "tiw:delve-season-credit",
+				name = "Delve Season Credit",
+				rev = 1,
+				scope = "account",
+				steps = {
+					{
+						evaluator = "questlog",
+						label = "Obtain [item=262586].",
+						params = {
+							quest = 93784,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Turn in [quest=93784] at Delve Headquarters.",
+						params = {
+							quest = 93784,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+				},
+				tooltip = "[quest=93784]",
+				v = 1,
 			},
 		},
-
-		-- 9. Housing Weekly --------------------------------------------------
 		{
 			bucket = "housing",
 			goal = {
-				v = 1, id = "tiw:housing-weekly", rev = 1,
-				name = "Housing Weekly",
 				category = "Housing",
-				desc = "Complete your weekly Housing quest to earn Crests, [currency=3316], "
-					.. "or [item=259085]s.",
-				icon = "ui_homestone-64",
-				scope = "account",
-				-- Two-step obtain→complete with no author `done`: add one so turn-in
-				-- (which clears the "obtained" step) still completes the goal.
-				done = { evaluator = "group",
-				         params = { need = 1, of = questLeaves("flag", housingWeekly) } },
-				steps = {
-					{ label = "Obtain your Housing Weekly.", evaluator = "group",
-					  params = { need = 1, of = questLeaves("questlog", housingWeekly) },
-					  resets = "weekly" },
-					{ label = "Complete your Housing Weekly.", evaluator = "group",
-					  params = { need = 1, of = questLeaves("flag", housingWeekly) },
-					  resets = "weekly" },
+				desc = "Complete your weekly Housing quest to earn Crests, [currency=3316], or [item=259085]s.",
+				done = {
+					evaluator = "group",
+					params = {
+						need = 1,
+						of = {
+							{
+								evaluator = "flag",
+								params = {
+									quest = 95413,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 95416,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 95440,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 95438,
+								},
+							},
+						},
+					},
 				},
+				icon = "ui_homestone-64",
+				id = "tiw:housing-weekly",
+				name = "Housing Weekly",
+				rev = 1,
+				scope = "account",
+				steps = {
+					{
+						evaluator = "group",
+						label = "Obtain your Housing Weekly.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 95413,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 95416,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 95440,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 95438,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Complete your Housing Weekly.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95413,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95416,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95440,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95438,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+				},
+				v = 1,
 			},
 		},
-
-		-- 10. Void Assault Weekly --------------------------------------------
 		{
 			bucket = "open-world",
 			goal = {
-				v = 1, id = "tiw:void-assault-weekly", rev = 1,
-				name = "Void Assault Weekly",
 				category = "Open World",
 				desc = "Complete the weekly to earn extra Field Accolades, Crests, and Coffer Keys.",
-				icon = "inv_1205_voidforge_sovereignvoidcorefragments_midnight",
-				scope = "perchar",
-				done = { evaluator = "group",
-				         params = { need = 1, of = questLeaves("flag", voidAssault) } },
-				steps = {
-					{ label = "Obtain your Void Assault Weekly.", evaluator = "group",
-					  params = { need = 1, of = questLeaves("questlog", voidAssault) } },
-					{ label = "Complete your Void Assault Weekly.", evaluator = "group",
-					  params = { need = 1, of = questLeaves("flag", voidAssault) } },
+				done = {
+					evaluator = "group",
+					params = {
+						need = 1,
+						of = {
+							{
+								evaluator = "flag",
+								params = {
+									quest = 94386,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 94385,
+								},
+							},
+						},
+					},
 				},
+				icon = "inv_1205_voidforge_sovereignvoidcorefragments_midnight",
+				id = "tiw:void-assault-weekly",
+				name = "Void Assault Weekly",
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "group",
+						label = "Obtain your Void Assault Weekly.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 94386,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 94385,
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete your Void Assault Weekly.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94386,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94385,
+									},
+								},
+							},
+						},
+					},
+				},
+				v = 1,
 			},
 		},
-
-		-- 11. Ritual Site Extra Reputation -----------------------------------
 		{
 			bucket = "open-world",
 			goal = {
-				v = 1, id = "tiw:ritual-site-extra-rep", rev = 1,
-				name = "Ritual Site Extra Reputation",
 				category = "Reputation",
 				desc = "Earn extra Renown on your first two Ritual Sites of the week.",
 				icon = "spell_shadow_shadesofdarkness",
+				id = "tiw:ritual-site-extra-rep",
+				name = "Ritual Site Extra Reputation",
+				rev = 1,
 				scope = "account",
 				steps = {
-					{ label = "Complete your first Ritual Site for the week.", evaluator = "flag",
-					  params = { quest = 95823 }, resets = "weekly" },
-					{ label = "Complete your second Ritual Site for the week.", evaluator = "flag",
-					  params = { quest = 95824 }, resets = "weekly" },
+					{
+						evaluator = "flag",
+						label = "Complete your first Ritual Site for the week.",
+						params = {
+							quest = 95823,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Complete your second Ritual Site for the week.",
+						params = {
+							quest = 95824,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 12. Midnight Season 1 World Bosses ---------------------------------
 		{
 			bucket = "open-world",
 			goal = {
-				v = 1, id = "tiw:midnight-s1-world-bosses", rev = 1,
-				name = "Midnight Season 1 World Bosses",
 				category = "Midnight Season 1",
 				desc = "Defeat the Midnight World Bosses for the week to earn Warbound gear.",
 				icon = "inv_offhand_1h_questbloodelf_b_01",
+				id = "tiw:midnight-s1-world-bosses",
+				name = "Midnight Season 1 World Bosses",
+				rev = 1,
 				scope = "perchar",
 				steps = {
-					{ label = "Defeat the Launch World Boss.", evaluator = "group",
-					  params = { need = 1, of = questLeaves("flag", worldBoss) },
-					  resets = "weekly" },
-					{ label = "Defeat the Revelations World Boss.", evaluator = "flag",
-					  params = { quest = 97473 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Defeat the Revelations World Boss on Heroic.", evaluator = "flag",
-					  params = { quest = 98292 }, resets = "weekly", require = { level = 90 } },
+					{
+						evaluator = "group",
+						label = "Defeat the Launch World Boss.",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 92560,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 92034,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 92636,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 92123,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Defeat the Revelations World Boss.",
+						params = {
+							quest = 97473,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Defeat the Revelations World Boss on Heroic.",
+						params = {
+							quest = 98292,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 13. Obtain Voidcores -----------------------------------------------
-		{
-			bucket = "endgame", popular = true,
-			goal = {
-				v = 1, id = "tiw:obtain-voidcores", rev = 1,
-				name = "Obtain Voidcores",
-				category = "Endgame",
-				desc = "Spend gold, crests, or Voidlight Marl to obtain all [currency=3418].",
-				icon = "inv_1205_voidforge_sovereignvoidcores_cosmicvoid",
-				tooltip = "[currency=3418]",
-				scope = "perchar",
-				steps = {
-					{ label = "Obtain all available [currency=3418].", evaluator = "currency",
-					  params = { currency = 3418, cap = true } },
-				},
-			},
-		},
-
-		-- 14. Obtain your Weekly Spark ---------------------------------------
 		{
 			bucket = "endgame",
 			goal = {
-				v = 1, id = "tiw:weekly-spark", rev = 1,
-				name = "Obtain your Weekly Spark",
+				category = "Endgame",
+				desc = "Spend gold, crests, or Voidlight Marl to obtain all [currency=3418].",
+				icon = "inv_1205_voidforge_sovereignvoidcores_cosmicvoid",
+				id = "tiw:obtain-voidcores",
+				name = "Obtain Voidcores",
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "currency",
+						label = "Obtain all available [currency=3418].",
+						params = {
+							cap = true,
+							currency = 3418,
+						},
+					},
+				},
+				tooltip = "[currency=3418]",
+				v = 1,
+			},
+			popular = true,
+		},
+		{
+			bucket = "endgame",
+			goal = {
 				category = "Midnight Season 1",
 				desc = "Obtain all available Sparks to stay up to date with gear crafts.",
 				icon = "item_sparkofragnoros",
+				id = "tiw:weekly-spark",
+				name = "Obtain your Weekly Spark",
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "currency",
+						label = "Obtain all available [item=232875].",
+						params = {
+							cap = true,
+							currency = 3212,
+						},
+					},
+				},
 				tooltip = "[item=232875]",
-				scope = "perchar",
-				steps = {
-					{ label = "Obtain all available [item=232875].", evaluator = "currency",
-					  params = { currency = 3212, cap = true } },
-				},
+				v = 1,
 			},
 		},
-
-		-- 15. Mythic+ Vault --------------------------------------------------
-		{
-			bucket = "vault", tag = "Mythic+ 10s", popular = true,
-			goal = {
-				v = 1, id = "tiw:mythic-vault", rev = 1,
-				name = "Mythic+ Vault",
-				category = "Endgame",
-				desc = "Complete 8 Mythic+ of at least +10 to fill your vault.",
-				icon = "achievement_raidprimalist_raid",
-				scope = "perchar",
-				steps = {
-					{ label = "Complete 1 Mythic+ +10 or higher", evaluator = "vault",
-					  params = { track = "mythic", slots = 1, ilvl = 272 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Complete 4 Mythic+ +10 or higher", evaluator = "vault",
-					  params = { track = "mythic", slots = 2, ilvl = 272 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Complete 8 Mythic+ +10 or higher", evaluator = "vault",
-					  params = { track = "mythic", slots = 3, ilvl = 272 }, resets = "weekly", require = { level = 90 } },
-				},
-			},
-		},
-
-		-- 16. Raid Vault -----------------------------------------------------
-		{
-			bucket = "vault", tag = "Mythic Bosses", popular = true,
-			goal = {
-				v = 1, id = "tiw:raid-vault", rev = 1,
-				name = "Raid Vault",
-				category = "Endgame",
-				desc = "Defeat 8 Raid bosses on Mythic difficulty.",
-				icon = "inv_10_dungeonjewelry_dragon_trinket_1arcanemagical_red",
-				scope = "perchar",
-				steps = {
-					{ label = "Defeat 2 Mythic Raid Bosses", evaluator = "vault",
-					  params = { track = "raid", slots = 1, ilvl = 272 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Defeat 4 Mythic Raid Bosses", evaluator = "vault",
-					  params = { track = "raid", slots = 2, ilvl = 272 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Defeat 6 Mythic Raid Bosses", evaluator = "vault",
-					  params = { track = "raid", slots = 3, ilvl = 272 }, resets = "weekly", require = { level = 90 } },
-				},
-			},
-		},
-
-		-- 17. Open World Vault -----------------------------------------------
 		{
 			bucket = "vault",
 			goal = {
-				v = 1, id = "tiw:open-world-vault", rev = 1,
-				name = "Open World Vault",
+				category = "Endgame",
+				desc = "Complete 8 Mythic+ of at least +10 to fill your vault.",
+				icon = "achievement_raidprimalist_raid",
+				id = "tiw:mythic-vault",
+				name = "Mythic+ Vault",
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "vault",
+						label = "Complete 1 Mythic+ +10 or higher",
+						params = {
+							ilvl = 272,
+							slots = 1,
+							track = "mythic",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "vault",
+						label = "Complete 4 Mythic+ +10 or higher",
+						params = {
+							ilvl = 272,
+							slots = 2,
+							track = "mythic",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "vault",
+						label = "Complete 8 Mythic+ +10 or higher",
+						params = {
+							ilvl = 272,
+							slots = 3,
+							track = "mythic",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+				},
+				v = 1,
+			},
+			popular = true,
+			tag = "Mythic+ 10s",
+		},
+		{
+			bucket = "vault",
+			goal = {
+				category = "Endgame",
+				desc = "Defeat 8 Raid bosses on Mythic difficulty.",
+				icon = "inv_10_dungeonjewelry_dragon_trinket_1arcanemagical_red",
+				id = "tiw:raid-vault",
+				name = "Raid Vault",
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "vault",
+						label = "Defeat 2 Mythic Raid Bosses",
+						params = {
+							ilvl = 272,
+							slots = 1,
+							track = "raid",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "vault",
+						label = "Defeat 4 Mythic Raid Bosses",
+						params = {
+							ilvl = 272,
+							slots = 2,
+							track = "raid",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "vault",
+						label = "Defeat 6 Mythic Raid Bosses",
+						params = {
+							ilvl = 272,
+							slots = 3,
+							track = "raid",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+				},
+				v = 1,
+			},
+			popular = true,
+			tag = "Mythic Bosses",
+		},
+		{
+			bucket = "vault",
+			goal = {
 				category = "Endgame",
 				desc = "Complete 8 World Activities.",
 				icon = "achievement_zone_ohnahranplains",
+				id = "tiw:open-world-vault",
+				name = "Open World Vault",
+				rev = 1,
 				scope = "perchar",
 				steps = {
-					{ label = "Complete 2 World Activities", evaluator = "vault",
-					  params = { track = "world", slots = 1 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Complete 4 World Activities", evaluator = "vault",
-					  params = { track = "world", slots = 2 }, resets = "weekly", require = { level = 90 } },
-					{ label = "Complete 8 World Activities", evaluator = "vault",
-					  params = { track = "world", slots = 3 }, resets = "weekly", require = { level = 90 } },
+					{
+						evaluator = "vault",
+						label = "Complete 2 World Activities",
+						params = {
+							slots = 1,
+							track = "world",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "vault",
+						label = "Complete 4 World Activities",
+						params = {
+							slots = 2,
+							track = "world",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "vault",
+						label = "Complete 8 World Activities",
+						params = {
+							slots = 3,
+							track = "world",
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+					},
 				},
+				v = 1,
 			},
 		},
-
-		-- 18. Defeat Ahune (Midsummer) ---------------------------------------
 		{
-			bucket = "world-events", tag = "Midsummer Fire Festival",
-			reward = "Sun Festival's Painted Roc", popular = true,
+			bucket = "world-events",
 			goal = {
-				v = 1, id = "tiw:defeat-ahune", rev = 1,
-				name = "Defeat Ahune",
 				category = "World Events",
+				date = {
+					event = 341,
+				},
 				desc = "During Midsummer Fire Festival, enter the dungeon finder version of Slave Pens to defeat Lord Ahune. Once a day, per battle.net account, you may find special loot inside [item=117394], including [item=275464].",
 				icon = "spell_frost_summonwaterelemental",
-				tooltip = "[item=117394]",
+				id = "tiw:defeat-ahune",
+				name = "Defeat Ahune",
+				rev = 1,
 				scope = "account",
-				date = { event = 341 },   -- Midsummer Fire Festival
 				steps = {
-					{ label = "Loot [item=117394] from Lord Ahune.", evaluator = "flag",
-					  params = { quest = 97111, account = true }, resets = "daily",
-					  note = "Quest only completes upon opening the bag. You may peek inside multiple before taking any loot from it.",
-					  icon = "inv_misc_bag_17", tooltip = "[item=117394]" },
+					{
+						evaluator = "flag",
+						icon = "inv_misc_bag_17",
+						label = "Loot [item=117394] from Lord Ahune.",
+						note = "Quest only completes upon opening the bag. You may peek inside multiple before taking any loot from it.",
+						params = {
+							account = true,
+							quest = 97111,
+						},
+						resets = "daily",
+						tooltip = "[item=117394]",
+					},
 				},
+				tooltip = "[item=117394]",
+				v = 1,
 			},
+			popular = true,
+			reward = "Sun Festival's Painted Roc",
+			tag = "Midsummer Fire Festival",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Alchemy in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_alchemy",
+				id = "tiw:prof-kp-onetime-alchemy-midnight",
+				name = "One-Time Alchemy Midnight Treasures",
+				require = {
+					profession = 171,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238536] (+3 KP)",
+						params = {
+							quest = 89115,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238538] (+3 KP)",
+						params = {
+							quest = 89117,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238532] (+3 KP)",
+						params = {
+							quest = 89111,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238535] (+3 KP)",
+						params = {
+							quest = 89114,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238537] (+3 KP)",
+						params = {
+							quest = 89116,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238534] (+3 KP)",
+						params = {
+							quest = 89113,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238539] (+3 KP)",
+						params = {
+							quest = 89118,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238533] (+3 KP)",
+						params = {
+							quest = 89112,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=262645] (+10 KP)",
+						note = "Unlock: Renown 9; 75x [currency=3256]; 750x [currency=3316]",
+						params = {
+							quest = 93794,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Alchemy in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_alchemy",
+				id = "tiw:prof-kp-weekly-alchemy-midnight",
+				name = "Weekly Alchemy Midnight KP",
+				require = {
+					profession = 171,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245755] (+1 KP)",
+						params = {
+							quest = 95127,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263454] (+1 KP)",
+						params = {
+							quest = 93690,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259188] (+1 KP)",
+						params = {
+							quest = 93528,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259189] (+1 KP)",
+						params = {
+							quest = 93529,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3189,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Blacksmithing in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_blacksmithing",
+				id = "tiw:prof-kp-onetime-blacksmithing-midnight",
+				name = "One-Time Blacksmithing Midnight Treasures",
+				require = {
+					profession = 164,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238540] (+3 KP)",
+						params = {
+							quest = 89177,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238543] (+3 KP)",
+						params = {
+							quest = 89180,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238546] (+3 KP)",
+						params = {
+							quest = 89183,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238547] (+3 KP)",
+						params = {
+							quest = 89184,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238541] (+3 KP)",
+						params = {
+							quest = 89178,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238542] (+3 KP)",
+						params = {
+							quest = 89179,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238545] (+3 KP)",
+						params = {
+							quest = 89182,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238544] (+3 KP)",
+						params = {
+							quest = 89181,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=262644] (+10 KP)",
+						note = "Unlock: Renown 9; 75x [currency=3257]; 750x [currency=3316]",
+						params = {
+							quest = 93795,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Blacksmithing in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_blacksmithing",
+				id = "tiw:prof-kp-weekly-blacksmithing-midnight",
+				name = "Weekly Blacksmithing Midnight KP",
+				require = {
+					profession = 164,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245763] (+1 KP)",
+						params = {
+							quest = 95128,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263455] (+2 KP)",
+						params = {
+							quest = 93691,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259190] (+2 KP)",
+						params = {
+							quest = 93530,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259191] (+2 KP)",
+						params = {
+							quest = 93531,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3199,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Enchanting in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_enchanting",
+				id = "tiw:prof-kp-onetime-enchanting-midnight",
+				name = "One-Time Enchanting Midnight Treasures",
+				require = {
+					profession = 333,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238551] (+3 KP)",
+						params = {
+							quest = 89103,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238555] (+3 KP)",
+						params = {
+							quest = 89107,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238549] (+3 KP)",
+						params = {
+							quest = 89101,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238554] (+3 KP)",
+						params = {
+							quest = 89106,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238548] (+3 KP)",
+						params = {
+							quest = 89100,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238552] (+3 KP)",
+						params = {
+							quest = 89104,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238553] (+3 KP)",
+						params = {
+							quest = 89105,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238550] (+3 KP)",
+						params = {
+							quest = 89102,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=257600] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3258]; 750x [currency=3316]",
+						params = {
+							quest = 92374,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250445] (+10 KP)",
+						note = "Unlock: 1600x [currency=3377]; 75x [currency=3258]",
+						params = {
+							quest = 92186,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Enchanting in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_enchanting",
+				id = "tiw:prof-kp-weekly-enchanting-midnight",
+				name = "Weekly Enchanting Midnight KP",
+				require = {
+					profession = 333,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245759] (+1 KP)",
+						params = {
+							quest = 95129,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=263464] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93699,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93698,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93697,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=267654] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95048,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95049,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95050,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95051,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 95052,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=267655] (+4 KP)",
+						params = {
+							quest = 95053,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259192] (+2 KP)",
+						params = {
+							quest = 93532,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259193] (+2 KP)",
+						params = {
+							quest = 93533,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3198,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Engineering in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_engineering",
+				id = "tiw:prof-kp-onetime-engineering-midnight",
+				name = "One-Time Engineering Midnight Treasures",
+				require = {
+					profession = 202,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238556] (+3 KP)",
+						params = {
+							quest = 89133,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238562] (+3 KP)",
+						params = {
+							quest = 89139,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238558] (+3 KP)",
+						params = {
+							quest = 89135,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238563] (+3 KP)",
+						params = {
+							quest = 89140,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238561] (+3 KP)",
+						params = {
+							quest = 89138,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238559] (+3 KP)",
+						params = {
+							quest = 89136,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238560] (+3 KP)",
+						params = {
+							quest = 89137,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238557] (+3 KP)",
+						params = {
+							quest = 89134,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=262646] (+10 KP)",
+						note = "Unlock: Renown 9; 75x [currency=3259]; 750x [currency=3316]",
+						params = {
+							quest = 93796,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Engineering in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_engineering",
+				id = "tiw:prof-kp-weekly-engineering-midnight",
+				name = "Weekly Engineering Midnight KP",
+				require = {
+					profession = 202,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245809] (+1 KP)",
+						params = {
+							quest = 95138,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263456] (+1 KP)",
+						params = {
+							quest = 93692,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259194] (+1 KP)",
+						params = {
+							quest = 93534,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259195] (+1 KP)",
+						params = {
+							quest = 93535,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3197,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Herbalism in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_herbalism",
+				id = "tiw:prof-kp-onetime-herbalism-midnight",
+				name = "One-Time Herbalism Midnight Treasures",
+				require = {
+					profession = 182,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238470] (+3 KP)",
+						params = {
+							quest = 89160,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238472] (+3 KP)",
+						params = {
+							quest = 89158,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238469] (+3 KP)",
+						params = {
+							quest = 89161,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238473] (+3 KP)",
+						params = {
+							quest = 89157,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238468] (+3 KP)",
+						params = {
+							quest = 89162,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238471] (+3 KP)",
+						params = {
+							quest = 89159,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238475] (+3 KP)",
+						params = {
+							quest = 89155,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238474] (+3 KP)",
+						params = {
+							quest = 89156,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=258410] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3260]; 750x [currency=3316]",
+						params = {
+							quest = 93411,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250443] (+10 KP)",
+						note = "Unlock: 1600x [currency=3377]; 75x [currency=3260]",
+						params = {
+							quest = 92174,
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Learn all first-time gather recipes (+1 KP each, 30 recipes)",
+						params = {
+							need = 30,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87747,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87741,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87749,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87743,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87755,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87737,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87731,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87748,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87742,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87754,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87736,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87730,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87753,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87751,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87745,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87757,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87739,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87733,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87735,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87729,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87752,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87746,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87758,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87740,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87734,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87750,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87744,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87756,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87738,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 87732,
+									},
+								},
+							},
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Herbalism in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_herbalism",
+				id = "tiw:prof-kp-weekly-herbalism-midnight",
+				name = "Weekly Herbalism Midnight KP",
+				require = {
+					profession = 182,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245761] (+1 KP)",
+						params = {
+							quest = 95130,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=263462] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93700,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93701,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93702,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93703,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93704,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=238465] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81425,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81426,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81427,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81428,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81429,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238466] (+4 KP)",
+						params = {
+							quest = 81430,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3196,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Inscription in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_inscription",
+				id = "tiw:prof-kp-onetime-inscription-midnight",
+				name = "One-Time Inscription Midnight Treasures",
+				require = {
+					profession = 773,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238578] (+3 KP)",
+						params = {
+							quest = 89073,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238579] (+3 KP)",
+						params = {
+							quest = 89074,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238574] (+3 KP)",
+						params = {
+							quest = 89069,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238577] (+3 KP)",
+						params = {
+							quest = 89072,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238573] (+3 KP)",
+						params = {
+							quest = 89068,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238575] (+3 KP)",
+						params = {
+							quest = 89070,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238576] (+3 KP)",
+						params = {
+							quest = 89071,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238572] (+3 KP)",
+						params = {
+							quest = 89067,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=258411] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3261]; 750x [currency=3316]",
+						params = {
+							quest = 93412,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Inscription in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_inscription",
+				id = "tiw:prof-kp-weekly-inscription-midnight",
+				name = "Weekly Inscription Midnight KP",
+				require = {
+					profession = 773,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245757] (+1 KP)",
+						params = {
+							quest = 95131,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263457] (+4 KP)",
+						params = {
+							quest = 93693,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259196] (+2 KP)",
+						params = {
+							quest = 93536,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259197] (+2 KP)",
+						params = {
+							quest = 93537,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3195,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Jewelcrafting in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_jewelcrafting",
+				id = "tiw:prof-kp-onetime-jewelcrafting-midnight",
+				name = "One-Time Jewelcrafting Midnight Treasures",
+				require = {
+					profession = 755,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238580] (+3 KP)",
+						params = {
+							quest = 89122,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238582] (+3 KP)",
+						params = {
+							quest = 89124,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238585] (+3 KP)",
+						params = {
+							quest = 89127,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238583] (+3 KP)",
+						params = {
+							quest = 89125,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238587] (+3 KP)",
+						params = {
+							quest = 89129,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238581] (+3 KP)",
+						params = {
+							quest = 89123,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238584] (+3 KP)",
+						params = {
+							quest = 89126,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238586] (+3 KP)",
+						params = {
+							quest = 89128,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=257599] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3262]; 750x [currency=3316]",
+						params = {
+							quest = 93222,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Jewelcrafting in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_jewelcrafting",
+				id = "tiw:prof-kp-weekly-jewelcrafting-midnight",
+				name = "Weekly Jewelcrafting Midnight KP",
+				require = {
+					profession = 755,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245760] (+1 KP)",
+						params = {
+							quest = 95133,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263458] (+3 KP)",
+						params = {
+							quest = 93694,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259199] (+2 KP)",
+						params = {
+							quest = 93539,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259198] (+2 KP)",
+						params = {
+							quest = 93538,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3194,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Leatherworking in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_leatherworking",
+				id = "tiw:prof-kp-onetime-leatherworking-midnight",
+				name = "One-Time Leatherworking Midnight Treasures",
+				require = {
+					profession = 165,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238595] (+3 KP)",
+						params = {
+							quest = 89096,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238588] (+3 KP)",
+						params = {
+							quest = 89089,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238590] (+3 KP)",
+						params = {
+							quest = 89091,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238591] (+3 KP)",
+						params = {
+							quest = 89092,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238593] (+3 KP)",
+						params = {
+							quest = 89094,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238594] (+3 KP)",
+						params = {
+							quest = 89095,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238589] (+3 KP)",
+						params = {
+							quest = 89090,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238592] (+3 KP)",
+						params = {
+							quest = 89093,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250922] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3263]; 750x [currency=3316]",
+						params = {
+							quest = 92371,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Leatherworking in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_leatherworking",
+				id = "tiw:prof-kp-weekly-leatherworking-midnight",
+				name = "Weekly Leatherworking Midnight KP",
+				require = {
+					profession = 165,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245758] (+1 KP)",
+						params = {
+							quest = 95134,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263459] (+2 KP)",
+						params = {
+							quest = 93695,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259200] (+2 KP)",
+						params = {
+							quest = 93540,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259201] (+2 KP)",
+						params = {
+							quest = 93541,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3193,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Mining in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_mining",
+				id = "tiw:prof-kp-onetime-mining-midnight",
+				name = "One-Time Mining Midnight Treasures",
+				require = {
+					profession = 186,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238599] (+3 KP)",
+						params = {
+							quest = 89147,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238597] (+3 KP)",
+						params = {
+							quest = 89145,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238601] (+3 KP)",
+						params = {
+							quest = 89149,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238603] (+3 KP)",
+						params = {
+							quest = 89151,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238602] (+3 KP)",
+						params = {
+							quest = 89150,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238596] (+3 KP)",
+						params = {
+							quest = 89144,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238598] (+3 KP)",
+						params = {
+							quest = 89146,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238600] (+3 KP)",
+						params = {
+							quest = 89148,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250924] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3264]; 750x [currency=3316]",
+						params = {
+							quest = 92372,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250444] (+10 KP)",
+						note = "Unlock: 1600x [currency=3377]; 75x [currency=3264]",
+						params = {
+							quest = 92187,
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Learn all first-time gather recipes (+1 KP each, 21 recipes)",
+						params = {
+							need = 21,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88471,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88466,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88484,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88487,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88488,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88490,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88479,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88469,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88475,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88480,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88491,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88476,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88478,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88477,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88481,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88465,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88463,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88470,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88472,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88486,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88485,
+									},
+								},
+							},
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Mining in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_mining",
+				id = "tiw:prof-kp-weekly-mining-midnight",
+				name = "Weekly Mining Midnight KP",
+				require = {
+					profession = 186,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245762] (+1 KP)",
+						params = {
+							quest = 95135,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=263463] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93705,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93706,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93707,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93708,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93709,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=237496] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88673,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88674,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88675,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88676,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88677,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=237506] (+3 KP)",
+						params = {
+							quest = 88678,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3192,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Skinning in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_skinning",
+				id = "tiw:prof-kp-onetime-skinning-midnight",
+				name = "One-Time Skinning Midnight Treasures",
+				require = {
+					profession = 393,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238633] (+3 KP)",
+						params = {
+							quest = 89171,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238635] (+3 KP)",
+						params = {
+							quest = 89173,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238632] (+3 KP)",
+						params = {
+							quest = 89170,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238634] (+3 KP)",
+						params = {
+							quest = 89172,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238629] (+3 KP)",
+						params = {
+							quest = 89167,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238628] (+3 KP)",
+						params = {
+							quest = 89166,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238630] (+3 KP)",
+						params = {
+							quest = 89168,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238631] (+3 KP)",
+						params = {
+							quest = 89169,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250923] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3265]; 750x [currency=3316]",
+						params = {
+							quest = 92373,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=250360] (+10 KP)",
+						note = "Unlock: 1600x [currency=3377]; 75x [currency=3265]",
+						params = {
+							quest = 92188,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Skinning in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_skinning",
+				id = "tiw:prof-kp-weekly-skinning-midnight",
+				name = "Weekly Skinning Midnight KP",
+				require = {
+					profession = 393,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245828] (+1 KP)",
+						params = {
+							quest = 95136,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=263461] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93710,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93711,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93712,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93713,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93714,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=238625] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88534,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88549,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88536,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88537,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 88530,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238626] (+3 KP)",
+						params = {
+							quest = 88529,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3191,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Tailoring in Midnight -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_tailoring",
+				id = "tiw:prof-kp-onetime-tailoring-midnight",
+				name = "One-Time Tailoring Midnight Treasures",
+				require = {
+					profession = 197,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=238613] (+3 KP)",
+						params = {
+							quest = 89079,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238618] (+3 KP)",
+						params = {
+							quest = 89084,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238614] (+3 KP)",
+						params = {
+							quest = 89080,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238619] (+3 KP)",
+						params = {
+							quest = 89085,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238612] (+3 KP)",
+						params = {
+							quest = 89078,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238615] (+3 KP)",
+						params = {
+							quest = 89081,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238616] (+3 KP)",
+						params = {
+							quest = 89082,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=238617] (+3 KP)",
+						params = {
+							quest = 89083,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=257601] (+10 KP)",
+						note = "Unlock: Renown 6; 75x [currency=3266]; 750x [currency=3316]",
+						params = {
+							quest = 93201,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Tailoring in Midnight -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_tailoring",
+				id = "tiw:prof-kp-weekly-tailoring-midnight",
+				name = "Weekly Tailoring Midnight KP",
+				require = {
+					profession = 197,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=245756] (+1 KP)",
+						params = {
+							quest = 95137,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=263460] (+2 KP)",
+						params = {
+							quest = 93696,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259202] (+2 KP)",
+						params = {
+							quest = 93542,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=259203] (+2 KP)",
+						params = {
+							quest = 93543,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3190,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "Midnight",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Alchemy in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_alchemy",
+				id = "tiw:prof-kp-onetime-alchemy-tww",
+				name = "One-Time Alchemy The War Within Treasures",
+				require = {
+					profession = 171,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226265] (+3 KP)",
+						params = {
+							quest = 83840,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226266] (+3 KP)",
+						params = {
+							quest = 83841,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226267] (+3 KP)",
+						params = {
+							quest = 83842,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226268] (+3 KP)",
+						params = {
+							quest = 83843,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226269] (+3 KP)",
+						params = {
+							quest = 83844,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226270] (+3 KP)",
+						params = {
+							quest = 83845,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226271] (+3 KP)",
+						params = {
+							quest = 83846,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226272] (+3 KP)",
+						params = {
+							quest = 83847,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227409] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 81146,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227420] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 81147,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227431] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 81148,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224645] (+10 KP)",
+						note = "Unlock: Renown 12",
+						params = {
+							quest = 83058,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232499] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85734,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235865] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87255,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224024] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82633,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Alchemy in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_alchemy",
+				id = "tiw:prof-kp-weekly-alchemy-tww",
+				name = "Weekly Alchemy The War Within KP",
+				require = {
+					profession = 171,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222546] (+1 KP)",
+						params = {
+							quest = 83725,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228773] (+2 KP)",
+						params = {
+							quest = 84133,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225234] (+2 KP)",
+						params = {
+							quest = 83253,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225235] (+2 KP)",
+						params = {
+							quest = 83255,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3057,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Blacksmithing in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_blacksmithing",
+				id = "tiw:prof-kp-onetime-blacksmithing-tww",
+				name = "One-Time Blacksmithing The War Within Treasures",
+				require = {
+					profession = 164,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226276] (+3 KP)",
+						params = {
+							quest = 83848,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226277] (+3 KP)",
+						params = {
+							quest = 83849,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226278] (+3 KP)",
+						params = {
+							quest = 83850,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226279] (+3 KP)",
+						params = {
+							quest = 83851,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226280] (+3 KP)",
+						params = {
+							quest = 83852,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226281] (+3 KP)",
+						params = {
+							quest = 83853,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226282] (+3 KP)",
+						params = {
+							quest = 83854,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226283] (+3 KP)",
+						params = {
+							quest = 83855,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227407] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 84226,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227418] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 84227,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227429] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 84228,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224647] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 83059,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232500] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85735,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235864] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87266,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224038] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82631,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Blacksmithing in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_blacksmithing",
+				id = "tiw:prof-kp-weekly-blacksmithing-tww",
+				name = "Weekly Blacksmithing The War Within KP",
+				require = {
+					profession = 164,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222554] (+1 KP)",
+						params = {
+							quest = 83726,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228774] (+2 KP)",
+						params = {
+							quest = 84127,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225233] (+1 KP)",
+						params = {
+							quest = 83256,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225232] (+1 KP)",
+						params = {
+							quest = 83257,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3058,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Enchanting in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_enchanting",
+				id = "tiw:prof-kp-onetime-enchanting-tww",
+				name = "One-Time Enchanting The War Within Treasures",
+				require = {
+					profession = 333,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226284] (+3 KP)",
+						params = {
+							quest = 83856,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226285] (+3 KP)",
+						params = {
+							quest = 83859,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226286] (+3 KP)",
+						params = {
+							quest = 83860,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226287] (+3 KP)",
+						params = {
+							quest = 83861,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226288] (+3 KP)",
+						params = {
+							quest = 83862,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226289] (+3 KP)",
+						params = {
+							quest = 83863,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226290] (+3 KP)",
+						params = {
+							quest = 83864,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226291] (+3 KP)",
+						params = {
+							quest = 83865,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227411] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 81076,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227422] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 81077,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227433] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 81078,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224652] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 83060,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232501] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85736,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235863] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87265,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224050] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82635,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Enchanting in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_enchanting",
+				id = "tiw:prof-kp-weekly-enchanting-tww",
+				name = "Weekly Enchanting The War Within KP",
+				require = {
+					profession = 333,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222550] (+1 KP)",
+						params = {
+							quest = 83727,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=227667] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84084,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84085,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84086,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=227659] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84290,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84291,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84292,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84293,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 84294,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227661] (+4 KP)",
+						params = {
+							quest = 84295,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225231] (+1 KP)",
+						params = {
+							quest = 83258,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225230] (+1 KP)",
+						params = {
+							quest = 83259,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3059,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Engineering in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_engineering",
+				id = "tiw:prof-kp-onetime-engineering-tww",
+				name = "One-Time Engineering The War Within Treasures",
+				require = {
+					profession = 202,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226292] (+3 KP)",
+						params = {
+							quest = 83866,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226293] (+3 KP)",
+						params = {
+							quest = 83867,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226294] (+3 KP)",
+						params = {
+							quest = 83868,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226295] (+3 KP)",
+						params = {
+							quest = 83869,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226296] (+3 KP)",
+						params = {
+							quest = 83870,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226297] (+3 KP)",
+						params = {
+							quest = 83871,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226298] (+3 KP)",
+						params = {
+							quest = 83872,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226299] (+3 KP)",
+						params = {
+							quest = 83873,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227412] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 84229,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227423] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 84230,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227434] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 84231,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224653] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 83063,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232507] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85737,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235862] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87264,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224052] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82632,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Engineering in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_engineering",
+				id = "tiw:prof-kp-weekly-engineering-tww",
+				name = "Weekly Engineering The War Within KP",
+				require = {
+					profession = 202,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222621] (+1 KP)",
+						params = {
+							quest = 83728,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228775] (+1 KP)",
+						params = {
+							quest = 84128,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225228] (+1 KP)",
+						params = {
+							quest = 83260,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225229] (+1 KP)",
+						params = {
+							quest = 83261,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3060,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Herbalism in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_herbalism",
+				id = "tiw:prof-kp-onetime-herbalism-tww",
+				name = "One-Time Herbalism The War Within Treasures",
+				require = {
+					profession = 182,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226300] (+3 KP)",
+						params = {
+							quest = 83874,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226301] (+3 KP)",
+						params = {
+							quest = 83875,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226302] (+3 KP)",
+						params = {
+							quest = 83876,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226303] (+3 KP)",
+						params = {
+							quest = 83877,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226304] (+3 KP)",
+						params = {
+							quest = 83878,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226305] (+3 KP)",
+						params = {
+							quest = 83879,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226306] (+3 KP)",
+						params = {
+							quest = 83880,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226307] (+3 KP)",
+						params = {
+							quest = 83881,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227415] (+15 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 81422,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227426] (+15 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 81423,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227437] (+15 KP)",
+						note = "Unlock: skill 400; skill 50",
+						params = {
+							quest = 81424,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224656] (+10 KP)",
+						note = "Unlock: Renown 14; skill 50",
+						params = {
+							quest = 83066,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232503] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85738,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235861] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87263,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224023] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82630,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Herbalism in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_herbalism",
+				id = "tiw:prof-kp-weekly-herbalism-tww",
+				name = "Weekly Herbalism The War Within KP",
+				require = {
+					profession = 182,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222552] (+1 KP)",
+						params = {
+							quest = 83729,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=224817] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82970,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82958,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82965,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82916,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82962,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=224264] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81416,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81417,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81418,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81419,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81420,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224265] (+4 KP)",
+						params = {
+							quest = 81421,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3061,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Inscription in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_inscription",
+				id = "tiw:prof-kp-onetime-inscription-tww",
+				name = "One-Time Inscription The War Within Treasures",
+				require = {
+					profession = 773,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226308] (+3 KP)",
+						params = {
+							quest = 83882,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226309] (+3 KP)",
+						params = {
+							quest = 83883,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226310] (+3 KP)",
+						params = {
+							quest = 83884,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226311] (+3 KP)",
+						params = {
+							quest = 83885,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226312] (+3 KP)",
+						params = {
+							quest = 83886,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226313] (+3 KP)",
+						params = {
+							quest = 83887,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226314] (+3 KP)",
+						params = {
+							quest = 83888,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226315] (+3 KP)",
+						params = {
+							quest = 83889,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227408] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 80749,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227419] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 80750,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227430] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 80751,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224654] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 83064,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232508] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85739,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235860] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87262,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224053] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82636,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Inscription in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_inscription",
+				id = "tiw:prof-kp-weekly-inscription-tww",
+				name = "Weekly Inscription The War Within KP",
+				require = {
+					profession = 773,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222548] (+1 KP)",
+						params = {
+							quest = 83730,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228776] (+2 KP)",
+						params = {
+							quest = 84129,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225227] (+2 KP)",
+						params = {
+							quest = 83262,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225226] (+2 KP)",
+						params = {
+							quest = 83264,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3062,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Jewelcrafting in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_jewelcrafting",
+				id = "tiw:prof-kp-onetime-jewelcrafting-tww",
+				name = "One-Time Jewelcrafting The War Within Treasures",
+				require = {
+					profession = 755,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226316] (+3 KP)",
+						params = {
+							quest = 83890,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226317] (+3 KP)",
+						params = {
+							quest = 83891,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226318] (+3 KP)",
+						params = {
+							quest = 83892,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226319] (+3 KP)",
+						params = {
+							quest = 83893,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226320] (+3 KP)",
+						params = {
+							quest = 83894,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226321] (+3 KP)",
+						params = {
+							quest = 83895,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226322] (+3 KP)",
+						params = {
+							quest = 83896,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226323] (+3 KP)",
+						params = {
+							quest = 83897,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227413] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 81259,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227424] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 81260,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227435] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 81261,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224655] (+10 KP)",
+						note = "Unlock: Renown 14; skill 50",
+						params = {
+							quest = 83065,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232504] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85740,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235859] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87261,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224054] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82637,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Jewelcrafting in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_jewelcrafting",
+				id = "tiw:prof-kp-weekly-jewelcrafting-tww",
+				name = "Weekly Jewelcrafting The War Within KP",
+				require = {
+					profession = 755,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222551] (+1 KP)",
+						params = {
+							quest = 83731,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228777] (+2 KP)",
+						params = {
+							quest = 84130,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225224] (+2 KP)",
+						params = {
+							quest = 83265,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225225] (+2 KP)",
+						params = {
+							quest = 83266,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3063,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Leatherworking in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_leatherworking",
+				id = "tiw:prof-kp-onetime-leatherworking-tww",
+				name = "One-Time Leatherworking The War Within Treasures",
+				require = {
+					profession = 165,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226324] (+3 KP)",
+						params = {
+							quest = 83898,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226325] (+3 KP)",
+						params = {
+							quest = 83899,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226326] (+3 KP)",
+						params = {
+							quest = 83900,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226327] (+3 KP)",
+						params = {
+							quest = 83901,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226328] (+3 KP)",
+						params = {
+							quest = 83902,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226329] (+3 KP)",
+						params = {
+							quest = 83903,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226330] (+3 KP)",
+						params = {
+							quest = 83904,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226331] (+3 KP)",
+						params = {
+							quest = 83905,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227414] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 80978,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227425] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 80979,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227436] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 80980,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224658] (+10 KP)",
+						note = "Unlock: Renown 14; skill 50",
+						params = {
+							quest = 83068,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232505] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85741,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235858] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87260,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224056] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82626,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Leatherworking in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_leatherworking",
+				id = "tiw:prof-kp-weekly-leatherworking-tww",
+				name = "Weekly Leatherworking The War Within KP",
+				require = {
+					profession = 165,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222549] (+1 KP)",
+						params = {
+							quest = 83732,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228778] (+2 KP)",
+						params = {
+							quest = 84131,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225223] (+1 KP)",
+						params = {
+							quest = 83267,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225222] (+1 KP)",
+						params = {
+							quest = 83268,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3064,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Mining in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_mining",
+				id = "tiw:prof-kp-onetime-mining-tww",
+				name = "One-Time Mining The War Within Treasures",
+				require = {
+					profession = 186,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226332] (+3 KP)",
+						params = {
+							quest = 83906,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226333] (+3 KP)",
+						params = {
+							quest = 83907,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226334] (+3 KP)",
+						params = {
+							quest = 83908,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226335] (+3 KP)",
+						params = {
+							quest = 83909,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226336] (+3 KP)",
+						params = {
+							quest = 83910,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226337] (+3 KP)",
+						params = {
+							quest = 83911,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226338] (+3 KP)",
+						params = {
+							quest = 83912,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226339] (+3 KP)",
+						params = {
+							quest = 83913,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227416] (+15 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 81390,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227427] (+15 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 81391,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227438] (+15 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 81392,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224651] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 83062,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232509] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85742,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235857] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87259,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224055] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82614,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Mining in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_mining",
+				id = "tiw:prof-kp-weekly-mining-tww",
+				name = "Weekly Mining The War Within KP",
+				require = {
+					profession = 186,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "group",
+						label = "[item=224818] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83104,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83105,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83103,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83106,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83102,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=222553] (+1 KP)",
+						params = {
+							quest = 83733,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=224583] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83050,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83051,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83052,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83053,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83054,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224584] (+3 KP)",
+						params = {
+							quest = 83049,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3065,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Skinning in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_skinning",
+				id = "tiw:prof-kp-onetime-skinning-tww",
+				name = "One-Time Skinning The War Within Treasures",
+				require = {
+					profession = 393,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226340] (+3 KP)",
+						params = {
+							quest = 83914,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226341] (+3 KP)",
+						params = {
+							quest = 83915,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226342] (+3 KP)",
+						params = {
+							quest = 83916,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226343] (+3 KP)",
+						params = {
+							quest = 83917,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226344] (+3 KP)",
+						params = {
+							quest = 83918,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226345] (+3 KP)",
+						params = {
+							quest = 83919,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226346] (+3 KP)",
+						params = {
+							quest = 83920,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226347] (+3 KP)",
+						params = {
+							quest = 83921,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227417] (+15 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 84232,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227428] (+15 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 84233,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227439] (+15 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 84234,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224657] (+10 KP)",
+						note = "Unlock: Renown 14; skill 50",
+						params = {
+							quest = 83067,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232506] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85744,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235856] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87258,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224007] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82596,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Skinning in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_skinning",
+				id = "tiw:prof-kp-weekly-skinning-tww",
+				name = "Weekly Skinning The War Within KP",
+				require = {
+					profession = 393,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "group",
+						label = "[item=224807] (+3 KP)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83097,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83098,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 83100,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82992,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 82993,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=222649] (+1 KP)",
+						params = {
+							quest = 83734,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "[item=224780] (+1 KP each, collect 5)",
+						params = {
+							need = 5,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81459,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81460,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81461,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81462,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 81463,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224781] (+2 KP)",
+						params = {
+							quest = 81464,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3066,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "One-time Knowledge Point sources for Tailoring in The War Within -- world treasures, research books, and first-time gathers. Each is earned once per character.",
+				icon = "ui_profession_tailoring",
+				id = "tiw:prof-kp-onetime-tailoring-tww",
+				name = "One-Time Tailoring The War Within Treasures",
+				require = {
+					profession = 197,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=226348] (+3 KP)",
+						params = {
+							quest = 83922,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226349] (+3 KP)",
+						params = {
+							quest = 83923,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226350] (+3 KP)",
+						params = {
+							quest = 83924,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226351] (+3 KP)",
+						params = {
+							quest = 83925,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226352] (+3 KP)",
+						params = {
+							quest = 83926,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226353] (+3 KP)",
+						params = {
+							quest = 83927,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226354] (+3 KP)",
+						params = {
+							quest = 83928,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=226355] (+3 KP)",
+						params = {
+							quest = 83929,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227410] (+10 KP)",
+						note = "Unlock: skill 200",
+						params = {
+							quest = 80871,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227421] (+10 KP)",
+						note = "Unlock: skill 300",
+						params = {
+							quest = 80872,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=227432] (+10 KP)",
+						note = "Unlock: skill 400",
+						params = {
+							quest = 80873,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224648] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 83061,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=232502] (+10 KP)",
+						note = "Unlock: Renown 16; skill 50",
+						params = {
+							quest = 85745,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=235855] (+10 KP)",
+						note = "Unlock: Renown 12; skill 50",
+						params = {
+							quest = 87257,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "[item=224036] (+10 KP)",
+						note = "Unlock: 565x [currency=3056]",
+						params = {
+							quest = 82634,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
+		},
+		{
+			bucket = "professions",
+			goal = {
+				category = "Professions",
+				desc = "Weekly Knowledge Point sources for Tailoring in The War Within -- treatise, work-order quest, gathered drops, and catch-up currency. Resets each week.",
+				icon = "ui_profession_tailoring",
+				id = "tiw:prof-kp-weekly-tailoring-tww",
+				name = "Weekly Tailoring The War Within KP",
+				require = {
+					profession = 197,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "[item=222547] (+1 KP)",
+						params = {
+							quest = 83735,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=228779] (+2 KP)",
+						params = {
+							quest = 84132,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225221] (+1 KP)",
+						params = {
+							quest = 83269,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "[item=225220] (+1 KP)",
+						params = {
+							quest = 83270,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Catch-up Knowledge",
+						params = {
+							cap = true,
+							currency = 3067,
+						},
+					},
+				},
+				v = 1,
+			},
+			tag = "The War Within",
 		},
 	}
-
-	-- Generated profession Knowledge-Point goals (catalog_professions.lua) are
-	-- appended into the same list under the "professions" bucket.
-	if ns.Goals.ProfessionCatalog then
-		for _, e in ipairs(ns.Goals.ProfessionCatalog.entries()) do
-			list[#list + 1] = e
-		end
-	end
-
-	return list
 end
 
--- The goal table for an id, or nil — used at import time (the view holds only
--- the shaped VM). Scans entries(); the catalog is small.
+-- The goal table for an id, or nil -- used at import time.
 function Catalog.goal(id)
 	for _, e in ipairs(Catalog.entries()) do
 		if e.goal.id == id then return e.goal end

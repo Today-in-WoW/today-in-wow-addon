@@ -11,7 +11,7 @@ local function harness()
 	local ns = {}
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/catalog.lua",
-		"goals/catalog_professions.lua", "goals/presenter.lua",
+		"goals/presenter.lua",
 		"goals/evaluators/lockout.lua", "goals/evaluators/currency.lua",
 		"goals/evaluators/collected.lua", "goals/evaluators/flag.lua",
 		"goals/evaluators/questlog.lua", "goals/evaluators/group.lua",

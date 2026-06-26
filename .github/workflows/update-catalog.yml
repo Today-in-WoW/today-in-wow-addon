@@ -1,0 +1,68 @@
+name: Update catalog
+
+# Regenerate goals/catalog.lua from the Goal Repository DB (via the public
+# catalog-export API) and open a PR when it changed. The catalog changes when
+# curators edit goals on the site, not when code is pushed — so this runs on a
+# schedule (and on demand), NOT on push.
+#
+# Safe to keep enabled before the endpoint is deployed: the probe step exits
+# cleanly (no-op) if /api/goals/catalog-export isn't reachable yet. The result is
+# a PR, never a direct push — generated player-facing content gets a human glance.
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # Mondays 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      api_base:
+        description: "Backend API base URL"
+        required: false
+        default: "https://www.todayinwow.com/api"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate:
+    name: Regenerate from DB
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Fetch export + regenerate (skip if endpoint absent)
+        id: regen
+        run: |
+          API="${{ github.event.inputs.api_base || 'https://www.todayinwow.com/api' }}"
+          echo "Probing $API/goals/catalog-export"
+          if ! curl -fsS "$API/goals/catalog-export" -o /tmp/export.json; then
+            echo "catalog-export not reachable — nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 tools/build_catalog.py --file /tmp/export.json
+          if git diff --quiet -- goals/catalog.lua; then
+            echo "Catalog already up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Catalog changed."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR
+        if: steps.regen.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: auto/catalog-update
+          commit-message: "chore: regenerate goal catalog from DB"
+          title: "chore: regenerate goal catalog from DB"
+          body: |
+            Automated regeneration of `goals/catalog.lua` from the Goal Repository
+            DB via `GET /api/goals/catalog-export` (`tools/build_catalog.py`).
+
+            Review the diff — this is the goal set that ships to players.
+          labels: automated
+          delete-branch: true
