@@ -88,8 +88,9 @@ function ns.Goals.SettingsModel()
 		},
 		{
 			kind = "checkbox", key = "TIW_HIDE_DONE_GOALS", label = "Hide completed goals",
-			tooltip = "On the tracker, hide a goal once you've completed it on the current character. "
-				.. "It stays pinned and reappears when one of its steps resets.",
+			tooltip = "On the tracker, once you've completed a goal on the current character it's hidden -- "
+				.. "or, if another character still needs it, moved to the bottom of the list. "
+				.. "It returns to its place when one of its steps resets.",
 			get = function() return ns.Goals.GetPref("hideCompletedGoals") end,
 			set = function(v) ns.Goals.SetPref("hideCompletedGoals", v) end,
 		},

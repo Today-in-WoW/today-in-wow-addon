@@ -313,16 +313,24 @@ describe("Presenter.pinned — completed-step/goal hiding (display prefs)", func
 			row("g:farm", 1, "Kill LK", { done = true }) }).goals)
 	end)
 
-	it("hideCompletedGoals drops a done goal even when another character still needs it", function()
+	it("hideCompletedGoals demotes (not hides) a done goal another character still needs", function()
 		local ns = harness()
 		ns.Goals.GetPref = function(k) return k == "hideCompletedGoals" end
 		local S = ns.Goals.Store
 		S.install(gFarm()); S.setPinned("g:farm", true)
-		seedAlt(ns, "Bbb-Realm", { lockouts = { iccRow(false) } })   -- alt still needs it
-		-- done on the CURRENT character -> hidden from the HUD regardless of alts
-		-- (per-character status still shows in the main window's matrix/detail).
-		assert.same({}, ns.Goals.Presenter.pinned({
-			row("g:farm", 1, "Kill LK", { done = true }) }).goals)
+		S.install(gMount()); S.setPinned("g:mount", true)
+		S.setSectionOrder(true, { "g:farm", "g:mount" })            -- farm ordered above mount
+		seedAlt(ns, "Bbb-Realm", { lockouts = { iccRow(false) } })   -- alt still needs farm
+		-- farm is done on the current char but an alt needs it -> kept, but sunk
+		-- below the still-active mount goal despite being first in store order.
+		local vm = ns.Goals.Presenter.pinned({
+			row("g:farm", 1, "Kill LK", { done = true }),
+			row("g:mount", 1, "Obtain", { done = false }),
+		})
+		assert.equal(2, #vm.goals)
+		assert.equal("g:mount", vm.goals[1].id)
+		assert.equal("g:farm", vm.goals[2].id)
+		assert.equal("Bbb-Realm", vm.goals[2].nextAlt)
 	end)
 
 	it("no pref accessor → nothing hidden (raw shaping for other specs)", function()

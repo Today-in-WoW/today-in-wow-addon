@@ -241,27 +241,37 @@ end
 
 -- The always-on panel. Returns { goals = { <goalEntry> + nextAlt, ... } } —
 -- pinned && active && in-season goals only, in display order (Store.ordered).
--- Two display prefs trim it: "Hide completed goals" drops a goal once it's done
--- on the CURRENT character (it stays pinned and returns when a step resets);
--- "Hide completed steps" renders only a goal's unfinished step lines.
+-- Two display prefs shape it: "Hide completed goals" — a goal done on the CURRENT
+-- character is hidden if no other character still needs it, otherwise demoted to
+-- the bottom (a "do it on an alt" tier); the stored order is untouched. "Hide
+-- completed steps" renders only a goal's unfinished step lines.
 function Presenter.pinned(flatVM)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
 	local hideGoals = pref("hideCompletedGoals")
 	local hideSteps = pref("hideCompletedSteps")
 	local out = { goals = {} }
+	local demoted = {}   -- done here but an alt still needs it: a lower-priority tier
 	for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
 		if rec.state.active and inSeason(rec.goal) then
 			local goal = rec.goal
 			local goalDone = goalLevelDone(goal)
 			local entry = goalEntry(goal, byId[goal.id], goalDone)
 			entry.nextAlt = nextAltFor(goal, rec.state, goalDone, current)
-			if not (hideGoals and entry.state == "done") then
+			local doneHere = hideGoals and entry.state == "done"
+			-- done here + nobody else needs it -> hidden; done here + an alt needs it
+			-- -> kept but demoted to the bottom (store order is untouched).
+			if not (doneHere and not entry.nextAlt) then
 				if hideSteps then dropDoneSteps(entry) end
-				out.goals[#out.goals + 1] = entry
+				if doneHere then
+					demoted[#demoted + 1] = entry
+				else
+					out.goals[#out.goals + 1] = entry
+				end
 			end
 		end
 	end
+	for _, entry in ipairs(demoted) do out.goals[#out.goals + 1] = entry end
 	return out
 end
 
