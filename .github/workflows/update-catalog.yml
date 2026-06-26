@@ -10,7 +10,7 @@ name: Update catalog
 # a PR, never a direct push — generated player-facing content gets a human glance.
 on:
   schedule:
-    - cron: "0 9 * * 1"   # Mondays 09:00 UTC
+    - cron: "0 9 * * *"   # 09:00 UTC
   workflow_dispatch:
     inputs:
       api_base:
