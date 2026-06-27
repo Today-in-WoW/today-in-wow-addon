@@ -9,7 +9,10 @@ local _, ns = ...
 -- addons silently mis-evaluate per-char instead of degrading (§4).
 
 ns.Goals.Registry.register("flag", {
-	events = { "QUEST_TURNED_IN" },
+	-- QUEST_TURNED_IN catches normal turn-ins; QUEST_LOG_UPDATE catches quests
+	-- flagged completed WITHOUT a turn-in (tracking quests set on loot — e.g. KP
+	-- item drops), which otherwise wouldn't refresh the HUD until a reload.
+	events = { "QUEST_TURNED_IN", "QUEST_LOG_UPDATE" },
 	validate = function(params)
 		return ns.Goals.Registry.checkParams(params, {
 			required = { quest = "number" },
