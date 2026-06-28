@@ -41,6 +41,7 @@ read_globals = {
 	"GameTooltip",                              -- goal/step icon hover tooltips (ui_panel)
 	"IsShiftKeyDown",                           -- shift-click a goal header to unpin (ui_panel)
 	"GetCursorPosition",                        -- card drag-and-drop reordering (ui_main)
+	"Minimap",                                  -- minimap button ring anchor (minimap)
 	"RAID_CLASS_COLORS", "LOCALIZED_CLASS_NAMES_MALE",  -- class color + display name (ui_main)
 	"CreateColor",                              -- gradient backdrop/buttons (ui_main)
 	"C_AddOns", "GetAddOnMetadata",             -- version string in the window footer (ui_main)

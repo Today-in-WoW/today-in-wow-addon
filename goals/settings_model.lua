@@ -81,6 +81,12 @@ function ns.Goals.SettingsModel()
 			set = function(v) ns.Goals.UIPanel.SetShown(v) end,
 		},
 		{
+			kind = "checkbox", key = "TIW_SHOW_MINIMAP", label = "Show minimap button",
+			tooltip = "Show the Today in WoW button on the minimap (left-click opens the window).",
+			get = function() return ns.Goals.Minimap and ns.Goals.Minimap.IsShown() end,
+			set = function(v) if ns.Goals.Minimap then ns.Goals.Minimap.SetShown(v) end end,
+		},
+		{
 			kind = "checkbox", key = "TIW_HIDE_DONE_STEPS", label = "Hide completed steps",
 			tooltip = "On the tracker, hide a goal's finished steps (the goal's count still shows the total).",
 			get = function() return ns.Goals.GetPref("hideCompletedSteps") end,

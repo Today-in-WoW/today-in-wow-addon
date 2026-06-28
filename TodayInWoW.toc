@@ -52,6 +52,7 @@ goals\ui_panel.lua
 goals\ui_matrix.lua
 goals\ui_options.lua
 goals\ui_main.lua
+goals\minimap.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua
 goals\evaluators\currency.lua
