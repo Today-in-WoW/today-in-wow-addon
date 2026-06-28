@@ -94,6 +94,14 @@ function ns.Goals.SettingsModel()
 			get = function() return ns.Goals.GetPref("hideCompletedGoals") end,
 			set = function(v) ns.Goals.SetPref("hideCompletedGoals", v) end,
 		},
+		{
+			kind = "slider", key = "TIW_STEP_PREVIEW", label = "Steps shown",
+			tooltip = "How many of a goal's steps the tracker shows before a clickable "
+				.. "\"... N more\" expander. Same setting as Edit Mode's Steps shown slider.",
+			min = 2, max = 30, step = 1,
+			get = function() return ns.Goals.UIPanel.GetStepPreview() end,
+			set = function(v) ns.Goals.UIPanel.SetStepPreview(v) end,
+		},
 		{ kind = "note", text = EDITMODE_NOTE },
 
 		{ kind = "header", text = "Style Settings" },

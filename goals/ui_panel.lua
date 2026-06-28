@@ -43,6 +43,8 @@ local DEFAULT_BG_OPACITY = 0.4              -- black backdrop alpha (0 = fully t
 local MIN_WIDTH, MAX_WIDTH = 180, 520
 local MIN_MAX_HEIGHT, MAX_MAX_HEIGHT = 120, 1000
 local SIZE_STEP = 5                         -- slider step; corner-drag rounds to it
+local DEFAULT_STEP_PREVIEW = 4              -- steps shown before a goal's "… N more" row
+local MIN_STEP_PREVIEW, MAX_STEP_PREVIEW = 2, 30
 
 -- Content layout metrics.
 local PAD = 8          -- top/bottom inner padding
@@ -112,6 +114,26 @@ local function applyWidth(layoutName)
 	frame:SetWidth(cfg(layoutName).width or DEFAULT_WIDTH)
 end
 
+-- How many step lines a goal previews before the "… N more" expander. A GLOBAL
+-- display pref (not per-layout) — surfaced in BOTH Edit Mode and the addon
+-- Settings (Goal Settings), so it's stored under TiWDB.settings, not cfg().
+local function stepPreview()
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	return TiWDB.settings.stepPreview or DEFAULT_STEP_PREVIEW
+end
+
+function Panel.GetStepPreview() return stepPreview() end
+
+function Panel.SetStepPreview(value)
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	value = math.max(MIN_STEP_PREVIEW, math.min(MAX_STEP_PREVIEW,
+		math.floor((tonumber(value) or DEFAULT_STEP_PREVIEW) + 0.5)))
+	TiWDB.settings.stepPreview = value
+	if frame then rebuild() end
+end
+
 local function applyBackground(layoutName)
 	if not frame then return end
 	frame.bg:SetColorTexture(0, 0, 0, cfg(layoutName).bgOpacity or DEFAULT_BG_OPACITY)
@@ -143,7 +165,11 @@ end
 local function onResizeStop()
 	if not frame then return end
 	frame:StopMovingOrSizing()
-	cfg().width = roundStep(frame:GetWidth())
+	local c = cfg()
+	c.width = roundStep(frame:GetWidth())
+	-- The corner handle also sets Max Height; rebuild then auto-fits within it
+	-- (so a short list still shrinks to its content, a long one scrolls).
+	c.maxHeight = math.min(MAX_MAX_HEIGHT, math.max(MIN_MAX_HEIGHT, roundStep(frame:GetHeight())))
 	applyPosition()
 	rebuild()
 	local lem = editMode()
@@ -205,6 +231,15 @@ local function sizeSettings(lem)
 				if frame then rebuild() end
 			end,
 		},
+		{
+			kind = lem.SettingType.Slider,
+			name = "Steps shown",   -- preview count before a goal's "… N more" row
+			default = DEFAULT_STEP_PREVIEW,
+			minValue = MIN_STEP_PREVIEW, maxValue = MAX_STEP_PREVIEW, valueStep = 1,
+			-- Global pref (not per-layout); same value the Goal Settings panel edits.
+			get = function() return Panel.GetStepPreview() end,
+			set = function(_, value) Panel.SetStepPreview(value) end,
+		},
 	}
 end
 
@@ -248,6 +283,19 @@ local function toggleCollapse(id, done)
 	local c = cfg()
 	c.collapsed = c.collapsed or {}
 	c.collapsed[id] = not isCollapsed(id, done)
+end
+
+-- Per-goal "show all steps" state. A long step list previews the first few (see
+-- stepPreview) and hides the rest behind a "… N more" row; this remembers which
+-- goals the user expanded (persisted per layout, like `collapsed`).
+local function isStepsExpanded(id)
+	local c = cfg()
+	return (c.stepsExpanded and c.stepsExpanded[id]) == true
+end
+local function toggleStepsExpanded(id)
+	local c = cfg()
+	c.stepsExpanded = c.stepsExpanded or {}
+	c.stepsExpanded[id] = (not isStepsExpanded(id)) or nil
 end
 
 local function newHeader()
@@ -320,6 +368,7 @@ local function newLine()
 
 	fr:SetScript("OnEnter", function(self) if self.tooltip then tooltipShow(self, self.tooltip) end end)
 	fr:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	fr:SetScript("OnMouseUp", function(self) if self.onClick then self.onClick() end end)
 	return fr
 end
 
@@ -375,7 +424,11 @@ local function configHeader(b, g, y, contentW)
 	b.label:ClearAllPoints()
 	b.label:SetPoint("TOPLEFT", labelX, -1)
 	b.label:SetWidth(contentW - labelX - 2)
-	b.label:SetText("|c" .. nameColor .. tostring(g.name) .. "|r  |cff9d9d9d" .. count .. "|r")
+	-- Resolve [item=…]/[currency=…]/… in the title too (the same way step lines do),
+	-- so a goal named "[item=257156] and …" shows the real icon + name.
+	local headerStr = "|c" .. nameColor .. tostring(g.name) .. "|r  |cff9d9d9d" .. count .. "|r"
+	if ns.Goals.Links then ns.Goals.Links.render(b, b.label, headerStr)
+	else b.label:SetText(headerStr) end
 
 	local h = math.max(HEADER_H, math.ceil(b.label:GetStringHeight()) + 4)
 	b:ClearAllPoints()
@@ -389,6 +442,7 @@ end
 local function configStep(fr, step, y, contentW)
 	local r = step.result
 	local done = r and r.done
+	fr.onClick = nil
 	fr.check:SetShown(done)
 	fr.mark:SetShown(not done)
 
@@ -424,10 +478,29 @@ local function configStep(fr, step, y, contentW)
 	return h
 end
 
+-- A clickable "… N more" / "show less" row that previews vs expands a goal's long
+-- step list. Styled like the muted "Next:" hint; toggles the per-goal expand state.
+local function configMore(fr, goalId, label, y, contentW)
+	fr.check:Hide(); fr.mark:Hide(); fr.icon:Hide()
+	fr.tooltip = nil
+	fr.onClick = function() toggleStepsExpanded(goalId); rebuild() end
+	fr:EnableMouse(true)
+	fr.text:ClearAllPoints()
+	fr.text:SetPoint("TOPLEFT", INDENT, 0)
+	fr.text:SetWidth(contentW - INDENT - 2)
+	fr.text:SetText(label)
+	fr.text:SetTextColor(0.5, 0.78, 1)
+	local h = math.max(LINE_H, math.ceil(fr.text:GetStringHeight()) + 2)
+	fr:ClearAllPoints()
+	fr:SetPoint("TOPLEFT", 0, y)
+	fr:SetSize(contentW, h)
+	return h
+end
+
 -- A plain text row (empty state, next-character hint): no marker/icon. Returns height.
 local function configText(fr, str, x, cr, cg, cb, y, contentW)
 	fr.check:Hide(); fr.mark:Hide(); fr.icon:Hide()
-	fr.tooltip = nil; fr:EnableMouse(false)
+	fr.tooltip = nil; fr.onClick = nil; fr:EnableMouse(false)
 	fr.text:ClearAllPoints()
 	fr.text:SetPoint("TOPLEFT", x, 0)
 	fr.text:SetWidth(contentW - x - 2)
@@ -476,8 +549,19 @@ function rebuild()
 		for _, g in ipairs(vm.goals) do
 			y = y - configHeader(acquireHeader(), g, y, contentW)
 			if not isCollapsed(g.id, g.state == "done") then
-				for _, step in ipairs(g.steps) do
-					y = y - configStep(acquireLine(), step, y, contentW)
+				-- Long step lists preview the first few; the rest hide behind a
+				-- clickable "… N more" row (per-goal expand).
+				local n = #g.steps
+				local limit = stepPreview()
+				local expanded = isStepsExpanded(g.id)
+				local shown = (n > limit and not expanded) and limit or n
+				for i = 1, shown do
+					y = y - configStep(acquireLine(), g.steps[i], y, contentW)
+				end
+				if n > limit then
+					local label = expanded and "show less"
+						or ("… " .. (n - limit) .. " more")
+					y = y - configMore(acquireLine(), g.id, label, y, contentW)
 				end
 				if g.nextAlt then
 					y = y - configText(acquireLine(),
@@ -490,9 +574,13 @@ function rebuild()
 	end
 	local contentH = math.max(LINE_H, -y)
 
-	-- Auto-fit up to the max; overflow becomes scroll range.
+	-- Auto-fit up to the max; overflow becomes scroll range. EXCEPT in Edit Mode:
+	-- hold the full Max Height so the corner handle can size past the current list
+	-- (otherwise the frame re-fits to content and the drag appears to snap back).
+	local lem = editMode()
+	local inEdit = not not (lem and lem:IsInEditMode())
 	local viewportMax = math.max(LINE_H, maxHeight - topOffset - PAD)
-	local viewportH = math.min(contentH, viewportMax)
+	local viewportH = inEdit and viewportMax or math.min(contentH, viewportMax)
 	local range = math.max(0, contentH - viewportH)
 	frame:SetHeight(topOffset + viewportH + PAD)
 
@@ -537,8 +625,9 @@ local function build()
 	f:SetFrameStrata("MEDIUM")
 	f:SetResizable(true)
 	if f.SetResizeBounds then
-		-- Height is auto-fit, so leave it effectively unconstrained.
-		f:SetResizeBounds(MIN_WIDTH, 1, MAX_WIDTH, 10000)
+		-- The corner handle drives width + max height; clamp the live drag to the
+		-- same ranges as the sliders (onResizeStop rounds/clamps on release).
+		f:SetResizeBounds(MIN_WIDTH, MIN_MAX_HEIGHT, MAX_WIDTH, MAX_MAX_HEIGHT)
 	end
 	-- Blizzard Objective-Tracker style: no border. A black fill whose opacity is
 	-- an Edit Mode setting (default semi-transparent for readability; 0 = clear).
@@ -579,17 +668,18 @@ local function build()
 	sb:Hide()
 	f.scrollbar, f.scrollThumb = sb, thumb
 
-	-- Right-edge width handle, shown only in Edit Mode (see applyVisibility).
+	-- Bottom-right corner handle (width + max height), shown only in Edit Mode
+	-- (see applyVisibility).
 	local grabber = CreateFrame("Button", nil, f)
 	grabber:SetSize(16, 16)
 	grabber:SetPoint("BOTTOMRIGHT", -4, 4)
 	-- Above LibEditMode's selection overlay (a same-strata child added later),
-	-- so the click resizes the width instead of starting a move-drag.
+	-- so the click resizes the frame instead of starting a move-drag.
 	grabber:SetFrameStrata("HIGH")
 	grabber:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	grabber:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	grabber:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-	grabber:SetScript("OnMouseDown", function() f:StartSizing("RIGHT") end)
+	grabber:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
 	grabber:SetScript("OnMouseUp", onResizeStop)
 	grabber:Hide()
 	f.grabber = grabber
