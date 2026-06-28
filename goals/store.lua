@@ -164,6 +164,25 @@ function Store.setChars(id, chars)
 	return true
 end
 
+-- Per-step ignore (account-wide): an unchecked step is excluded from the goal as
+-- if it didn't exist — out of every aggregate (done/total) and off the pinned
+-- HUD, on every character. Keyed by top-level step index (like `unsupported`).
+-- state[id].ignored = { [index] = true }; absent/false means included.
+local EMPTY = {}
+function Store.setIgnored(id, index, on)
+	local st = ns.Goals.db.state[id]
+	if not st then return nil, "not installed" end
+	st.ignored = st.ignored or {}
+	st.ignored[index] = on and true or nil
+	return true
+end
+
+-- The ignored-index set for a goal (a shared empty table when none) — read-only.
+function Store.ignoredSet(id)
+	local st = ns.Goals.db.state[id]
+	return (st and st.ignored) or EMPTY
+end
+
 -- Drag-reorder / move: assign the given ids, in order, to the `pinned` section
 -- (renumbering them 1..N) and set their pinned flag to match — so this one call
 -- handles both within-section reordering and dragging a card across sections.

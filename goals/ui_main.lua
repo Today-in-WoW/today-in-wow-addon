@@ -71,6 +71,8 @@ local SEC_LABEL_H = 26          -- section-label row height
 local SCROLL_STEP = 32          -- pixels per mouse-wheel notch
 local DEFAULT_ICON = 134400     -- inv_misc_questionmark, per the brief
 local DEFAULT_FONT_SIZE = 13    -- detail step-list base text size (scaled by window scale)
+local STEP_CB = 16              -- per-step include checkbox footprint
+local STEP_CB_SHIFT = 18        -- right-shift of marker/label to clear the checkbox
 local DEFAULT_WINDOW_SCALE = 1  -- whole-window scale (Settings-adjustable)
 local MIN_WINDOW_SCALE, MAX_WINDOW_SCALE = 0.8, 1.5
 
@@ -678,8 +680,34 @@ local function newStepRow(parent)
 	bar:SetPoint("TOPLEFT"); bar:SetPoint("BOTTOMLEFT")
 	bar:SetWidth(3)
 	fr.bar = bar
+
+	-- Include checkbox: checked (default) keeps the step in the goal; unchecking
+	-- excludes it account-wide (out of the count + off the HUD). configStep wires
+	-- fr.goalId / fr.stepIndex before this fires.
+	local cb = CreateFrame("CheckButton", nil, fr)
+	cb:SetSize(STEP_CB, STEP_CB)
+	cb:SetPoint("TOPLEFT", 8, -1)
+	cb:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+	cb:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+	cb:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+	cb:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+	cb:SetScript("OnClick", function(self)
+		-- CheckButton has already flipped its state: checked == keep the step.
+		ns.Goals.Store.setIgnored(fr.goalId, fr.stepIndex, not self:GetChecked())
+		if ns.Goals.Engine and ns.Goals.Engine.rerender then ns.Goals.Engine.rerender() end
+	end)
+	cb:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(self:GetChecked()
+			and "Tracked — uncheck to drop this step from the goal"
+			or "Skipped — check to count this step again", 1, 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	fr.cb = cb
+
 	local mark = fr:CreateTexture(nil, "ARTWORK")
-	mark:SetPoint("TOPLEFT", 12, -1)
+	mark:SetPoint("TOPLEFT", 12 + STEP_CB_SHIFT, -1)
 	fr.mark = mark
 	local label = fr:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 	label:SetJustifyH("LEFT"); label:SetWordWrap(true)
@@ -705,15 +733,23 @@ local function stepSubtitle(step)
 end
 
 local function configStep(fr, step, y, width, size, active)
+	-- An excluded (unchecked) step still shows here so it can be re-enabled, but
+	-- de-emphasized and out of the active/done styling — it doesn't count.
+	local ignored = step.ignored
+	active = active and not ignored
 	local r = step.result
-	local done = r and r.done
-	local stale = r and r.stale and not done
+	local done = (not ignored) and r and r.done
+	local stale = (not ignored) and r and r.stale and not done
 	local state = done and "done" or (active and "active") or "pending"
+
+	fr.stepIndex = step.index
+	fr.cb:SetChecked(not ignored)
 
 	local bar = done and GREEN or (active and GOLD) or (stale and AMBER) or { 1, 1, 1, 0.10 }
 	fr.bar:SetColorTexture(bar[1], bar[2], bar[3], bar[4] or 1)
 	fr.rowbg:SetShown(active)
 
+	fr.mark:SetShown(not ignored)
 	fr.mark:SetTexture(MARK[done and "done" or (active and "active") or "pending"])
 	fr.mark:SetSize(size + 1, size + 1)
 	fr.mark:SetAlpha(state == "pending" and 0.5 or 1)
@@ -722,11 +758,12 @@ local function configStep(fr, step, y, width, size, active)
 	local file, _, flags = fr.label:GetFont()
 	fr.label:SetFont(file, size, flags)
 	fr.label:ClearAllPoints()
-	fr.label:SetPoint("TOPLEFT", size + 18, -1)
-	fr.label:SetWidth(width - size - 70)
+	fr.label:SetPoint("TOPLEFT", size + 18 + STEP_CB_SHIFT, -1)
+	fr.label:SetWidth(width - size - 70 - STEP_CB_SHIFT)
 	if ns.Goals.Links then ns.Goals.Links.render(fr, fr.label, tostring(step.label))
 	else fr.label:SetText(tostring(step.label)) end
-	if done then fr.label:SetTextColor(0.55, 0.55, 0.55)
+	if ignored then fr.label:SetTextColor(0.42, 0.42, 0.45)
+	elseif done then fr.label:SetTextColor(0.55, 0.55, 0.55)
 	elseif active then fr.label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
 	elseif stale then fr.label:SetTextColor(AMBER[1], AMBER[2], AMBER[3])
 	else fr.label:SetTextColor(0.62, 0.62, 0.64) end
@@ -745,11 +782,14 @@ local function configStep(fr, step, y, width, size, active)
 	local subtext = stepSubtitle(step)
 	fr.sub:ClearAllPoints()
 	fr.sub:SetPoint("TOPLEFT", fr.label, "BOTTOMLEFT", 0, -2)
-	fr.sub:SetText(subtext)
+	-- Resolve [item=…]/[currency=…]/… in the note line too (e.g. "Unlock: 75x
+	-- [currency=3258]"), the same way the label above renders them.
+	if ns.Goals.Links then ns.Goals.Links.render(fr, fr.sub, subtext)
+	else fr.sub:SetText(subtext) end
 	fr.sub:SetShown(subtext ~= "")
 
 	-- Right-aligned progress (n/m).
-	if r and r.progress then
+	if (not ignored) and r and r.progress then
 		fr.prog:ClearAllPoints()
 		fr.prog:SetPoint("TOPRIGHT", -2, -2)
 		local pcol = done and GREEN or GOLD
@@ -869,8 +909,10 @@ function renderDetail(entry)
 		local fr = G.steps[n]
 		if not fr then fr = newStepRow(sc); G.steps[n] = fr end
 		fr:Show()
+		fr.goalId = entry.id
 		local done = step.result and step.result.done
-		local active = (not done) and (not firstIncompleteSeen)
+		-- Excluded steps never claim the "active" (next-up) highlight.
+		local active = (not done) and (not step.ignored) and (not firstIncompleteSeen)
 		if active then firstIncompleteSeen = true end
 		y = y - configStep(fr, step, y, width, size, active) - 4
 	end

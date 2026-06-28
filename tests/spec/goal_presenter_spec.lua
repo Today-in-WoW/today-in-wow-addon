@@ -343,6 +343,61 @@ describe("Presenter.pinned — completed-step/goal hiding (display prefs)", func
 	end)
 end)
 
+describe("Presenter — account-wide ignored steps (per-step checkbox)", function()
+	local function gTwo()
+		return { v = 1, id = "g:two", rev = 1, name = "Two Steps", scope = "perchar",
+			steps = {
+				{ label = "A", evaluator = "flag", params = { quest = 1 } },
+				{ label = "B", evaluator = "flag", params = { quest = 2 } },
+			} }
+	end
+	local twoRows = function()
+		return {
+			row("g:two", 1, "A", { done = true }),
+			row("g:two", 2, "B", { done = false }),
+		}
+	end
+
+	it("pinned: an ignored step leaves the aggregate AND the HUD step list", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gTwo()); S.setPinned("g:two", true)
+		S.setIgnored("g:two", 2, true)                   -- drop the unfinished step
+		local g = ns.Goals.Presenter.pinned(twoRows()).goals[1]
+		assert.equal(1, g.done)
+		assert.equal(1, g.total)                         -- 1/1, not 1/2
+		assert.equal("done", g.state)                    -- only step A counts, and it's done
+		assert.equal(1, #g.steps)                        -- ignored step is gone from the HUD
+		assert.equal("A", g.steps[1].label)
+	end)
+
+	it("library: the detail keeps the ignored step (tagged), but it's out of the count", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gTwo())                                -- available section
+		S.setIgnored("g:two", 2, true)
+		local entry = ns.Goals.Presenter.library(twoRows()).available[1]
+		assert.equal(2, #entry.steps)                    -- both rows still shown (for the checkbox)
+		assert.is_true(entry.steps[2].ignored)
+		assert.is_nil(entry.steps[1].ignored or nil)     -- step A still tracked
+		assert.equal(1, entry.total)                     -- but the count excludes B
+		assert.equal(1, entry.done)
+	end)
+
+	it("matrix: the current cell count drops the ignored step", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gTwo())
+		S.setIgnored("g:two", 2, true)
+		local c = ns.Goals.Presenter.matrix({
+			row("g:two", 1, "A", { done = true }),
+			row("g:two", 2, "B", { done = true }),
+		}).goals[1].cells[ME]
+		assert.equal(1, c.done)
+		assert.equal(1, c.total)                         -- 1/1, not 2/2
+	end)
+end)
+
 -- ===========================================================================
 -- Presenter.matrix
 -- ===========================================================================

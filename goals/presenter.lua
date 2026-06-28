@@ -80,12 +80,13 @@ local function goalLevelDone(goal)
 	return r ~= nil and r.done == true
 end
 
--- Is an offline character's goal fully done? All ELIGIBLE steps complete (and at
--- least one such step). The §3 reset/stale handling already happened in Offline.
-local function offlineComplete(g)
+-- Is an offline character's goal fully done? All ELIGIBLE, non-ignored steps
+-- complete (and at least one such step). The §3 reset/stale handling already
+-- happened in Offline. `ignored` is the goal's account-wide ignored-index set.
+local function offlineComplete(g, ignored)
 	local any = false
 	for _, row in ipairs(g.steps) do
-		if not row.ineligible then
+		if not row.ineligible and not (ignored and ignored[row.index]) then
 			any = true
 			local r = row.result
 			if not (r and r.done) then return false end
@@ -145,11 +146,16 @@ local function groupByGoal(flatVM)
 	return byId
 end
 
--- Current character's step results for one goal, from the threaded flatVM.
-local function currentResults(rows)
-	local results = {}
-	for i = 1, #(rows or {}) do results[i] = rows[i].result end
-	return results
+-- Step results for a goal aggregate, EXCLUDING account-wide ignored steps (and,
+-- for offline rows, `require`-ineligible ones). Works for both the threaded
+-- flatVM rows (current char) and Offline.goalFor rows — both carry `.index`.
+local function effectiveResults(goalId, rows)
+	local ignored = ns.Goals.Store.ignoredSet(goalId)
+	local out = {}
+	for _, r in ipairs(rows or {}) do
+		if not r.ineligible and not ignored[r.index] then out[#out + 1] = r.result end
+	end
+	return out
 end
 
 -- Does the live (current) character know the profession `id` (skillLineID)?
@@ -177,11 +183,14 @@ end
 -- (§2): when true, steps render struck (result forced done) so a done goal isn't
 -- an active checklist under a 1/1 header. nextAlt is added by the caller.
 local function goalEntry(goal, rows, goalDone)
-	local agg = aggregate(currentResults(rows), currentEligible(goal), goalDone)
+	local agg = aggregate(effectiveResults(goal.id, rows), currentEligible(goal), goalDone)
+	local ignored = ns.Goals.Store.ignoredSet(goal.id)
 	local steps = {}
 	for i = 1, #(rows or {}) do
-		local def = goal.steps[rows[i].index] or {}
-		steps[i] = { label = rows[i].label,
+		local idx = rows[i].index
+		local def = goal.steps[idx] or {}
+		steps[i] = { index = idx, ignored = ignored[idx] == true,
+		             label = rows[i].label,
 		             result = goalDone and { done = true } or rows[i].result,
 		             icon = def.icon, tooltip = def.tooltip,
 		             note = def.note, resets = def.resets }
@@ -201,10 +210,11 @@ end
 -- goal, or when no such character exists.
 local function nextAltFor(goal, st, goalDone, current)
 	if goal.scope == "account" or goalDone then return nil end
+	local ignored = ns.Goals.Store.ignoredSet(goal.id)
 	for _, key in ipairs(ns.Goals.Store.chars()) do
 		if key ~= current and isAssigned(st.chars, key) then
 			local g = ns.Goals.Offline.goalFor(key, goal)
-			if not g.noData and g.eligible and not offlineComplete(g) then
+			if not g.noData and g.eligible and not offlineComplete(g, ignored) then
 				return key
 			end
 		end
@@ -239,6 +249,17 @@ local function dropDoneSteps(entry)
 	entry.steps = kept
 end
 
+-- Drop account-wide ignored steps: on the HUD an unchecked step doesn't exist
+-- (it's already out of the aggregate computed in goalEntry). The detail window
+-- keeps them — that's where their checkbox lives — so this is HUD-only.
+local function dropIgnoredSteps(entry)
+	local kept = {}
+	for _, s in ipairs(entry.steps) do
+		if not s.ignored then kept[#kept + 1] = s end
+	end
+	entry.steps = kept
+end
+
 -- The always-on panel. Returns { goals = { <goalEntry> + nextAlt, ... } } —
 -- pinned && active && in-season goals only, in display order (Store.ordered).
 -- Two display prefs shape it: "Hide completed goals" — a goal done on the CURRENT
@@ -262,6 +283,7 @@ function Presenter.pinned(flatVM)
 			-- done here + nobody else needs it -> hidden; done here + an alt needs it
 			-- -> kept but demoted to the bottom (store order is untouched).
 			if not (doneHere and not entry.nextAlt) then
+				dropIgnoredSteps(entry)
 				if hideSteps then dropDoneSteps(entry) end
 				if doneHere then
 					demoted[#demoted + 1] = entry
@@ -343,7 +365,7 @@ function Presenter.matrix(flatVM)
 		local goal = rec.goal
 		local goalDone = goalLevelDone(goal)
 		local currentCell = aggregate(
-			currentResults(byId[goal.id]), currentEligible(goal), goalDone)
+			effectiveResults(goal.id, byId[goal.id]), currentEligible(goal), goalDone)
 
 		local cells = {}
 		for _, col in ipairs(chars) do
@@ -365,11 +387,7 @@ function Presenter.matrix(flatVM)
 				if g.noData then
 					cells[key] = { state = "nodata" }
 				else
-					local results = {}
-					for _, row in ipairs(g.steps) do
-						if not row.ineligible then results[#results + 1] = row.result end
-					end
-					cells[key] = aggregate(results, g.eligible, goalDone)
+					cells[key] = aggregate(effectiveResults(goal.id, g.steps), g.eligible, goalDone)
 				end
 			end
 		end
@@ -398,7 +416,7 @@ function Presenter.goalChars(flatVM, goalId)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
 	local goalDone = goalLevelDone(goal)
-	local currentCell = aggregate(currentResults(byId[goalId]), currentEligible(goal), goalDone)
+	local currentCell = aggregate(effectiveResults(goalId, byId[goalId]), currentEligible(goal), goalDone)
 
 	-- Assigned columns: current first (when assigned), then id-sorted others —
 	-- known substrate characters plus any explicitly-assigned-but-unseen alt.
@@ -436,11 +454,7 @@ function Presenter.goalChars(flatVM, goalId)
 			if g.noData then
 				cell = { state = "nodata" }
 			else
-				local results = {}
-				for _, r in ipairs(g.steps) do
-					if not r.ineligible then results[#results + 1] = r.result end
-				end
-				cell = aggregate(results, g.eligible, goalDone)
+				cell = aggregate(effectiveResults(goalId, g.steps), g.eligible, goalDone)
 			end
 		end
 		local class

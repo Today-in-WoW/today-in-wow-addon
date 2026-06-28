@@ -152,6 +152,22 @@ describe("store list / get / remove / assignment", function()
 		S.setChars("tiw:dev-mount", "all")
 		assert.equal("all", TiWDB.goals.state["tiw:dev-mount"].chars)
 	end)
+
+	it("setIgnored / ignoredSet toggles a step's account-wide exclusion by index", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		assert.same({}, S.ignoredSet("tiw:dev-mount"))        -- nothing ignored by default
+
+		S.setIgnored("tiw:dev-mount", 2, true)
+		assert.is_true(S.ignoredSet("tiw:dev-mount")[2])
+		assert.is_nil(S.ignoredSet("tiw:dev-mount")[1])
+
+		S.setIgnored("tiw:dev-mount", 2, false)               -- re-include clears the key
+		assert.is_nil(S.ignoredSet("tiw:dev-mount")[2])
+
+		assert.is_nil((S.setIgnored("nope", 1, true)))        -- unknown id → nil, err
+	end)
 end)
 
 describe("store ordering (display order for the goals window + matrix)", function()
