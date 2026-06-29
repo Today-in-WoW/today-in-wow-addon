@@ -54,6 +54,7 @@ local CHEVRON_W = 14   -- collapse +/- button gutter in a header row
 local ICON = 16        -- goal icon size
 local INDENT = 22      -- step text indent within a step row (marker sits left of it)
 local HEADER_H = 20    -- minimum header row height
+local HEADER_BAND = 32 -- master header band height (Blizzard ObjectiveTracker header = 32)
 local LINE_H = 16      -- minimum step row height
 local SB_W = 12        -- scrollbar gutter width (reserved on the chosen side)
 local SCROLL_STEP = 24 -- pixels per mouse-wheel notch
@@ -131,6 +132,21 @@ function Panel.SetStepPreview(value)
 	value = math.max(MIN_STEP_PREVIEW, math.min(MAX_STEP_PREVIEW,
 		math.floor((tonumber(value) or DEFAULT_STEP_PREVIEW) + 0.5)))
 	TiWDB.settings.stepPreview = value
+	if frame then rebuild() end
+end
+
+-- Master collapse: minimized = show only the header bar (Objective-Tracker
+-- "All Objectives" style). A GLOBAL UI preference, like trackerShown.
+local function isMinimized()
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	return TiWDB.settings.trackerMinimized == true
+end
+
+local function setMinimized(v)
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	TiWDB.settings.trackerMinimized = not not v
 	if frame then rebuild() end
 end
 
@@ -534,10 +550,31 @@ function rebuild()
 	local usableRight = (side == "LEFT") and ROW_X or (ROW_X + SB_W)
 	local contentW = width - usableLeft - usableRight
 
-	-- Fixed master header; the goal list scrolls below it.
-	frame.title:ClearAllPoints()
-	frame.title:SetPoint("TOPLEFT", ROW_X, -PAD)
-	local topOffset = PAD + math.ceil(frame.title:GetStringHeight()) + 6
+	-- Fixed master header band; the goal list scrolls below it. Swap the minimize
+	-- button between Blizzard's collapse-all / expand-all atlases per state.
+	local minimized = isMinimized()
+	if minimized then
+		frame.minBtn:SetNormalAtlas("ui-questtrackerbutton-expand-all")
+		frame.minBtn:SetPushedAtlas("ui-questtrackerbutton-expand-all-pressed")
+	else
+		frame.minBtn:SetNormalAtlas("ui-questtrackerbutton-collapse-all")
+		frame.minBtn:SetPushedAtlas("ui-questtrackerbutton-collapse-all-pressed")
+	end
+	local topOffset = HEADER_BAND + 2
+
+	-- Collapsed: render only the header band. In Edit Mode stay expanded so the
+	-- corner handle can still size the frame (minimize applies once you leave it).
+	local lem = editMode()
+	local inEdit = not not (lem and lem:IsInEditMode())
+	if minimized and not inEdit then
+		frame.scrollFrame:Hide()
+		frame.scrollbar:Hide()
+		for i = 1, #headers do headers[i]:Hide() end
+		for i = 1, #lines do lines[i]:Hide() end
+		frame:SetHeight(HEADER_BAND)
+		return
+	end
+	frame.scrollFrame:Show()
 
 	-- Lay the rows into the scroll child (y descends from 0 at its top).
 	local y = 0
@@ -577,8 +614,6 @@ function rebuild()
 	-- Auto-fit up to the max; overflow becomes scroll range. EXCEPT in Edit Mode:
 	-- hold the full Max Height so the corner handle can size past the current list
 	-- (otherwise the frame re-fits to content and the drag appears to snap back).
-	local lem = editMode()
-	local inEdit = not not (lem and lem:IsInEditMode())
 	local viewportMax = math.max(LINE_H, maxHeight - topOffset - PAD)
 	local viewportH = inEdit and viewportMax or math.min(contentH, viewportMax)
 	local range = math.max(0, contentH - viewportH)
@@ -635,10 +670,47 @@ local function build()
 	bg:SetAllPoints()
 	f.bg = bg
 
-	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalMed2")
-	title:SetPoint("TOPLEFT", ROW_X, -PAD)
-	title:SetText("Today in WoW")
+	-- Master header, mimicking Blizzard's ObjectiveTrackerContainerHeaderTemplate
+	-- (atlas/font names from Blizzard_ObjectiveTrackerContainer.xml): the gold
+	-- "primary objective header" atlas band, the ObjectiveTrackerHeaderFont title
+	-- ("Goal Tracking") with a smaller "Today in WoW" beside it, and the red
+	-- collapse-all minimize button on the right.
+	local header = CreateFrame("Frame", nil, f)
+	header:SetPoint("TOPLEFT", 0, 0)
+	header:SetPoint("TOPRIGHT", 0, 0)
+	header:SetHeight(HEADER_BAND)
+	f.header = header
+
+	local hbg = header:CreateTexture(nil, "ARTWORK")
+	hbg:SetAtlas("ui-questtracker-primary-objective-header")   -- stretched to width
+	hbg:SetAllPoints()
+	f.headerBg = hbg
+
+	local title = header:CreateFontString(nil, "OVERLAY")
+	title:SetFontObject(_G.ObjectiveTrackerHeaderFont or _G.GameFontNormalLarge)
+	title:SetPoint("LEFT", 7, 0)               -- Blizzard header Text anchor
+	title:SetText("Goal Tracking")
 	f.title = title
+
+	local subtitle = header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	subtitle:SetPoint("LEFT", title, "RIGHT", 6, -1)
+	subtitle:SetText("Today in WoW")
+	f.subtitle = subtitle
+
+	local minBtn = CreateFrame("Button", nil, header)
+	minBtn:SetSize(24, 24)
+	minBtn:SetPoint("RIGHT", -2, 0)
+	minBtn:RegisterForClicks("LeftButtonUp")
+	minBtn:SetHighlightAtlas("ui-questtrackerbutton-red-highlight")
+	if minBtn:GetHighlightTexture() then minBtn:GetHighlightTexture():SetBlendMode("ADD") end
+	minBtn:SetScript("OnClick", function() setMinimized(not isMinimized()) end)
+	minBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:SetText(isMinimized() and "Expand" or "Collapse", 1, 1, 1)
+		GameTooltip:Show()
+	end)
+	minBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	f.minBtn = minBtn
 
 	-- Scrollable viewport for the goal list (rebuild positions/sizes it). The
 	-- rows are pooled children of the scroll child; mouse-wheel scrolls.
