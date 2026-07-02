@@ -522,7 +522,8 @@ local function layoutGrid(entries, startY, numCols, outItems)
 		local c = acquireGrid()
 		c.goalId, c.pinned, c.tooltip = e.id, true, e.tooltip
 		setIcon(c.icon, e.icon)
-		c.name:SetText(e.name)
+		if ns.Goals.Links then ns.Goals.Links.render(c, c.name, e.name)
+		else c.name:SetText(e.name) end
 		markGrid(c, e.id == selectedId)
 		c:SetAlpha(1)
 		c:ClearAllPoints()
@@ -540,7 +541,8 @@ local function layoutList(entries, startY, width, outItems)
 		local r = acquireList()
 		r.goalId, r.pinned, r.tooltip = e.id, false, e.tooltip
 		setIcon(r.icon, e.icon)
-		r.nameFS:SetText(e.name)
+		if ns.Goals.Links then ns.Goals.Links.render(r, r.nameFS, e.name)
+		else r.nameFS:SetText(e.name) end
 		r.cat:SetText(e.category or "")
 		markList(r, e.id == selectedId)
 		r:SetAlpha(1)
@@ -865,7 +867,9 @@ function renderDetail(entry)
 	G.dScroll.sf:Show()
 
 	-- Header: title + category breadcrumb.
-	G.dTitle:SetText(entry.name); G.dTitle:Show()
+	if ns.Goals.Links then ns.Goals.Links.render(G.detail, G.dTitle, entry.name)
+	else G.dTitle:SetText(entry.name) end
+	G.dTitle:Show()
 	if entry.category and entry.category ~= "" then
 		G.dCat:SetText(entry.category); G.dCat:Show()
 	else
@@ -1374,7 +1378,9 @@ local function renderCatalogDetail(e)
 	C.dHint:Hide()
 
 	C.dIcon:Show(); C.dIconBorder:Show(); setIcon(C.dIcon, e.icon)
-	C.dName:Show(); C.dName:SetText(e.name or "")
+	C.dName:Show()
+	if ns.Goals.Links then ns.Goals.Links.render(C.detail, C.dName, e.name or "")
+	else C.dName:SetText(e.name or "") end
 	C.dTag:Show(); C.dTag:SetText(e.tag or "")
 
 	local headerH = math.max(50, (C.dName:GetStringHeight() or 16) + 6 + (C.dTag:GetStringHeight() or 12) + 4)
