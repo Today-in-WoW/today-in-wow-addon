@@ -46,6 +46,7 @@ local closeOpenDropdown     -- closes the open settings dropdown (overlay), if a
 local onItemDragStart, onItemDragStop   -- assigned below; builders wire them
 local dragState             -- active drag { id, pinned }, or nil
 local importFrame           -- import modal, built on first use
+local libraryFrame          -- Goal Library popup, built on first use
 
 -- Browse Catalog state + forward declarations.
 local catBucket             -- selected sidebar bucket key
@@ -122,23 +123,23 @@ local C_HEAD_H   = 92    -- center header band (title + subtitle + search)
 
 -- Goal-level status badge: aggregate state -> { text, color }.
 local BADGE = {
-	done       = { "COMPLETE",    GREEN },
-	partial    = { "IN PROGRESS", AMBER },
-	todo       = { "NOT STARTED", GREY },
-	stale      = { "UNKNOWN",     GREY },
-	ineligible = { "UNAVAILABLE", GREY },
+	done       = { "Complete",    GREEN },
+	partial    = { "In Progress", AMBER },
+	todo       = { "Not Started", GREY },
+	stale      = { "Unknown",     GREY },
+	ineligible = { "Unavailable", GREY },
 }
 
 -- Per-character progress line: cell state -> { text, color }. The leading marker
 -- is a texture — the same green check the checklist uses for "done", a yellow dot
 -- for "in progress" — or a grey em-dash for the rest.
 local CHAR_STATUS = {
-	done       = { "DONE",        GREEN },
-	partial    = { "IN PROGRESS", AMBER },
-	todo       = { "NOT STARTED", GREY },
-	stale      = { "UNKNOWN",     GREY },
+	done       = { "Done",        GREEN },
+	partial    = { "In Progress", AMBER },
+	todo       = { "Not Started", GREY },
+	stale      = { "Unknown",     GREY },
 	ineligible = { "N/A",         GREY },
-	nodata     = { "NO DATA",     GREY },
+	nodata     = { "No Data",     GREY },
 }
 local CHAR_MARK = {
 	done    = "|TInterface\\RaidFrame\\ReadyCheck-Ready:14:14|t ",
@@ -302,6 +303,31 @@ local function makeImportButton(parent)
 
 	b:SetScript("OnEnter", function() b:SetBackdropBorderColor(1, 0.5, 0.4, 1); label:SetTextColor(1, 0.95, 0.78) end)
 	b:SetScript("OnLeave", function() b:SetBackdropBorderColor(0.85, 0.35, 0.28, 0.9); label:SetTextColor(1, 0.88, 0.62) end)
+	return b
+end
+
+-- A neutral "Goal Library" pill matching the import button's shape.
+local function makeLibraryButton(parent)
+	local b = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	b:SetSize(110, 28)
+	b:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropBorderColor(1, 1, 1, 0.18)
+
+	local bg = b:CreateTexture(nil, "BACKGROUND")
+	bg:SetPoint("TOPLEFT", 1, -1); bg:SetPoint("BOTTOMRIGHT", -1, 1)
+	bg:SetColorTexture(1, 1, 1, 0.04)
+
+	local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetPoint("CENTER")
+	label:SetText("Goal Library")
+	label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+
+	b:SetScript("OnEnter", function()
+		b:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.7); label:SetTextColor(1, 0.95, 0.78)
+	end)
+	b:SetScript("OnLeave", function()
+		b:SetBackdropBorderColor(1, 1, 1, 0.18); label:SetTextColor(WHITE[1], WHITE[2], WHITE[3])
+	end)
 	return b
 end
 
@@ -1873,6 +1899,80 @@ local function openImport()
 end
 
 -- ---------------------------------------------------------------------------
+-- Goal Library popup: points at the website catalog with a copyable URL.
+-- ---------------------------------------------------------------------------
+local LIBRARY_URL = "http://todayinwow.com/goals/?utm_source=addon&utm_medium=referral&utm_campaign=in-game-link"
+
+local function buildLibrary()
+	local f = CreateFrame("Frame", "TiWGoalLibrary", UIParent, "BackdropTemplate")
+	f:SetSize(460, 168)
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("FULLSCREEN_DIALOG")
+	f:SetToplevel(true)
+	f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	if f.SetBackdrop then
+		f:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Buttons\\WHITE8X8",
+			edgeSize = 1, insets = { left = 1, right = 1, top = 1, bottom = 1 },
+		})
+		f:SetBackdropColor(0.06, 0.055, 0.065, 0.98)
+		f:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.6)
+	end
+
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("TOP", 0, -14)
+	title:SetText("Goal Library"); title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+
+	local body = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	body:SetPoint("TOPLEFT", 16, -40)
+	body:SetPoint("TOPRIGHT", -16, -40)
+	body:SetJustifyH("LEFT"); body:SetWordWrap(true)
+	body:SetText("To browse the complete goal catalog, visit our website. You can browse and find all existing goals for free.")
+
+	local copyHint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	copyHint:SetPoint("TOPLEFT", body, "BOTTOMLEFT", 0, -8)
+	copyHint:SetPoint("TOPRIGHT", body, "BOTTOMRIGHT", 0, -8)
+	copyHint:SetJustifyH("LEFT"); copyHint:SetWordWrap(true)
+	copyHint:SetText("Copy the link below and paste it on your browser to access it.")
+	copyHint:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+
+	-- Copyable URL: the box always holds the link; focusing selects it for Ctrl+C.
+	local edit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+	edit:SetHeight(20)
+	edit:SetPoint("BOTTOMLEFT", 22, 46)
+	edit:SetPoint("BOTTOMRIGHT", -16, 46)
+	edit:SetAutoFocus(false)
+	edit:SetText(LIBRARY_URL)
+	edit:SetCursorPosition(0)
+	edit:SetScript("OnTextChanged", function(self, user)
+		if user then self:SetText(LIBRARY_URL); self:HighlightText() end
+	end)
+	edit:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+	edit:SetScript("OnEscapePressed", function() f:Hide() end)
+	f.edit = edit
+
+	local close = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	close:SetSize(100, 22)
+	close:SetPoint("BOTTOMRIGHT", -16, 14)
+	close:SetText("Close")
+	close:SetScript("OnClick", function() f:Hide() end)
+
+	table.insert(UISpecialFrames, "TiWGoalLibrary")
+	libraryFrame = f
+	return f
+end
+
+local function openLibrary()
+	if not libraryFrame then buildLibrary() end
+	libraryFrame:Show()
+	libraryFrame:Raise()
+	libraryFrame.edit:SetFocus()   -- selects the URL, ready for Ctrl+C
+end
+
+-- ---------------------------------------------------------------------------
 -- Tabs.
 -- ---------------------------------------------------------------------------
 -- "settings" is a view opened by the cogwheel, not a tab in the left tab row, so
@@ -2025,7 +2125,7 @@ local function buildGoalsTab(pane)
 	-- Status caption + badge (top-right of the detail).
 	local statusCap = detail:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	statusCap:SetPoint("TOPRIGHT", -2, -2)
-	statusCap:SetText("STATUS"); statusCap:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	statusCap:SetText("Status"); statusCap:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
 	statusCap:Hide(); G.statusCap = statusCap
 
 	local badge = CreateFrame("Frame", nil, detail, "BackdropTemplate")
@@ -2046,12 +2146,12 @@ local function buildGoalsTab(pane)
 	G.dDesc:Hide()
 
 	G.dStepsLabel = G.dScroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	G.dStepsLabel:SetText("CURRENT STEPS")
+	G.dStepsLabel:SetText("Current Steps")
 	G.dStepsLabel:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
 	G.dStepsLabel:Hide()
 
 	G.dCharsLabel = G.dScroll.sc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	G.dCharsLabel:SetText("CHARACTER PROGRESS")
+	G.dCharsLabel:SetText("Character Progress")
 	G.dCharsLabel:SetTextColor(LABEL[1], LABEL[2], LABEL[3])
 	G.dCharsLabel:Hide()
 
@@ -2670,6 +2770,10 @@ local function build()
 	local importBtn = makeImportButton(f)
 	importBtn:SetPoint("RIGHT", cog, "LEFT", -10, 0)
 	importBtn:SetScript("OnClick", openImport)
+
+	local libraryBtn = makeLibraryButton(f)
+	libraryBtn:SetPoint("RIGHT", importBtn, "LEFT", -8, 0)
+	libraryBtn:SetScript("OnClick", openLibrary)
 
 	local topRule = hLine(f, FAINT)
 	topRule:SetPoint("TOPLEFT", PANE_PAD, -TOPBAR_H)
