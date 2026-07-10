@@ -1901,7 +1901,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Goal Library popup: points at the website catalog with a copyable URL.
 -- ---------------------------------------------------------------------------
-local LIBRARY_URL = "http://todayinwow.com/goals/?utm_source=addon&utm_medium=referral&utm_campaign=in-game-link"
+local LIBRARY_URL = "https://www.todayinwow.com/goals/?utm_source=addon&utm_medium=referral&utm_campaign=in-game-link"
 
 local function buildLibrary()
 	local f = CreateFrame("Frame", "TiWGoalLibrary", UIParent, "BackdropTemplate")
