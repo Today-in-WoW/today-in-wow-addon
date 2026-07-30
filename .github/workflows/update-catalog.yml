@@ -62,7 +62,5 @@ jobs:
           body: |
             Automated regeneration of `goals/catalog.lua` from the Goal Repository
             DB via `GET /api/goals/catalog-export` (`tools/build_catalog.py`).
-
-            Review the diff — this is the goal set that ships to players.
           labels: automated
           delete-branch: true
