@@ -61,6 +61,22 @@ function Offline.lastDaily(now)
 	return now + C_DateAndTime.GetSecondsUntilDailyReset() - 86400
 end
 
+-- §3a showif: is this step visible for this character? The condition evaluates
+-- with charKey like any check (per-char leaves read the substrate; world-state
+-- leaves like taskquest answer once for everyone). Same rules as the engine's
+-- live branch: done == true shows, stale counts as not-done, `negate` flips,
+-- unknown evaluator → visible (install already marked the step unsupported).
+local function stepVisible(step, charKey)
+	local si = step.showif
+	if not si then return true end
+	local def = ns.Goals.Registry.get(si.evaluator)
+	if not def then return true end
+	local r = def.evaluate(si.params, charKey)
+	local shown = r ~= nil and r.done == true
+	if si.negate then shown = not shown end
+	return shown
+end
+
 -- Evaluate one installed goal for one offline character.
 -- Returns:
 --   { noData = true, steps = {} }                  -- no substrate: "log this
@@ -68,6 +84,7 @@ end
 --   { eligible = bool, seen = ts, steps = {        -- substrate exists
 --       { index, label, result },                  -- result per §5 conventions
 --       { index, label, ineligible = true },       -- step `require` not met
+--       { index, label, visible = false },         -- §3a showif-hidden (no result)
 --       ... } }
 -- eligible = goal-level `require` (level + profession) vs meta (no require ->
 -- true; missing meta.level counts as 0, missing meta.professions as none).
@@ -84,7 +101,9 @@ function Offline.goalFor(charKey, goal)
 	for i = 1, #goal.steps do
 		local step = goal.steps[i]
 		local row = { index = i, label = step.label }
-		if step.require and not meetsRequire(step.require, rec.meta) then
+		if not stepVisible(step, charKey) then
+			row.visible = false            -- hidden: no evaluation, no result
+		elseif step.require and not meetsRequire(step.require, rec.meta) then
 			row.ineligible = true
 		else
 			local def = ns.Goals.Registry.get(step.evaluator)

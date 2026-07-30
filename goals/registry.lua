@@ -131,13 +131,16 @@ function Registry.eventsFor(step)
 end
 
 -- Capability check for a decoded goal: array of step indices whose evaluator
--- is unknown or whose params fail validate. {} when fully supported.
+-- is unknown or whose params fail validate. {} when fully supported. A step's
+-- §3a `showif` condition is checked the same way (its shape already passed the
+-- codec) — a visibility rule we can't evaluate degrades the step, never guesses.
 function Registry.unsupportedSteps(goal)
 	local bad = {}
 	local steps = goal.steps or {}
 	for i = 1, #steps do
 		local step = steps[i]
-		if not Registry.validate(step.evaluator, step.params) then
+		if not Registry.validate(step.evaluator, step.params)
+			or (step.showif and not Registry.validate(step.showif.evaluator, step.showif.params)) then
 			bad[#bad + 1] = i
 		end
 	end

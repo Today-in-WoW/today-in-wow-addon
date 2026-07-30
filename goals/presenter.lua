@@ -39,7 +39,10 @@ ns.Goals.Presenter = Presenter
 --   nodata     assigned & eligibility-unknown: alt has no substrate yet
 --   stale      assigned & eligible, but the answer is unreadable (§5 stale)
 --   unassigned not assigned to this character (§6a)
--- (matrix only emits `unassigned`; the pinned panel only lists assigned goals.)
+--   inactive   every step showif-hidden for this character (§3a): the goal's
+--              rotation isn't up — a blank cell, not a todo
+-- (matrix only emits `unassigned`/`inactive`; the pinned panel only lists
+-- assigned goals and HIDES a goal whose steps are all hidden.)
 
 -- "all" assignment, or a { [charKey] = true } set that names this character.
 local function isAssigned(chars, key)
@@ -80,13 +83,13 @@ local function goalLevelDone(goal)
 	return r ~= nil and r.done == true
 end
 
--- Is an offline character's goal fully done? All ELIGIBLE, non-ignored steps
--- complete (and at least one such step). The §3 reset/stale handling already
--- happened in Offline. `ignored` is the goal's account-wide ignored-index set.
+-- Is an offline character's goal fully done? All ELIGIBLE, visible, non-ignored
+-- steps complete (and at least one such step). The §3 reset/stale handling
+-- already happened in Offline. `ignored` is the goal's account-wide ignored set.
 local function offlineComplete(g, ignored)
 	local any = false
 	for _, row in ipairs(g.steps) do
-		if not row.ineligible and not (ignored and ignored[row.index]) then
+		if not row.ineligible and row.visible ~= false and not (ignored and ignored[row.index]) then
 			any = true
 			local r = row.result
 			if not (r and r.done) then return false end
@@ -146,16 +149,31 @@ local function groupByGoal(flatVM)
 	return byId
 end
 
--- Step results for a goal aggregate, EXCLUDING account-wide ignored steps (and,
--- for offline rows, `require`-ineligible ones). Works for both the threaded
--- flatVM rows (current char) and Offline.goalFor rows — both carry `.index`.
+-- Step results for a goal aggregate, EXCLUDING account-wide ignored steps,
+-- §3a showif-hidden ones (visible == false; a hidden step doesn't exist right
+-- now, so it never weighs on the aggregate) and, for offline rows,
+-- `require`-ineligible ones. Works for both the threaded flatVM rows (current
+-- char) and Offline.goalFor rows — both carry `.index`.
 local function effectiveResults(goalId, rows)
 	local ignored = ns.Goals.Store.ignoredSet(goalId)
 	local out = {}
 	for _, r in ipairs(rows or {}) do
-		if not r.ineligible and not ignored[r.index] then out[#out + 1] = r.result end
+		if not r.ineligible and r.visible ~= false and not ignored[r.index] then
+			out[#out + 1] = r.result
+		end
 	end
 	return out
+end
+
+-- §3a: rows exist but every one is showif-hidden — the goal's rotation isn't
+-- up for this character. Drives the pinned-panel goal hide and the matrix
+-- `inactive` cell. No rows / no hidden rows → false.
+local function allHidden(rows)
+	if not rows or #rows == 0 then return false end
+	for _, r in ipairs(rows) do
+		if r.visible ~= false then return false end
+	end
+	return true
 end
 
 -- Does the live (current) character know the profession `id` (skillLineID)?
@@ -187,13 +205,17 @@ local function goalEntry(goal, rows, goalDone)
 	local ignored = ns.Goals.Store.ignoredSet(goal.id)
 	local steps = {}
 	for i = 1, #(rows or {}) do
-		local idx = rows[i].index
-		local def = goal.steps[idx] or {}
-		steps[i] = { index = idx, ignored = ignored[idx] == true,
-		             label = rows[i].label,
-		             result = goalDone and { done = true } or rows[i].result,
-		             icon = def.icon, tooltip = def.tooltip,
-		             note = def.note, resets = def.resets }
+		-- §3a showif-hidden steps don't exist right now: no row on any surface
+		-- (unlike ignored steps, which the detail window keeps for their checkbox).
+		if rows[i].visible ~= false then
+			local idx = rows[i].index
+			local def = goal.steps[idx] or {}
+			steps[#steps + 1] = { index = idx, ignored = ignored[idx] == true,
+			             label = rows[i].label,
+			             result = goalDone and { done = true } or rows[i].result,
+			             icon = def.icon, tooltip = def.tooltip,
+			             note = def.note, resets = def.resets }
+		end
 	end
 	return {
 		id = goal.id, name = goal.name, scope = goal.scope,
@@ -202,6 +224,7 @@ local function goalEntry(goal, rows, goalDone)
 		state = agg.state, done = agg.done, total = agg.total,
 		progress = agg.progress, max = agg.max,
 		steps = steps,
+		allHidden = allHidden(rows),   -- §3a: every step showif-hidden right now
 	}
 end
 
@@ -214,7 +237,9 @@ local function nextAltFor(goal, st, goalDone, current)
 	for _, key in ipairs(ns.Goals.Store.chars()) do
 		if key ~= current and isAssigned(st.chars, key) then
 			local g = ns.Goals.Offline.goalFor(key, goal)
-			if not g.noData and g.eligible and not offlineComplete(g, ignored) then
+			-- an all-hidden (§3a inactive) alt has nothing actionable — never the hint
+			if not g.noData and g.eligible and not allHidden(g.steps)
+				and not offlineComplete(g, ignored) then
 				return key
 			end
 		end
@@ -274,7 +299,9 @@ function Presenter.pinned(flatVM)
 	local out = { goals = {} }
 	local demoted = {}   -- done here but an alt still needs it: a lower-priority tier
 	for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
-		if rec.state.active and inSeason(rec.goal) then
+		-- §3a: a goal whose steps are ALL showif-hidden hides header and all —
+		-- its rotation isn't up, there is nothing actionable to show.
+		if rec.state.active and inSeason(rec.goal) and not allHidden(byId[rec.goal.id]) then
 			local goal = rec.goal
 			local goalDone = goalLevelDone(goal)
 			local entry = goalEntry(goal, byId[goal.id], goalDone)
@@ -359,15 +386,18 @@ function Presenter.matrix(flatVM)
 		chars[#chars + 1] = { key = key, name = n, realm = r, class = c, level = l }
 	end
 
-	-- Cells per goal × column.
+	-- Cells per goal × column. A column whose steps are ALL §3a showif-hidden is
+	-- `inactive` (blank); the goal's ROW survives while ANY assigned column has
+	-- a visible step, and drops only when the rotation is down for everyone.
 	local goals = {}
 	for _, rec in ipairs(active) do
 		local goal = rec.goal
 		local goalDone = goalLevelDone(goal)
-		local currentCell = aggregate(
+		local currentInactive = allHidden(byId[goal.id])
+		local currentCell = currentInactive and { state = "inactive" } or aggregate(
 			effectiveResults(goal.id, byId[goal.id]), currentEligible(goal), goalDone)
 
-		local cells = {}
+		local cells, anyActive, anyInactive = {}, false, false
 		for _, col in ipairs(chars) do
 			local key = col.key
 			if not isAssigned(rec.state.chars, key) then
@@ -386,16 +416,25 @@ function Presenter.matrix(flatVM)
 				local g = ns.Goals.Offline.goalFor(key, goal)
 				if g.noData then
 					cells[key] = { state = "nodata" }
+				elseif allHidden(g.steps) then
+					cells[key] = { state = "inactive" }
 				else
 					cells[key] = aggregate(effectiveResults(goal.id, g.steps), g.eligible, goalDone)
 				end
 			end
+			local s = cells[key].state
+			if s == "inactive" then anyInactive = true
+			elseif s ~= "unassigned" then anyActive = true end
 		end
 
-		goals[#goals + 1] = {
-			id = goal.id, name = goal.name, scope = goal.scope,
-			icon = goal.icon, tooltip = goal.tooltip, cells = cells,
-		}
+		-- Drop the row only when §3a hiding is what emptied it (inactive for
+		-- everyone assigned); an all-unassigned row keeps its existing behavior.
+		if anyActive or not anyInactive then
+			goals[#goals + 1] = {
+				id = goal.id, name = goal.name, scope = goal.scope,
+				icon = goal.icon, tooltip = goal.tooltip, cells = cells,
+			}
+		end
 	end
 
 	return { chars = chars, goals = goals }
@@ -416,7 +455,8 @@ function Presenter.goalChars(flatVM, goalId)
 	local current = currentKey()
 	local byId = groupByGoal(flatVM)
 	local goalDone = goalLevelDone(goal)
-	local currentCell = aggregate(effectiveResults(goalId, byId[goalId]), currentEligible(goal), goalDone)
+	local currentCell = allHidden(byId[goalId]) and { state = "inactive" }
+		or aggregate(effectiveResults(goalId, byId[goalId]), currentEligible(goal), goalDone)
 
 	-- Assigned columns: current first (when assigned), then id-sorted others —
 	-- known substrate characters plus any explicitly-assigned-but-unseen alt.
@@ -453,6 +493,8 @@ function Presenter.goalChars(flatVM, goalId)
 			local g = ns.Goals.Offline.goalFor(key, goal)
 			if g.noData then
 				cell = { state = "nodata" }
+			elseif allHidden(g.steps) then
+				cell = { state = "inactive" }
 			else
 				cell = aggregate(effectiveResults(goalId, g.steps), g.eligible, goalDone)
 			end

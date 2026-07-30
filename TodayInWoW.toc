@@ -62,6 +62,7 @@ goals\evaluators\achievement.lua
 goals\evaluators\renown.lua
 goals\evaluators\reputation.lua
 goals\evaluators\questlog.lua
+goals\evaluators\taskquest.lua
 goals\evaluators\vault.lua
 goals\evaluators\group.lua
 goals\dev.lua
@@ -80,6 +81,7 @@ collectors\quest_completion.lua
 collectors\quests_seen.lua
 collectors\prey_quests.lua
 collectors\world_quests.lua
+collectors\quest_lines.lua
 collectors\npc_defeats.lua
 collectors\encounter_defeated.lua
 collectors\lockout_changed.lua

@@ -37,6 +37,7 @@ local function cellText(c)
 	if s == "ineligible" then return "|cff808080n/a|r" end
 	if s == "nodata" then return "|cff808080?|r" end
 	if s == "unassigned" then return "" end
+	if s == "inactive" then return "|cff5c5c5c—|r" end   -- §3a: rotation down, nothing applies
 	return tostring(s)
 end
 

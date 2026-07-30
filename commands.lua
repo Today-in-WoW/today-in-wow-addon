@@ -278,6 +278,110 @@ local function wqReport()
 	end
 end
 
+-- /tiw ql: what the quest-lines collector sees right now (data_storage §3.18).
+-- Cache-read only (the collector's re-read pass): walks the same map set and runs
+-- every line through the filter funnel — hidden / parent echo / classification —
+-- so "no rows" traces to cold cache vs filtered vs startMapID absent (§3.18 TODO).
+-- PASS rows already emitted today are marked (daily dedup suppresses them; §3.18).
+--   /tiw ql scan       fire the requesting walk now (don't wait for login+60s)
+--   /tiw ql reset      clear today's dedup set so the next scan re-emits
+--   /tiw ql map <id>   dump one map's RAW lines (all fields + classification) —
+--                      the "which filter ate my quest" view for a specific hub
+local function qlReport(arg)
+	local qlc = ns.collectors and ns.collectors.quest_lines
+	if not (qlc and qlc.mapsToScan) then out("quest_lines not loaded"); return end
+	if arg == "scan" then
+		qlc.rescan(true)
+		out("ql  ·  requesting walk started — replies re-read ~30s after QUESTLINE_UPDATE")
+		return
+	end
+	local seen = (qlc.seenToday and qlc.seenToday()) or {}
+	if arg == "reset" then
+		local n = 0
+		for k in pairs(seen) do seen[k] = nil; n = n + 1 end
+		out("ql  ·  cleared " .. n .. " dedup entries — '/tiw ql scan' will re-emit")
+		return
+	end
+	local QL = C_QuestLine
+	if not (QL and QL.GetAvailableQuestLines) then out("C_QuestLine unavailable"); return end
+	local QC = Enum and Enum.QuestClassification
+	local allowed = QC and { [QC.Recurring] = true, [QC.Meta] = true, [QC.Calling] = true } or {}
+	local getClass = C_QuestInfoSystem and C_QuestInfoSystem.GetQuestClassification
+
+	local mapArg = arg and arg:match("^map%s+(%d+)$")
+	if mapArg then
+		local mapID = tonumber(mapArg)
+		local inSet = false
+		for _, m in ipairs(qlc.mapsToScan()) do if m == mapID then inSet = true; break end end
+		if QL.RequestQuestLinesForMap then QL.RequestQuestLinesForMap(mapID) end   -- warm for a rerun
+		local lines = QL.GetAvailableQuestLines(mapID) or {}
+		local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+		out(string.format("ql map %d %s  ·  inScanSet=%s  lines=%d  (raw, unfiltered; request fired — rerun in a few seconds if 0)",
+			mapID, (info and info.name) or "?", tostring(inSet), #lines))
+		for _, q in ipairs(lines) do
+			out(string.format("  q=%s line=%s class=%s startMapID=%s hidden=%s emitted=%s  %s",
+				tostring(q.questID), tostring(q.questLineID),
+				tostring(getClass and q.questID and getClass(q.questID)),
+				tostring(q.startMapID), tostring(q.isHidden),
+				tostring(q.questID and seen[q.questID] or false),
+				tostring(q.questName)))
+		end
+		-- The OTHER dynamic source rotating weeklies can travel as: task quests on the
+		-- same map (§3.1 wq_offered's feed). inWqWalk says whether the world-quest
+		-- collector's Zone-only walk already covers this map.
+		local tasks = (C_TaskQuest and C_TaskQuest.GetQuestsOnMap and C_TaskQuest.GetQuestsOnMap(mapID)) or {}
+		local inWqWalk = false
+		local wq = ns.collectors and ns.collectors.world_quests
+		if wq and wq.mapsToScan then
+			for _, m in ipairs(wq.mapsToScan()) do if m == mapID then inWqWalk = true; break end end
+		end
+		out(string.format("  task quests on map: %d  ·  inWqWalk=%s", #tasks, tostring(inWqWalk)))
+		for _, q in ipairs(tasks) do
+			local id = q.questID or q.questId
+			local title = C_TaskQuest.GetQuestInfoByQuestID and C_TaskQuest.GetQuestInfoByQuestID(id)
+			out(string.format("  task q=%s class=%s  %s",
+				tostring(id), tostring(getClass and id and getClass(id)), tostring(title)))
+		end
+		return
+	end
+
+	local maps = qlc.mapsToScan()
+	local total, hidden, echoes, noClass, filtered = 0, 0, 0, 0, 0
+	local passes, raws = {}, {}
+	for _, mapID in ipairs(maps) do
+		for _, q in ipairs(QL.GetAvailableQuestLines(mapID) or {}) do
+			total = total + 1
+			if #raws < 5 then
+				raws[#raws + 1] = string.format("  raw q=%s line=%s startMapID=%s hidden=%s (scanned map %d)",
+					tostring(q.questID), tostring(q.questLineID), tostring(q.startMapID), tostring(q.isHidden), mapID)
+			end
+			local startMap = q.startMapID or q.mapID
+			if q.isHidden then hidden = hidden + 1
+			elseif startMap ~= mapID then echoes = echoes + 1
+			else
+				local class = getClass and getClass(q.questID)
+				if not class then noClass = noClass + 1
+				elseif not allowed[class] then filtered = filtered + 1
+				else
+					local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+					passes[#passes + 1] = string.format("  PASS q=%d line=%s class=%d  map %d %s%s",
+						q.questID, tostring(q.questLineID), class, mapID, (info and info.name) or "",
+						seen[q.questID] and "  |cff808080(emitted today — dedup suppresses)|r" or "  |cff00ff00(will emit next scan)|r")
+				end
+			end
+		end
+	end
+	out(string.format("ql  ·  maps=%d  lines=%d  pass=%d  (hidden=%d  parentEcho=%d  classUnloaded=%d  classFiltered=%d)",
+		#maps, total, #passes, hidden, echoes, noClass, filtered))
+	for i = 1, #passes do out(passes[i]) end
+	if total > 0 and #passes == 0 then
+		out("  nothing passed — raw samples:")
+		for i = 1, #raws do out(raws[i]) end
+	elseif total == 0 then
+		out("  cache is cold — run '/tiw ql scan', wait a few seconds, then '/tiw ql' again")
+	end
+end
+
 -- /tiw export: copy-paste the whole SavedVariables as one import string for site
 -- users without the companion (§8). Opens a popup with the string pre-selected
 -- (Ctrl+C to copy). "Mark exported — free space" records delivery via
@@ -632,6 +736,8 @@ SlashCmdList["TIW"] = function(msg)
 		logReport(arg)
 	elseif msg == "wq" then
 		wqReport()
+	elseif cmd == "ql" then
+		qlReport(arg)
 	elseif msg == "trace" then
 		if ns.OnEmit then
 			ns.OnEmit = nil
@@ -643,7 +749,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
+		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw ql  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
 	end
 end
 

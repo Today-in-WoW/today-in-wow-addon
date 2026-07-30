@@ -17,6 +17,8 @@ local _, ns = ...
 --   wq_offered {
 --     questID, mapID, x, y,              -- coords scaled to ints (§3.6)
 --     expiresAt?,                        -- ABSOLUTE epoch; omitted when untimed
+--     questClassification?,              -- Enum.QuestClassification int: discriminates rotating
+--                                        --  weeklies (Recurring/Meta) from threats and plain WQs
 --     worldQuestType?, tradeskillLineID?, isElite?, rarity?,
 --     rewardGold?, rewardItemID?,
 --     rewardCurrencies?,                 -- "currencyID:amount,…" (sorted; non-rep currencies)
@@ -173,6 +175,10 @@ local function buildRow(q)
 		if tag.isElite then data.isElite = true end
 		if tag.quality then data.rarity = tag.quality end
 	end
+
+	local class = C_QuestInfoSystem and C_QuestInfoSystem.GetQuestClassification
+		and C_QuestInfoSystem.GetQuestClassification(id)
+	if class then data.questClassification = class end
 
 	local exp = expiresOf(id)
 	if exp then data.expiresAt = exp end

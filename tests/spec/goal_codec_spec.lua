@@ -190,8 +190,8 @@ describe("goal codec §2/§3 shape", function()
 		return Codec.decode(rawEncode(goal))
 	end
 
-	it("rejects schema versions other than 1", function()
-		local got, err = decodeMutated(function(g) g.v = 2 end)
+	it("rejects schema versions other than 1 or 2 (v2 = §3a showif)", function()
+		local got, err = decodeMutated(function(g) g.v = 3 end)
 		assert.is_nil(got)
 		assert.matches("version", err)
 	end)

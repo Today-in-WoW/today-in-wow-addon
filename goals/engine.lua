@@ -30,7 +30,8 @@ Engine.DEBOUNCE = 0.3   -- seconds after the last dirty mark before the pass
 local frame                 -- the single router frame
 local steps = {}            -- list of step refs for the ACTIVE goals
 local doneRefs = {}         -- goal-level `done` refs (change-detection only)
-local eventMap = {}         -- event name -> { ref, ... } (step OR done refs)
+local showRefs = {}         -- §3a `showif` refs (visibility; one per gated step)
+local eventMap = {}         -- event name -> { ref, ... } (step / done / show refs)
 local dirty = {}            -- set of refs needing re-evaluation
 local results = {}          -- last result table per ref (change detection)
 local timerScheduled = false
@@ -43,6 +44,7 @@ end
 local function markAllDirty()
 	for i = 1, #steps do dirty[steps[i]] = true end
 	for i = 1, #doneRefs do dirty[doneRefs[i]] = true end
+	for i = 1, #showRefs do dirty[showRefs[i]] = true end
 end
 
 -- Two evaluator results are "the same" when nothing the display cares about
@@ -54,16 +56,27 @@ local function sameResult(a, b)
 end
 
 -- The view-model handed to the render seam. Engine never touches frames; the
--- display layer never evaluates.
+-- display layer never evaluates. `visible = false` marks a §3a showif-hidden
+-- step: the showif result must be confidently done (stale counts as not-done;
+-- an unevaluated condition hides too — the pre-first-pass state), `negate`
+-- flips it. Steps without showif are always visible (field omitted = true).
 local function buildViewModel()
 	local vm = {}
 	for i = 1, #steps do
 		local ref = steps[i]
+		local visible = true
+		if ref.showRef then
+			local sr = results[ref.showRef]
+			local shown = sr ~= nil and sr.done == true
+			if ref.step.showif.negate then shown = not shown end
+			visible = shown
+		end
 		vm[#vm + 1] = {
-			id     = ref.id,
-			index  = ref.index,
-			label  = ref.step.label,
-			result = results[ref],
+			id      = ref.id,
+			index   = ref.index,
+			label   = ref.step.label,
+			result  = results[ref],
+			visible = visible,
 		}
 	end
 	return vm
@@ -81,10 +94,10 @@ local function runPass()
 	local t0 = debugprofilestop and debugprofilestop()
 	local changed, n = false, 0
 	for ref in pairs(dirty) do
-		-- Done refs carry params directly; step refs read them off ref.step. A
-		-- changed result (a step OR a goal-level `done`) forces a render so the
-		-- presenter recomputes goalDone live.
-		local params = ref.isDone and ref.params or ref.step.params
+		-- Done and show refs carry params directly; step refs read them off
+		-- ref.step. A changed result (a step, a goal-level `done`, or a showif
+		-- condition) forces a render so the presenter sees the flip.
+		local params = ref.params or ref.step.params
 		local res = ref.def.evaluate(params, nil)
 		if not sameResult(results[ref], res) then changed = true end
 		results[ref] = res
@@ -133,6 +146,7 @@ function Engine.Start()
 
 	steps = {}
 	doneRefs = {}
+	showRefs = {}
 	eventMap = {}
 	dirty = {}
 	results = {}
@@ -156,6 +170,20 @@ function Engine.Start()
 					local ref = { id = rec.id, index = i, step = step, def = def }
 					steps[#steps + 1] = ref
 					listen(ref, step)
+					-- §3a showif: a second ref on the CONDITION's evaluator + events,
+					-- so a visibility flip re-renders like any result change. Unknown
+					-- showif evaluator → no ref → the step stays visible (the install
+					-- already marked it unsupported; never guess hidden).
+					if step.showif then
+						local sdef = Registry.get(step.showif.evaluator)
+						if sdef then
+							local sref = { id = rec.id, index = i, step = step,
+							               params = step.showif.params, def = sdef, isShow = true }
+							ref.showRef = sref
+							showRefs[#showRefs + 1] = sref
+							listen(sref, step.showif)
+						end
+					end
 				end
 			end
 			-- Goal-level `done` may use an evaluator no step uses (e.g. a mount

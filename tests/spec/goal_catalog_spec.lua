@@ -15,7 +15,7 @@ local function harness()
 		"goals/evaluators/lockout.lua", "goals/evaluators/currency.lua",
 		"goals/evaluators/collected.lua", "goals/evaluators/flag.lua",
 		"goals/evaluators/questlog.lua", "goals/evaluators/group.lua",
-		"goals/evaluators/vault.lua",
+		"goals/evaluators/vault.lua", "goals/evaluators/taskquest.lua",
 	}) do
 		assert(loadfile(f))("TiW", ns)
 	end
@@ -35,11 +35,21 @@ local function expectedCounts(ns)
 end
 
 describe("Catalog", function()
-	it("lists buckets in display order", function()
+	-- Bucket CONTENT is curated on the site (Activity rows, ordered by their `sort`)
+	-- and regenerated into catalog.lua, so pinning the exact key list here just
+	-- breaks every time a curator adds an activity. Assert the structural
+	-- invariants the addon actually depends on instead.
+	it("ships a non-empty bucket list with unique keys and labels", function()
 		local ns = harness()
-		local keys = {}
-		for _, b in ipairs(ns.Goals.Catalog.buckets()) do keys[#keys + 1] = b.key end
-		assert.same({ "reputation", "open-world", "world-events", "delves", "vault", "endgame", "housing", "professions" }, keys)
+		local buckets = ns.Goals.Catalog.buckets()
+		assert.is_true(#buckets > 0, "catalog ships no buckets")
+		local seen = {}
+		for _, b in ipairs(buckets) do
+			assert.is_truthy(b.key and b.key ~= "", "bucket without a key")
+			assert.is_truthy(b.label and b.label ~= "", b.key .. ": bucket without a label")
+			assert.is_false(seen[b.key] == true, "duplicate bucket key: " .. tostring(b.key))
+			seen[b.key] = true
+		end
 	end)
 
 	it("returns a goal table by id, nil for unknown", function()
@@ -71,7 +81,13 @@ describe("Catalog", function()
 		local seen = {}
 		for _, e in ipairs(ns.Goals.Catalog.entries()) do
 			local g = e.goal
-			assert.equal(1, g.v, tostring(g.id) .. ": schema version")
+			-- v1, or v2 exactly when a step carries a §3a `showif` condition —
+			-- the same rule the site's editor derives the version from.
+			local gated = false
+			for _, s in ipairs(g.steps or {}) do
+				if s.showif then gated = true; break end
+			end
+			assert.equal(gated and 2 or 1, g.v, tostring(g.id) .. ": schema version")
 			assert.is_string(g.id)
 			assert.is_false(seen[g.id] == true, "duplicate id: " .. tostring(g.id))
 			seen[g.id] = true

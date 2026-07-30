@@ -2278,6 +2278,20 @@ describe("world_quests §3.1 collector (wq_offered, edge-triggered + reward-defe
 		_G.C_QuestInfoSystem = nil
 	end)
 
+	it("ships questClassification when exposed (rotating weeklies vs WQs); omitted when unloaded", function()
+		local ns = setup()
+		rewardReady[70017], rewardReady[70018] = true, true
+		_G.C_QuestInfoSystem = { GetQuestClassification = function(id) return id == 70017 and 5 or nil end }
+		process(ns, {
+			{ questID = 70017, x = 0, y = 0, mapID = 2393 },
+			{ questID = 70018, x = 0, y = 0, mapID = 2393 },
+		})
+		local rows = byKind(ns.session.events).wq_offered
+		assert.equal(5, rows[1].data.questClassification)      -- Recurring: the weekly dungeon quest case
+		assert.is_nil(rows[2].data.questClassification)        -- not exposed -> field omitted
+		_G.C_QuestInfoSystem = nil
+	end)
+
 	it("captures the WQ faction (clean API) as factionID:0 when the amount isn't exposed", function()
 		local ns = setup()
 		rewardReady[70014] = true
@@ -2312,5 +2326,100 @@ describe("world_quests §3.1 collector (wq_offered, edge-triggered + reward-defe
 		wqFaction[70016], awardsRep[70016] = 2710, true
 		process(ns, { { questID = 70016, x = 0, y = 0, mapID = 1 } })
 		assert.equal("2503:75,2710:0", byKind(ns.session.events).wq_offered[1].data.rewardReputations)
+	end)
+end)
+
+describe("quest_lines §3.18 collector (questline_offered, availability scan + daily dedup)", function()
+	local classification   -- questID -> Enum.QuestClassification, mutated per test
+	local QC = { Important = 0, Legendary = 1, Campaign = 2, Calling = 3, Meta = 4, Recurring = 5, Questline = 6, Normal = 7 }
+	local function loadCollector(ns) assert(loadfile("collectors/quest_lines.lua"))("TiW", ns) end
+	local function setup()
+		local ns = freshNS()
+		ns.char = {}                                  -- per-character dedup store (bound at login in-game)
+		_G.Enum = _G.Enum or {}
+		_G.Enum.QuestClassification = QC
+		_G.C_QuestInfoSystem = { GetQuestClassification = function(id) return classification[id] end }
+		loadCollector(ns)
+		return ns
+	end
+	local function process(ns, mapID, lines) ns.collectors.quest_lines.processAvailable(mapID, lines) end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.timers = {}
+		classification = {}
+	end)
+	after_each(function()
+		_G.C_QuestInfoSystem = nil
+		if _G.Enum then _G.Enum.QuestClassification = nil end
+	end)
+
+	it("emits questline_offered for a Recurring line starting on the scanned map, coords scaled", function()
+		local ns = setup()
+		classification[93755] = QC.Recurring
+		process(ns, 2393, { { questID = 93755, questLineID = 5601, startMapID = 2393, x = 0.5, y = 0.25 } })
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.questline_offered or {}))
+		assert.same({ questID = 93755, questLineID = 5601, mapID = 2393,
+			questClassification = QC.Recurring, x = 5000, y = 2500 }, m.questline_offered[1].data)
+	end)
+
+	it("Meta and Calling classifications pass the filter", function()
+		local ns = setup()
+		classification[93911] = QC.Meta
+		classification[60401] = QC.Calling
+		process(ns, 2393, {
+			{ questID = 93911, questLineID = 1, startMapID = 2393, x = 0, y = 0 },
+			{ questID = 60401, questLineID = 2, startMapID = 2393, x = 0, y = 0 },
+		})
+		assert.equal(2, #(byKind(ns.session.events).questline_offered or {}))
+	end)
+
+	it("filters non-recurring classifications (static quest lines = personal progress, not world state)", function()
+		local ns = setup()
+		classification[10001] = QC.Normal
+		classification[10002] = QC.Campaign
+		classification[10003] = QC.Important
+		process(ns, 2393, {
+			{ questID = 10001, questLineID = 1, startMapID = 2393, x = 0, y = 0 },
+			{ questID = 10002, questLineID = 2, startMapID = 2393, x = 0, y = 0 },
+			{ questID = 10003, questLineID = 3, startMapID = 2393, x = 0, y = 0 },
+		})
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("skips isHidden entries and parent-map echoes (startMapID mismatch)", function()
+		local ns = setup()
+		classification[93755] = QC.Recurring
+		classification[93756] = QC.Recurring
+		process(ns, 2274, {   -- continent scan echoing a child map's line
+			{ questID = 93755, questLineID = 1, startMapID = 2393, x = 0, y = 0 },
+			{ questID = 93756, questLineID = 2, startMapID = 2274, x = 0, y = 0, isHidden = true },
+		})
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("an unloaded (nil) classification is skipped WITHOUT marking dedup — retries next pass", function()
+		local ns = setup()
+		local line = { { questID = 93755, questLineID = 5601, startMapID = 2393, x = 0, y = 0 } }
+		process(ns, 2393, line)                       -- classification not loaded yet
+		assert.equal(0, #ns.session.events)
+		classification[93755] = QC.Recurring
+		process(ns, 2393, line)                       -- loaded now -> emits
+		assert.equal(1, #ns.session.events)
+	end)
+
+	it("dedups per day, survives a /reload, and re-emits after the daily reset", function()
+		local ns = setup()
+		classification[93755] = QC.Recurring
+		local line = { { questID = 93755, questLineID = 5601, startMapID = 2393, x = 0, y = 0 } }
+		process(ns, 2393, line)
+		process(ns, 2393, line)                       -- same day -> suppressed
+		assert.equal(1, #ns.session.events)
+		loadCollector(ns)                             -- /reload: fresh module, ns.char persists
+		process(ns, 2393, line)
+		assert.equal(1, #ns.session.events)
+		mock.now = mock.now + 86400                   -- next day -> bucket flips, re-emits
+		process(ns, 2393, line)
+		assert.equal(2, #ns.session.events)
 	end)
 end)

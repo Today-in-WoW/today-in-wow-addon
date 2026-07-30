@@ -46,6 +46,7 @@ Consent.STATES = { none = true, generic = true, everything = true }
 Consent.CLASS = {
 	-- generic: anonymous world observations
 	wq_offered           = "generic",
+	questline_offered    = "generic",
 	quest_seen           = "generic",
 	event_scheduled      = "generic",
 	event_ongoing        = "generic",
