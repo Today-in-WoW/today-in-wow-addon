@@ -31,8 +31,8 @@ local function rawEncode(tbl)
 	return "!TIWG:1!" .. LD:EncodeForPrint(LD:CompressDeflate(Ace:Serialize(tbl)))
 end
 
-local SHOWIF = { evaluator = "flag", params = { quest = 93755 } }
-
+-- NOTE: the showif table is built inline (not shared via an upvalue) because
+-- tests below mutate it — a shared table would leak between cases.
 local function v2Goal(over)
 	local g = {
 		v = 2, id = "tiw:rot", rev = 1, name = "Rotation", scope = "perchar",
