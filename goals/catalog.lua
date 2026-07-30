@@ -64,6 +64,12 @@ function Catalog.buckets()
 			key = "professions",
 			label = "Professions",
 		},
+		{
+			desc = "Daily rare-mount farms.",
+			icon = "Interface\\Icons\\Ability_Mount_RidingHorse",
+			key = "mounts",
+			label = "Mounts",
+		},
 	}
 end
 
@@ -261,7 +267,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "reputation",
@@ -1028,7 +1033,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Eversong Woods",
 		},
 		{
 			bucket = "open-world",
@@ -2295,7 +2299,6 @@ function Catalog.entries()
 				v = 1,
 			},
 			popular = true,
-			tag = "Mythic+ 10s",
 		},
 		{
 			bucket = "vault",
@@ -2351,7 +2354,6 @@ function Catalog.entries()
 				v = 1,
 			},
 			popular = true,
-			tag = "Mythic Bosses",
 		},
 		{
 			bucket = "vault",
@@ -2435,8 +2437,6 @@ function Catalog.entries()
 				v = 1,
 			},
 			popular = true,
-			reward = "Sun Festival's Painted Roc",
-			tag = "Midsummer Fire Festival",
 		},
 		{
 			bucket = "professions",
@@ -2519,7 +2519,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -2578,7 +2577,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -2661,7 +2659,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -2720,7 +2717,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -2811,7 +2807,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -2938,7 +2933,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3021,7 +3015,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3080,7 +3073,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3360,7 +3352,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3483,7 +3474,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3566,7 +3556,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3625,7 +3614,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3708,7 +3696,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3767,7 +3754,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3850,7 +3836,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -3909,7 +3894,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4135,7 +4119,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4258,7 +4241,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4349,7 +4331,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4472,7 +4453,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4555,7 +4535,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4614,7 +4593,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "Midnight",
 		},
 		{
 			bucket = "professions",
@@ -4745,7 +4723,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -4804,7 +4781,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -4935,7 +4911,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -4994,7 +4969,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5125,7 +5099,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5252,7 +5225,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5383,7 +5355,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5442,7 +5413,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5573,7 +5543,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5696,7 +5665,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5827,7 +5795,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -5886,7 +5853,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6017,7 +5983,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6076,7 +6041,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6207,7 +6171,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6266,7 +6229,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6397,7 +6359,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6520,7 +6481,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6651,7 +6611,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6774,7 +6733,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6905,7 +6863,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 		{
 			bucket = "professions",
@@ -6964,7 +6921,6 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
-			tag = "The War Within",
 		},
 	}
 end
