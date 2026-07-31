@@ -1275,6 +1275,42 @@ describe("quest_completion §3.3 collector", function()
 		assert.equal(1, #(byKind(ns.session.events).quest_completed or {}))   -- scan deduped
 	end)
 
+	it("guardrail: a transient bad read (implausible mass diff) is silently resynced without flooding events (the 44k-event bug)", function()
+		local big = {}
+		for i = 1, 200 do big[i] = i end
+		completed = big
+		local ns = setup()                      -- baseline = {1..200}
+
+		completed = {}                           -- transient bad read: log looks wiped
+		mock.fireEvent("QUEST_LOG_UPDATE")
+		mock.advance(1)
+		assert.equal(0, #ns.session.events)      -- massive unflagged -> guarded, no flood
+
+		completed = big                          -- real data streams back in
+		mock.fireEvent("QUEST_LOG_UPDATE")
+		mock.advance(1)
+		assert.equal(0, #ns.session.events)      -- baseline had resynced to {} -> massive flagged -> guarded again
+	end)
+
+	it("guardrail does not clip a normal small diff on a large baseline", function()
+		local big = {}
+		for i = 1, 200 do big[i] = i end
+		completed = big
+		local ns = setup()                       -- baseline = {1..200}
+
+		completed = { unpack(big) }
+		table.remove(completed, 1)                -- 1 removed
+		completed[#completed + 1] = 999           -- 1 newly completed
+		mock.fireEvent("QUEST_LOG_UPDATE")
+		mock.advance(1)
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.quest_completed or {}))
+		assert.equal(999, m.quest_completed[1].data.questID)
+		assert.equal(1, #(m.quest_unflagged or {}))
+		assert.equal(1, m.quest_unflagged[1].data.questID)
+	end)
+
 	it("out-of-combat gate: the scan defers in combat and runs on PLAYER_REGEN_ENABLED", function()
 		local ns = setup()
 		completed = { 100, 200, 300, 700 }
@@ -1813,6 +1849,39 @@ describe("reputation_changed §3.11 collector (change event; renown folded in)",
 		local m = byKind(ns.session.events)
 		assert.equal(1, #(m.reputation_changed or {}))
 		assert.same({ factionID = 2503, level = 10, value = 1500 }, m.reputation_changed[1].data)
+	end)
+
+	it("guardrail: a transient partial read (implausible faction drop) is skipped without corrupting the baseline", function()
+		local ns = setup()
+		factions = {}
+		for i = 1, 50 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed 50 factions
+
+		factions = { { factionID = 1001, currentStanding = 100 } }   -- transient bad read: only 1 visible
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		assert.equal(0, #ns.session.events)                          -- guarded: no emit, no baseline mutation
+
+		-- real data reappears unchanged -> baseline was preserved, so still nothing fires
+		factions = {}
+		for i = 1, 50 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("guardrail does not clip a normal small drop in factions", function()
+		local ns = setup()
+		factions = {}
+		for i = 1, 50 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed 50 factions
+
+		factions = {}
+		for i = 1, 49 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
+		factions[10].currentStanding = 200   -- one legit change; faction 1050 genuinely gone
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.equal(1010, m.reputation_changed[1].data.factionID)
 	end)
 end)
 

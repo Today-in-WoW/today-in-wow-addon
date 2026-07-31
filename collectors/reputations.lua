@@ -86,6 +86,20 @@ ns.Snapshot.Register("reputations", scan)
 -- first scan seeds silently (same negligible login→first-event window as §3.14).
 local lastRep   -- factionID -> "level:value"; nil until the first scan seeds it
 
+-- Guardrail against a bad read (same class of bug as quest_completion.lua /
+-- collections.lua's massive-jump guardrail, the 44k-event schema-migration bug,
+-- May 2026): C_Reputation.GetNumFactions/GetFactionDataByIndex can transiently
+-- return a partial list for one tick around ANY loading screen (zone change,
+-- dungeon enter/leave — not just login). If that partial read were adopted as the
+-- new lastRep, the factions missing from it would silently drop out of the
+-- baseline (below) — then the VERY NEXT real scan (full faction list again) would
+-- see every one of them as "changed" (nil ~= a real key) and flood
+-- reputation_changed for the whole faction list at once. A scan that returns
+-- implausibly fewer factions than last known is treated as a bad read: skip it
+-- entirely (no emit, no lastRep mutation) and let the next dirty trigger
+-- (UPDATE_FACTION fires constantly) retry once the real data is back.
+local MISSING_ABS, MISSING_RATIO = 20, 0.5
+
 local function emitChanges()
 	if not ns.session then return end
 	local cur = scan().data
@@ -94,6 +108,13 @@ local function emitChanges()
 		for id, d in pairs(cur) do lastRep[id] = d.level .. ":" .. d.value end
 		return
 	end
+
+	local curCount, lastCount = 0, 0
+	for _ in pairs(cur) do curCount = curCount + 1 end
+	for _ in pairs(lastRep) do lastCount = lastCount + 1 end
+	local missing = lastCount - curCount
+	if missing > MISSING_ABS and missing > lastCount * MISSING_RATIO then return end
+
 	for id, d in pairs(cur) do
 		local key = d.level .. ":" .. d.value
 		if lastRep[id] ~= key then

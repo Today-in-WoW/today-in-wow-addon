@@ -45,6 +45,21 @@ local baseline = {}   -- sorted completed-quest IDs: the snapshot baseline AND t
 local emitted = {}    -- session_emitted (§3.3): questID -> true; dedups path B against path A
 local pending = false
 
+-- Guardrail against a bad read: C_QuestLog.GetAllCompletedQuestIDs() can transiently
+-- return an incomplete list for one tick around a loading screen (data still
+-- streaming in). Diffed naively that floods quest_unflagged (the baseline looks
+-- wiped); once adopted as the new baseline it then mirrors into a quest_completed
+-- flood on the VERY NEXT scan when the real list reappears — this is the exact
+-- failure mode collections.lua's massive-jump guardrail exists for (the 44k-event
+-- schema-migration bug, May 2026); quest_completion never got the same fix. A scan
+-- that moves an implausible fraction of the baseline either way is treated as a bad
+-- read: the baseline still resyncs (so the next real scan diffs cleanly), but
+-- nothing is emitted for this pass.
+local MOVE_ABS, MOVE_RATIO = 50, 0.25
+local function massive(count, baselineCount)
+	return count > MOVE_ABS and count > baselineCount * MOVE_RATIO
+end
+
 local function completedIDs()
 	return (C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs and C_QuestLog.GetAllCompletedQuestIDs()) or {}
 end
@@ -80,8 +95,13 @@ local function runScan()
 	if ns.session then
 		local fresh = completedIDs()   -- already sorted (API contract); no re-sort (§3.3)
 		local flagged, unflagged = ns.QuestDiff(baseline, fresh)
-		for questID in pairs(flagged) do emitCompleted(questID, "scan") end
-		for questID in pairs(unflagged) do ns.Emit("quest_unflagged", { questID = questID }) end
+		local nFlagged, nUnflagged = 0, 0
+		for _ in pairs(flagged) do nFlagged = nFlagged + 1 end
+		for _ in pairs(unflagged) do nUnflagged = nUnflagged + 1 end
+		if not (massive(nFlagged, #baseline) or massive(nUnflagged, #baseline)) then
+			for questID in pairs(flagged) do emitCompleted(questID, "scan") end
+			for questID in pairs(unflagged) do ns.Emit("quest_unflagged", { questID = questID }) end
+		end
 		baseline = fresh
 	end
 	pending = false
