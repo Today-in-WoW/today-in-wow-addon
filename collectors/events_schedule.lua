@@ -10,27 +10,59 @@ local _, ns = ...
 --   event_ongoing   { areaPoiID, endTime? }             active now; endTime
 --                       = GetServerTime()+GetAreaPOISecondsLeft, omitted if untimed
 --
--- Dedup per occurrence window (§3.16): scheduled keyed by startTime (the unique
--- occurrence), ongoing keyed by UTC day-bucket (§3.2) so a multi-day event
--- re-emits once per day. Session-scoped — a reload re-emits once, which the site
--- dedups by (areaPoiID, occurrence).
+-- Dedup per occurrence window (§3.16), persisted on ns.char so a relog doesn't
+-- re-ship an occurrence already emitted: scheduled keyed by (areaPoiID, startTime)
+-- (the unique occurrence) with past occurrences pruned as they age out — the
+-- scheduler only reports the future, so an expired startTime never recurs.
+-- Ongoing is keyed by UTC day-bucket (§3.2, shared via ns.DailyDedup) so a
+-- multi-day event re-emits once per day.
 -- ===========================================================================
 
-local seen = {}   -- dedup keys for this session
+-- Persistent per-character store: areaPoiID -> { startTime -> true }. A relog
+-- doesn't re-ship an occurrence already seen; a genuinely new occurrence
+-- (different startTime) still fires.
+local function scheduledStore()
+	local c = ns.char
+	if not c then return nil end
+	c.dedup = c.dedup or {}
+	c.dedup.event_scheduled = c.dedup.event_scheduled or {}
+	return c.dedup.event_scheduled
+end
 
 local function emitScheduled(ev)
-	local key = "s:" .. ev.areaPoiID .. ":" .. ev.startTime
-	if seen[key] then return end
-	seen[key] = true
+	local store = scheduledStore()
+	if not store then return end
+	local times = store[ev.areaPoiID]
+	if not times then
+		times = {}
+		store[ev.areaPoiID] = times
+	end
+	if times[ev.startTime] then return end
+
+	local now = GetServerTime()   -- prune occurrences already started; they can't recur
+	for t in pairs(times) do
+		if t < now then times[t] = nil end
+	end
+	times[ev.startTime] = true
+
 	local data = { areaPoiID = ev.areaPoiID, startTime = ev.startTime }
 	if ev.endTime then data.endTime = ev.endTime end
 	ns.Emit("event_scheduled", data)
 end
 
+-- Per-character "seen since the last UTC day" set (areaPoiID -> true).
+local function ongoingSeenToday()
+	local c = ns.char
+	if not c then return nil end
+	c.dedup = c.dedup or {}
+	c.dedup.event_ongoing = c.dedup.event_ongoing or {}
+	return ns.DailyDedup.today(c.dedup.event_ongoing, GetServerTime(), 0)
+end
+
 local function emitOngoing(areaPoiID)
-	local key = "o:" .. areaPoiID .. ":" .. ns.Bucket.daily(GetServerTime(), 0)
-	if seen[key] then return end
-	seen[key] = true
+	local set = ongoingSeenToday()
+	if not set or set[areaPoiID] then return end
+	set[areaPoiID] = true
 	local data = { areaPoiID = areaPoiID }
 	local secondsLeft = C_AreaPoiInfo and C_AreaPoiInfo.GetAreaPOISecondsLeft
 		and C_AreaPoiInfo.GetAreaPOISecondsLeft(areaPoiID)

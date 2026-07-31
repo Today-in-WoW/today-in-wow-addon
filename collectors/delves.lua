@@ -15,18 +15,27 @@ local _, ns = ...
 -- variant is the localized widget text (no stable ID exists); it's an event
 -- payload hashed as bytes, so it's locale-safe for the chain and the site maps
 -- the text. Dedup per delve per day (§3.2 reset-aware bucket; bountiful rotates
--- at daily reset).
+-- at daily reset), persisted on ns.char (shared via ns.DailyDedup) so a relog
+-- mid-day doesn't re-ship a delve already seen today.
 -- ===========================================================================
-
-local seen = {}   -- session-scoped dedup keys
 
 -- Reset-aware day bucket (§3.2): bountiful flips at the region daily reset, not
 -- UTC midnight, so derive the reset offset from GetSecondsUntilDailyReset.
-local function currentBucket()
+local function resetOffset()
 	local now = GetServerTime()
 	local secs = (C_DateAndTime and C_DateAndTime.GetSecondsUntilDailyReset
 		and C_DateAndTime.GetSecondsUntilDailyReset()) or 0
-	return ns.Bucket.daily(now, (now + secs) % 86400)
+	return (now + secs) % 86400
+end
+
+-- Per-character "seen since the last daily reset" set (delveID -> true). ns.char is
+-- bound at PLAYER_LOGIN, before PLAYER_ENTERING_WORLD fires the first scan.
+local function seenToday()
+	local c = ns.char
+	if not c then return nil end
+	c.dedup = c.dedup or {}
+	c.dedup.delve = c.dedup.delve or {}
+	return ns.DailyDedup.today(c.dedup.delve, GetServerTime(), resetOffset())
 end
 
 -- Port of DelverView's extractVariantFromWidgetSet: orderIndex 0 TextWithState
@@ -64,9 +73,9 @@ local function poiXY(info)
 end
 
 local function emitDelve(mapID, delveID, info)
-	local key = "d:" .. delveID .. ":" .. currentBucket()
-	if seen[key] then return end
-	seen[key] = true
+	local set = seenToday()
+	if not set or set[delveID] then return end
+	set[delveID] = true
 
 	local variant, widgetBountiful = extractVariant(info.tooltipWidgetSet)
 	variant = ns.Secrets.guard(variant)   -- widget text may be a restricted value
@@ -125,7 +134,7 @@ local WORLD_ROOT = 946   -- Cosmic map; allDescendants reaches every continent/z
 -- AREA_POIS_UPDATED. So fullWorldScan is RE-ATTEMPTED on that signal until one
 -- attempt actually emits delves (fullScanOK), then we stop full-sweeping and let
 -- scanViewedMap handle incremental navigation. `scanning` guards against launching
--- overlapping sweeps; per-delve `seen` dedup makes any overlap/repeat idempotent.
+-- overlapping sweeps; per-delve daily dedup makes any overlap/repeat idempotent.
 local scanning, fullScanOK = false, false
 
 local function fullWorldScan()

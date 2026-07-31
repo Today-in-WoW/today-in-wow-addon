@@ -232,6 +232,7 @@ describe("events_schedule §3.16 collector", function()
 
 	it("emits event_scheduled and event_ongoing with absolute epoch times", function()
 		local ns = freshNS()
+		ns.char = {}
 		installScheduler(
 			{ { areaPoiID = 456 }, { areaPoiID = 789 } },                           -- 456 timed, 789 untimed
 			{ { areaPoiID = 123, startTime = 1748000000, endTime = 1748003600 } },  -- one scheduled
@@ -260,6 +261,7 @@ describe("events_schedule §3.16 collector", function()
 
 	it("dedups per occurrence window across repeated updates", function()
 		local ns = freshNS()
+		ns.char = {}
 		local scheduled = { { areaPoiID = 123, startTime = 1748000000, endTime = 1748003600 } }
 		installScheduler({}, scheduled, true)
 		loadCollector(ns)
@@ -276,10 +278,39 @@ describe("events_schedule §3.16 collector", function()
 
 	it("does not collect until C_EventScheduler.HasData()", function()
 		local ns = freshNS()
+		ns.char = {}
 		installScheduler({}, { { areaPoiID = 999, startTime = 1750000000 } }, false)
 		loadCollector(ns)
 		mock.fireEvent("EVENT_SCHEDULER_UPDATE")
 		assert.equal(0, #ns.session.events)
+	end)
+
+	it("dedup is PERSISTED on ns.char: a relog (fresh module load, same character) doesn't re-ship an already-seen occurrence or ongoing event", function()
+		local char = {}
+		local scheduled = { { areaPoiID = 123, startTime = 1748000000, endTime = 1748003600 } }
+		local ongoing = { { areaPoiID = 456 } }
+
+		local ns1 = freshNS()
+		ns1.char = char
+		installScheduler(ongoing, scheduled, true)
+		loadCollector(ns1)
+		mock.fireEvent("EVENT_SCHEDULER_UPDATE")
+		assert.equal(1, #(byKind(ns1.session.events).event_scheduled or {}))
+		assert.equal(1, #(byKind(ns1.session.events).event_ongoing or {}))
+
+		-- relog: fresh frames/session, but the SAME ns.char (persisted SavedVariables)
+		mock.frames = {}
+		local ns2 = freshNS()
+		ns2.char = char
+		installScheduler(ongoing, scheduled, true)
+		loadCollector(ns2)
+		mock.fireEvent("EVENT_SCHEDULER_UPDATE")
+		assert.equal(0, #ns2.session.events)
+
+		-- a genuinely new occurrence still fires post-relog
+		scheduled[#scheduled + 1] = { areaPoiID = 123, startTime = 1749000000, endTime = 1749003600 }
+		mock.fireEvent("EVENT_SCHEDULER_UPDATE")
+		assert.equal(1, #(byKind(ns2.session.events).event_scheduled or {}))
 	end)
 end)
 
@@ -362,6 +393,7 @@ describe("delves §3.9 collector", function()
 
 	it("walks the viewed continent's child zones and emits storyline + bountiful with scaled coords", function()
 		local ns = freshNS()
+		ns.char = {}
 		loadCollector(ns)
 		WorldMapFrame:OnMapChanged()   -- viewing the continent (delves are on its child zones)
 
@@ -382,6 +414,7 @@ describe("delves §3.9 collector", function()
 
 	it("walks the whole map tree on login via the coroutine runner (no map opened)", function()
 		local ns = freshNS()
+		ns.char = {}
 		loadCollector(ns)
 		mock.fireEvent("PLAYER_ENTERING_WORLD")   -- kicks off the full-world scan
 		mock.tick(0)                              -- pump Schedule.Run to completion
@@ -393,6 +426,7 @@ describe("delves §3.9 collector", function()
 
 	it("dedups per delve per day across repeated map views", function()
 		local ns = freshNS()
+		ns.char = {}
 		loadCollector(ns)
 		WorldMapFrame:OnMapChanged()
 		local n = #ns.session.events
@@ -400,8 +434,29 @@ describe("delves §3.9 collector", function()
 		assert.equal(n, #ns.session.events)
 	end)
 
+	it("dedup is PERSISTED on ns.char: a relog (fresh module load, same character) doesn't re-ship a delve already seen today", function()
+		local char = {}
+
+		local ns1 = freshNS()
+		ns1.char = char
+		loadCollector(ns1)
+		mock.fireEvent("PLAYER_ENTERING_WORLD")   -- full-world scan
+		mock.tick(0)
+		assert.equal(2, #(byKind(ns1.session.events).delve_storyline_seen or {}))
+
+		-- relog: fresh frames/session, but the SAME ns.char (persisted SavedVariables)
+		mock.frames = {}
+		local ns2 = freshNS()
+		ns2.char = char
+		loadCollector(ns2)
+		mock.fireEvent("PLAYER_ENTERING_WORLD")
+		mock.tick(0)
+		assert.equal(0, #ns2.session.events)
+	end)
+
 	it("guards a secret variant but still emits the delve", function()
 		local ns = freshNS()
+		ns.char = {}
 		loadCollector(ns)
 		mock.setSecret("Waygate Wiles")
 		WorldMapFrame:OnMapChanged()
