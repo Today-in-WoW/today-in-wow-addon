@@ -40,6 +40,15 @@ ns.Goals = ns.Goals or {}
 local Sync = {}
 ns.Goals.Sync = Sync
 
+-- Highest payload envelope version this addon understands (goal-sync-plan §6.1),
+-- mirroring `PAYLOAD_VERSION` in the backend's app/services/goal_sync.py.
+--
+-- Adding optional fields does NOT bump this: unknown keys are ignored and absent
+-- ones default, so the payload grows freely. It bumps only for a change that
+-- would make this code MISREAD the payload — and then an addon this old refuses
+-- the whole thing rather than acting on a shape it doesn't understand.
+Sync.PAYLOAD_VERSION = 1
+
 function Sync.decide(loc, entry)
 	if not entry then return "none" end                 -- §6.1: no opinion
 
@@ -96,6 +105,14 @@ end
 function Sync.apply(payload, now)
 	if type(payload) ~= "table" then return nil end
 
+	-- A payload from a NEWER site than this addon: refuse it whole rather than
+	-- half-apply a shape we don't understand. Absent `v` is the original
+	-- envelope, which this version speaks. Reported so the caller can tell the
+	-- user to update — the one case where doing nothing needs explaining.
+	if (tonumber(payload.v) or 1) > Sync.PAYLOAD_VERSION then
+		return nil, "addon_outdated"
+	end
+
 	local Store = ns.Goals.Store
 	local generated = tonumber(payload.generated_at) or 0
 	if generated <= Store.getAppliedPush() then return nil end
@@ -143,17 +160,24 @@ function Sync.apply(payload, now)
 
 	for _, list in pairs(r) do sortById(list) end
 
-	Store.pruneTombstones(now)
 	Store.setAppliedPush(generated)
 	return r
 end
 
--- Read the companion payload and apply it. An absent companion addon (or one
--- carrying no goals block) is the normal no-op, never an error.
+-- The login entry point: expire old tombstones, then apply the payload if there
+-- is one. An absent companion addon (or one carrying no goals block) is the
+-- normal no-op, never an error.
+--
+-- The prune deliberately happens BEFORE (and independently of) the payload
+-- check. Most installs have no companion app at all, and tombstones are written
+-- by any in-game goal removal — so hanging the prune off the payload path would
+-- leave the majority of users accumulating them forever.
 function Sync.run(now)
+	ns.Goals.Store.pruneTombstones(now)
+
 	local db = _G.TiWCompanionDB
 	if type(db) ~= "table" then return nil end
-	return Sync.apply(db.goals, now)
+	return Sync.apply(db.goals, now)   -- passes through the second return
 end
 
 return ns

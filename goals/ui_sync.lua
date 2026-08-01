@@ -84,8 +84,17 @@ end
 
 -- Apply the payload and report it. Safe to call with no companion installed.
 function UISync.runAndReport()
-	local result = ns.Goals.Sync.run()
-	if not result then return end
+	local result, reason = ns.Goals.Sync.run()
+	if not result then
+		-- The site is sending an envelope this addon is too old to read. Every
+		-- other "nothing happened" is silent by design; this one is actionable,
+		-- so it says so — once per login, until they update.
+		if reason == "addon_outdated" then
+			out("Your Today in WoW addon is out of date — update it to keep receiving "
+				.. "goals from the website.")
+		end
+		return
+	end
 
 	for _, e in ipairs(result.removed) do
 		out("Goal " .. label(e) .. " was removed (you removed it on the website).")

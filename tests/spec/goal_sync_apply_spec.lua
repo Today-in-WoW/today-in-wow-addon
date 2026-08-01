@@ -44,6 +44,44 @@ end
 
 after_each(function() _G.TiWDB = nil; _G.TiWCompanionDB = nil end)
 
+describe("sync §6.1 payload envelope version", function()
+	it("accepts a payload at the current version", function()
+		local ns = harness()
+		local p = payload(500, "tiw:dev-mount",
+			{ updated_at = 100, rev = 1, active = true, def = fixtures().mount_account })
+		p.v = ns.Goals.Sync.PAYLOAD_VERSION
+		assert.is_table(ns.Goals.Sync.apply(p))
+	end)
+
+	it("accepts a payload with NO version (the original envelope)", function()
+		local ns = harness()
+		assert.is_table(ns.Goals.Sync.apply(payload(500, "tiw:dev-mount",
+			{ updated_at = 100, rev = 1, active = true, def = fixtures().mount_account })))
+	end)
+
+	it("REFUSES a payload from a newer site, whole, and says why", function()
+		local ns = harness()
+		local p = payload(500, "tiw:dev-mount",
+			{ updated_at = 100, rev = 1, active = true, def = fixtures().mount_account })
+		p.v = ns.Goals.Sync.PAYLOAD_VERSION + 1
+		local r, reason = ns.Goals.Sync.apply(p)
+		assert.is_nil(r)
+		assert.equal("addon_outdated", reason)
+		-- nothing half-applied, and the payload is NOT marked as seen: the user
+		-- must still receive it once they update.
+		assert.is_nil(TiWDB.goals.installed["tiw:dev-mount"])
+		assert.equal(0, ns.Goals.Store.getAppliedPush())
+	end)
+
+	it("run passes the refusal reason through", function()
+		local ns = harness()
+		_G.TiWCompanionDB = { goals = { v = 99, generated_at = 500, subs = {} } }
+		local r, reason = ns.Goals.Sync.run()
+		assert.is_nil(r)
+		assert.equal("addon_outdated", reason)
+	end)
+end)
+
 describe("sync §6.1.1 apply-once", function()
 	it("no payload at all is a silent no-op (companion never installed)", function()
 		local ns = harness()
@@ -213,13 +251,28 @@ describe("sync §6.1 apply — absence is no opinion", function()
 end)
 
 describe("sync apply — housekeeping", function()
-	it("prunes expired tombstones during the pass", function()
+	-- The prune lives on Sync.run, NOT Sync.apply: most installs have no
+	-- companion app, and tombstones are written by any in-game removal, so
+	-- hanging it off the payload path would let them accumulate forever.
+	it("run prunes expired tombstones even with NO payload at all", function()
 		local ns, mock = harness()
 		ns.Goals.Store.install(fixtures().mount_account)
 		mock.now = 1000
 		ns.Goals.Store.remove("tiw:dev-mount")
 		mock.now = 1000 + (30 * 86400) + 1
-		ns.Goals.Sync.apply({ generated_at = 500 })
+		_G.TiWCompanionDB = nil
+		assert.is_nil(ns.Goals.Sync.run())
+		assert.is_nil(TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
+
+	it("run prunes expired tombstones alongside a payload", function()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 1000
+		ns.Goals.Store.remove("tiw:dev-mount")
+		mock.now = 1000 + (30 * 86400) + 1
+		_G.TiWCompanionDB = { goals = { generated_at = 500, subs = {} } }
+		assert.is_table(ns.Goals.Sync.run())
 		assert.is_nil(TiWDB.goals.tombstones["tiw:dev-mount"])
 	end)
 
