@@ -40,6 +40,7 @@ core\export.lua
 goals\registry.lua
 goals\codec.lua
 goals\store.lua
+goals\sync.lua
 goals\engine.lua
 goals\substrate.lua
 goals\offline.lua

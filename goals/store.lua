@@ -10,10 +10,26 @@ local addonName, ns = ...
 --   TiWDB.goals = {
 --     installed = { [id] = goalTable },                 -- as imported
 --     state     = { [id] = { active, pinned, chars,     -- "all" | {charKey=true}
---                            unsupported } },           -- step indices (§4)
+--                            unsupported,               -- step indices (§4)
+--                            mtime } },                 -- sync §6.2, see below
 --     substrate = { [charKey] = { seen, meta, lockouts, -- per-char raw state
 --                                 currencies, quests } },-- (§5 charKey / §6)
+--     tombstones   = { [id] = ts },                     -- sync §6.2
+--     applied_push = ts,                                -- sync §6.1.1
 --   }
+--
+-- Sync bookkeeping (goal-sync-plan §6.2) — the site and the addon both curate
+-- the installed set, so two extra facts make the merge decidable:
+--   `mtime`      the last local MEMBERSHIP or ACTIVE change (install / remove /
+--                setActive). NOT stamped by a rev refresh (content is one-way
+--                site data, §5.1) and NOT by display prefs (pinned/chars/
+--                ignored/order are local-only, §5.3).
+--   `tombstones` id -> removal time. Absence is ambiguous ("removed" vs "never
+--                had"); a tombstone makes the removal an explicit timestamped
+--                fact so an in-flight push can't resurrect it (§4.4).
+-- Both are UNGATED by consent: they are local functionality, and the merge has
+-- to work at every consent level. goals/sync.lua owns the policy; this module
+-- only owns the writes.
 --
 -- substrate is goal-independent (remove() never touches it) and doubles as
 -- the known-characters registry — its keys are every character that has
@@ -38,11 +54,16 @@ function Store._bind()
 	_G.TiWDB = _G.TiWDB or {}
 	local g = TiWDB.goals or {}
 	TiWDB.goals = g
-	g.installed = g.installed or {}
-	g.state     = g.state or {}
-	g.substrate = g.substrate or {}
+	g.installed  = g.installed or {}
+	g.state      = g.state or {}
+	g.substrate  = g.substrate or {}
+	g.tombstones = g.tombstones or {}
 	ns.Goals.db = g
 end
+
+-- Tombstones outlive any realistic push delay, then go. Bounded anyway by how
+-- many goals a user has ever removed.
+local TOMBSTONE_TTL = 30 * 86400
 
 -- Next free display-order key: one past the current max across all state. New
 -- and section-moved goals land at the bottom; drag-reorder (setSectionOrder)
@@ -56,8 +77,11 @@ local function nextOrder()
 	return m + 1
 end
 
--- Install a decoded goal. opts = { chars = "all" | { [charKey] = true } }
--- (default "all"). Returns "installed" | "updated" | "unchanged", or nil, err.
+-- Install a decoded goal. opts = { chars = "all" | { [charKey] = true },
+-- mtime = <ts>, active = <bool> } — chars defaults to "all", mtime to the
+-- current clock (pass the site's timestamp when applying a push, so the addon
+-- doesn't look like the author of a change it merely received).
+-- Returns "installed" | "updated" | "unchanged", or nil, err.
 -- Marks unsupported step indices into state[id].unsupported via the Registry.
 function Store.install(goal, opts)
 	local db = ns.Goals.db
@@ -67,6 +91,7 @@ function Store.install(goal, opts)
 	if existing then
 		if goal.rev <= existing.rev then return "unchanged" end
 		-- update: replace the goal, KEEP activation/assignment state (§2).
+		-- Content only — mtime tracks membership, so it does NOT move here.
 		db.installed[id] = goal
 		db.state[id].unsupported = ns.Goals.Registry.unsupportedSteps(goal)
 		return "updated"
@@ -74,24 +99,66 @@ function Store.install(goal, opts)
 
 	db.installed[id] = goal
 	db.state[id] = {
-		active      = true,
+		active      = (opts and opts.active ~= nil) and (opts.active and true or false) or true,
 		pinned      = false,
 		chars       = (opts and opts.chars ~= nil) and opts.chars or "all",
 		unsupported = ns.Goals.Registry.unsupportedSteps(goal),
 		order       = nextOrder(),   -- bottom of its (available) section
+		mtime       = (opts and opts.mtime) or GetServerTime(),
 	}
+	db.tombstones[id] = nil          -- the fresh mtime supersedes any tombstone
 	return "installed"
 end
 
--- Remove an installed goal (goal + state). Substrate is goal-independent —
--- removing a goal never touches per-character state.
--- true when removed, false when the id wasn't installed.
-function Store.remove(id)
+-- Remove an installed goal (goal + state) and record a tombstone at `at`
+-- (default: now). Substrate is goal-independent — removing a goal never touches
+-- per-character state. true when removed, false when the id wasn't installed
+-- (no tombstone for something we never had).
+function Store.remove(id, at)
 	local db = ns.Goals.db
 	if not db.installed[id] then return false end
 	db.installed[id] = nil
 	db.state[id] = nil
+	db.tombstones[id] = at or GetServerTime()
 	return true
+end
+
+-- Drop tombstones past the TTL. Cheap; call at login.
+function Store.pruneTombstones(now)
+	local db = ns.Goals.db
+	local cutoff = (now or GetServerTime()) - TOMBSTONE_TTL
+	for id, ts in pairs(db.tombstones) do
+		if ts < cutoff then db.tombstones[id] = nil end
+	end
+end
+
+-- The local view of one goal that goals/sync.lua's merge rule consumes. Keeps
+-- TiWDB access out of the (pure) sync module.
+function Store.syncRecord(id)
+	local db = ns.Goals.db
+	local st = db.state[id]
+	if not st then
+		return { present = false, mtime = 0, active = false, rev = 0,
+		         tombstone = db.tombstones[id] }
+	end
+	return {
+		present = true,
+		mtime   = st.mtime or 0,
+		active  = st.active and true or false,
+		rev     = db.installed[id].rev or 0,
+	}
+end
+
+-- §6.1.1 apply-once: the `generated_at` of the last payload the addon applied.
+-- Not a correctness device (a repeated payload is already a no-op under LWW) —
+-- it stops a payload that has stopped advancing from replaying its login
+-- messages forever.
+function Store.getAppliedPush()
+	return ns.Goals.db.applied_push or 0
+end
+
+function Store.setAppliedPush(ts)
+	ns.Goals.db.applied_push = ts
 end
 
 -- ---------------------------------------------------------------------------
@@ -136,13 +203,6 @@ function Store.list()
 	return out
 end
 
-function Store.setActive(id, on)
-	local st = ns.Goals.db.state[id]
-	if not st then return nil, "not installed" end
-	st.active = on and true or false
-	return true
-end
-
 -- Single pin/unpin (shift-click). Moving sections lands the goal at the bottom
 -- of its new section (drag-reorder is the precise placement path).
 function Store.setPinned(id, on)
@@ -153,6 +213,16 @@ function Store.setPinned(id, on)
 		st.pinned = want
 		st.order = nextOrder()
 	end
+	return true
+end
+
+-- `active` is SYNCED state (sync §5.2), so it stamps mtime. `at` overrides the
+-- clock when applying a push.
+function Store.setActive(id, on, at)
+	local st = ns.Goals.db.state[id]
+	if not st then return nil, "not installed" end
+	st.active = on and true or false
+	st.mtime = at or GetServerTime()
 	return true
 end
 

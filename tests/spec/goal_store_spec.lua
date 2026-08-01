@@ -232,6 +232,186 @@ describe("store ordering (display order for the goals window + matrix)", functio
 	end)
 end)
 
+-- ---------------------------------------------------------------------------
+-- goal-sync-plan §6.2 — sync bookkeeping. `mtime` records the last local
+-- MEMBERSHIP/ACTIVE change (never a content refresh, never a display pref), and
+-- tombstones make a removal an explicit timestamped fact instead of a gap.
+-- ---------------------------------------------------------------------------
+
+describe("store sync §6.2 mtime stamping", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	it("a fresh install stamps mtime from the clock", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		ns.Goals.Store.install(fixtures().mount_account)
+		assert.equal(1000, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+
+	it("install accepts an explicit mtime (applying the site's timestamp)", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		ns.Goals.Store.install(fixtures().mount_account, { mtime = 555 })
+		assert.equal(555, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+
+	it("setActive stamps mtime (active is synced state, §5.2)", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 2000
+		ns.Goals.Store.setActive("tiw:dev-mount", false)
+		assert.equal(2000, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+
+	it("a rev UPDATE does not stamp mtime (content is one-way, §5.1)", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		ns.Goals.Store.install(fixtures().mount_account)
+		local newer = fixtures().mount_account
+		newer.rev = 2
+		mock.now = 2000
+		assert.equal("updated", (ns.Goals.Store.install(newer)))
+		-- membership never changed, so the local clock must not advance past the
+		-- site's — otherwise applying a push makes the addon look like the author.
+		assert.equal(1000, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+
+	it("an 'unchanged' install does not stamp mtime", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 2000
+		assert.equal("unchanged", (ns.Goals.Store.install(fixtures().mount_account)))
+		assert.equal(1000, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+
+	it("display prefs never stamp mtime (§5.3 local-only)", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		mock.now = 2000
+		S.setPinned("tiw:dev-mount", true)
+		S.setChars("tiw:dev-mount", { ["X-Y"] = true })
+		S.setIgnored("tiw:dev-mount", 1, true)
+		S.setSectionOrder(true, { "tiw:dev-mount" })
+		assert.equal(1000, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+end)
+
+describe("store sync §6.2 tombstones", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	it("remove writes a tombstone stamped from the clock", function()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 3000
+		assert.is_true(ns.Goals.Store.remove("tiw:dev-mount"))
+		assert.equal(3000, TiWDB.goals.tombstones["tiw:dev-mount"])
+		assert.is_nil(TiWDB.goals.installed["tiw:dev-mount"])
+		assert.is_nil(TiWDB.goals.state["tiw:dev-mount"])
+	end)
+
+	it("remove accepts an explicit timestamp (applying the site's delete)", function()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 3000
+		ns.Goals.Store.remove("tiw:dev-mount", 555)
+		assert.equal(555, TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
+
+	it("removing an id that isn't installed writes no tombstone", function()
+		local ns = harness()
+		assert.is_false(ns.Goals.Store.remove("tiw:nope"))
+		assert.is_nil(TiWDB.goals.tombstones["tiw:nope"])
+	end)
+
+	it("re-installing clears the tombstone (the newer mtime supersedes it)", function()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 3000
+		ns.Goals.Store.remove("tiw:dev-mount")
+		mock.now = 4000
+		ns.Goals.Store.install(fixtures().mount_account)
+		assert.is_nil(TiWDB.goals.tombstones["tiw:dev-mount"])
+		assert.equal(4000, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+
+	it("prune drops tombstones older than the TTL and keeps the rest", function()
+		local ns, mock = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		S.install(fixtures().crest_cap)
+		mock.now = 1000
+		S.remove("tiw:dev-mount")                       -- old
+		mock.now = 1000 + (30 * 86400) + 1              -- one second past the TTL
+		S.remove("tiw:dev-crests")                      -- fresh
+		S.pruneTombstones()
+		assert.is_nil(TiWDB.goals.tombstones["tiw:dev-mount"])
+		assert.is_not_nil(TiWDB.goals.tombstones["tiw:dev-crests"])
+	end)
+
+	it("keeps a tombstone exactly AT the TTL (older-than, not at-or-older)", function()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 1000
+		ns.Goals.Store.remove("tiw:dev-mount")
+		mock.now = 1000 + (30 * 86400)
+		ns.Goals.Store.pruneTombstones()
+		assert.equal(1000, TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
+end)
+
+describe("store sync §6.1.1 applied_push", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	it("reads 0 before any payload has been applied", function()
+		local ns = harness()
+		assert.equal(0, ns.Goals.Store.getAppliedPush())
+	end)
+
+	it("round-trips the last applied generated_at", function()
+		local ns = harness()
+		ns.Goals.Store.setAppliedPush(1754000000)
+		assert.equal(1754000000, ns.Goals.Store.getAppliedPush())
+		assert.equal(1754000000, TiWDB.goals.applied_push)
+	end)
+end)
+
+describe("store sync §6.2 syncRecord (the view Sync.decide consumes)", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	it("describes an installed goal", function()
+		local ns, mock = harness()
+		mock.now = 1000
+		ns.Goals.Store.install(fixtures().crest_cap)
+		local r = ns.Goals.Store.syncRecord("tiw:dev-crests")
+		assert.is_true(r.present)
+		assert.equal(1000, r.mtime)
+		assert.is_true(r.active)
+		assert.equal(2, r.rev)
+		assert.is_nil(r.tombstone)
+	end)
+
+	it("describes a removed goal via its tombstone", function()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 3000
+		ns.Goals.Store.remove("tiw:dev-mount")
+		local r = ns.Goals.Store.syncRecord("tiw:dev-mount")
+		assert.is_false(r.present)
+		assert.equal(3000, r.tombstone)
+	end)
+
+	it("describes a goal it has never seen", function()
+		local ns = harness()
+		local r = ns.Goals.Store.syncRecord("tiw:never")
+		assert.is_false(r.present)
+		assert.is_nil(r.tombstone)
+	end)
+end)
+
 describe("store §6 sole-writer guard", function()
 	after_each(function() _G.TiWDB = nil end)
 
