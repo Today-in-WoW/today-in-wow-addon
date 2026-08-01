@@ -89,16 +89,19 @@ local lastRep   -- factionID -> "level:value"; nil until the first scan seeds it
 -- Guardrail against a bad read (same class of bug as quest_completion.lua /
 -- collections.lua's massive-jump guardrail, the 44k-event schema-migration bug,
 -- May 2026): C_Reputation.GetNumFactions/GetFactionDataByIndex can transiently
--- return a partial list for one tick around ANY loading screen (zone change,
--- dungeon enter/leave — not just login). If that partial read were adopted as the
--- new lastRep, the factions missing from it would silently drop out of the
--- baseline (below) — then the VERY NEXT real scan (full faction list again) would
--- see every one of them as "changed" (nil ~= a real key) and flood
--- reputation_changed for the whole faction list at once. A scan that returns
--- implausibly fewer factions than last known is treated as a bad read: skip it
--- entirely (no emit, no lastRep mutation) and let the next dirty trigger
--- (UPDATE_FACTION fires constantly) retry once the real data is back.
-local MISSING_ABS, MISSING_RATIO = 20, 0.5
+-- return corrupted data for one tick around ANY loading screen (zone change,
+-- dungeon enter/leave — not just login) — either a partial faction list, OR
+-- (observed in-game) a full list whose currentStanding reads come back pinned to
+-- sentinel extremes (±42000, the classic Hated/Exalted bar bounds) for many
+-- factions at once. Either shape moves an implausible fraction of the tracked set
+-- in one scan; naively emitting/adopting it either floods reputation_changed
+-- outright or corrupts lastRep so the FOLLOW-UP scan (once real data returns)
+-- mirrors the flood back. So: count how many factions actually differ (changed
+-- value + vanished + newly seen) against the size of the last known set — if
+-- that's implausible, suppress the emit for this pass. lastRep still resyncs to
+-- the fresh read either way (guarded or not) so a bad scan self-heals within one
+-- more scan instead of comparing against a stale baseline forever.
+local CHANGED_ABS, CHANGED_RATIO = 20, 0.5
 
 local function emitChanges()
 	if not ns.session then return end
@@ -109,20 +112,29 @@ local function emitChanges()
 		return
 	end
 
-	local curCount, lastCount = 0, 0
-	for _ in pairs(cur) do curCount = curCount + 1 end
-	for _ in pairs(lastRep) do lastCount = lastCount + 1 end
-	local missing = lastCount - curCount
-	if missing > MISSING_ABS and missing > lastCount * MISSING_RATIO then return end
-
-	for id, d in pairs(cur) do
-		local key = d.level .. ":" .. d.value
-		if lastRep[id] ~= key then
-			ns.Emit("reputation_changed", { factionID = id, level = d.level, value = d.value })
-		end
-		lastRep[id] = key
+	local lastCount, nChanged = 0, 0
+	for id in pairs(lastRep) do
+		lastCount = lastCount + 1
+		local d = cur[id]
+		if not d or (d.level .. ":" .. d.value) ~= lastRep[id] then nChanged = nChanged + 1 end
 	end
-	for id in pairs(lastRep) do if cur[id] == nil then lastRep[id] = nil end end
+	for id in pairs(cur) do
+		if lastRep[id] == nil then nChanged = nChanged + 1 end   -- newly-tracked faction
+	end
+	local guarded = nChanged > CHANGED_ABS and nChanged > lastCount * CHANGED_RATIO
+
+	if not guarded then
+		for id, d in pairs(cur) do
+			local key = d.level .. ":" .. d.value
+			if lastRep[id] ~= key then
+				ns.Emit("reputation_changed", { factionID = id, level = d.level, value = d.value })
+			end
+		end
+	end
+
+	local fresh = {}
+	for id, d in pairs(cur) do fresh[id] = d.level .. ":" .. d.value end
+	lastRep = fresh
 end
 
 if ns.Schedule then

@@ -1851,7 +1851,7 @@ describe("reputation_changed §3.11 collector (change event; renown folded in)",
 		assert.same({ factionID = 2503, level = 10, value = 1500 }, m.reputation_changed[1].data)
 	end)
 
-	it("guardrail: a transient partial read (implausible faction drop) is skipped without corrupting the baseline", function()
+	it("guardrail: a transient partial read (implausible faction drop) is suppressed and self-heals", function()
 		local ns = setup()
 		factions = {}
 		for i = 1, 50 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
@@ -1859,13 +1859,39 @@ describe("reputation_changed §3.11 collector (change event; renown folded in)",
 
 		factions = { { factionID = 1001, currentStanding = 100 } }   -- transient bad read: only 1 visible
 		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
-		assert.equal(0, #ns.session.events)                          -- guarded: no emit, no baseline mutation
+		assert.equal(0, #ns.session.events)   -- guarded: 49 "missing" -> no flood this pass
 
-		-- real data reappears unchanged -> baseline was preserved, so still nothing fires
+		-- real data reappears (mirror-image diff vs the now-shrunk baseline) -> guarded again
 		factions = {}
 		for i = 1, 50 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
 		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		assert.equal(0, #ns.session.events)   -- never floods, even across the mirror scan
+
+		-- baseline is healed now; an unchanged re-scan stays quiet
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
 		assert.equal(0, #ns.session.events)
+	end)
+
+	it("guardrail: many factions changing value at once with the SAME faction count (corrupted read, not a partial one) is also suppressed", function()
+		-- The in-game bug (screenshot): after a loading screen, C_Reputation returns the
+		-- full faction list but many currentStanding reads come back pinned to sentinel
+		-- bar extremes (±42000) — the faction count never shrinks, so a guard keyed only
+		-- on "missing factions" wouldn't catch this shape at all.
+		local ns = setup()
+		factions = {}
+		for i = 1, 50 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed 50 factions
+
+		for i = 1, 50 do factions[i].currentStanding = 42000 end   -- same 50 factions, sentinel values
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		assert.equal(0, #ns.session.events)   -- guarded: no flood despite the faction count being unchanged
+
+		-- one real, isolated change afterward is still picked up normally (self-healed)
+		factions[10].currentStanding = 42500
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.equal(1010, m.reputation_changed[1].data.factionID)
 	end)
 
 	it("guardrail does not clip a normal small drop in factions", function()
