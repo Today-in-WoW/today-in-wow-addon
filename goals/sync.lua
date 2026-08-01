@@ -72,4 +72,88 @@ function Sync.decide(loc, entry)
 	return action, setActive
 end
 
+-- ---------------------------------------------------------------------------
+-- The apply pass (goal-sync-plan §6.1 / §9)
+--
+-- Sync.apply(payload, now) -> result | nil
+--   payload = TiWCompanionDB.goals — { generated_at, subs = { [id] = entry } }
+--
+-- Takes the payload as an argument (Sync.run reads the global and delegates) so
+-- the whole pass is drivable from a fixture with no companion addon present.
+-- Returns WHAT HAPPENED and prints nothing; the caller owns the §9 messaging.
+--
+--   result = { added, removed, refreshed, activated, rejected }  -- {id,name,active}
+--
+-- nil means "nothing to do": no payload, or a `generated_at` that has not
+-- advanced past the last applied one (§6.1.1 — an app that has stopped updating
+-- the file must not replay its login messages every session).
+-- ---------------------------------------------------------------------------
+
+local function sortById(list)
+	table.sort(list, function(a, b) return a.id < b.id end)
+end
+
+function Sync.apply(payload, now)
+	if type(payload) ~= "table" then return nil end
+
+	local Store = ns.Goals.Store
+	local generated = tonumber(payload.generated_at) or 0
+	if generated <= Store.getAppliedPush() then return nil end
+
+	local r = { added = {}, removed = {}, refreshed = {}, activated = {}, rejected = {} }
+
+	for id, entry in pairs(payload.subs or {}) do
+		if type(entry) == "table" then
+			local action, setActive = Sync.decide(Store.syncRecord(id), entry)
+			local at = tonumber(entry.updated_at) or 0
+
+			if action == "install" or action == "refresh" then
+				-- The payload carries goal tables as literal Lua, so they get the
+				-- same shape contract the import box enforces — a malformed def
+				-- must never reach the store.
+				local def = entry.def
+				local ok = type(def) == "table" and ns.Goals.Codec.validateGoal(def)
+				if not ok then
+					r.rejected[#r.rejected + 1] = { id = id }
+				elseif action == "install" then
+					Store.install(def, { mtime = at, active = entry.active })
+					r.added[#r.added + 1] = { id = id, name = def.name }
+				else
+					Store.install(def)                  -- rev update: keeps state, no mtime
+					r.refreshed[#r.refreshed + 1] = { id = id, name = def.name }
+				end
+			elseif action == "remove" then
+				local goal = Store.get(id)
+				local name = goal and goal.goal.name
+				Store.remove(id, at)
+				r.removed[#r.removed + 1] = { id = id, name = name }
+			end
+
+			-- `active` resolves independently of content (§5.2) — a refresh and a
+			-- flip can both land for the same entry. Skipped when the goal just
+			-- arrived (install already carried entry.active) or just left.
+			if setActive ~= nil and Store.get(id) then
+				Store.setActive(id, setActive, at)
+				local goal = Store.get(id)
+				r.activated[#r.activated + 1] =
+					{ id = id, name = goal.goal.name, active = setActive }
+			end
+		end
+	end
+
+	for _, list in pairs(r) do sortById(list) end
+
+	Store.pruneTombstones(now)
+	Store.setAppliedPush(generated)
+	return r
+end
+
+-- Read the companion payload and apply it. An absent companion addon (or one
+-- carrying no goals block) is the normal no-op, never an error.
+function Sync.run(now)
+	local db = _G.TiWCompanionDB
+	if type(db) ~= "table" then return nil end
+	return Sync.apply(db.goals, now)
+end
+
 return ns

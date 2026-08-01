@@ -209,11 +209,22 @@ function Codec.decode(str)
 	local ok, goal = Ace:Deserialize(serialized)
 	if not ok then return nil, "goal deserialize failed" end
 
-	local sok, serr = checkShape(goal)
+	local sok, serr = Codec.validateGoal(goal)
 	if not sok then return nil, serr end
-	if #goal.steps > Codec.MAX_STEPS then return nil, "goal has too many steps" end
 
 	return goal
+end
+
+-- The full shape contract for a goal table, independent of transport: shape +
+-- the step cap. Exported because the site→addon payload (goals/sync.lua) carries
+-- goal tables as literal Lua rather than encoded strings, and must enforce the
+-- SAME rules the import box does — one contract, not two.
+-- true, or nil, err.
+function Codec.validateGoal(goal)
+	local ok, err = checkShape(goal)
+	if not ok then return nil, err end
+	if #goal.steps > Codec.MAX_STEPS then return nil, "goal has too many steps" end
+	return true
 end
 
 -- pack bundle -> "!TIWGP:1!…" string, or nil, err. (Symmetry with the backend;

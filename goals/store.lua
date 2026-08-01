@@ -97,9 +97,14 @@ function Store.install(goal, opts)
 		return "updated"
 	end
 
+	-- NB: an explicit if, not the `and/or` ternary — that idiom can never yield
+	-- false, so `active = false` from a push would silently become true.
+	local active = true
+	if opts and opts.active ~= nil then active = opts.active and true or false end
+
 	db.installed[id] = goal
 	db.state[id] = {
-		active      = (opts and opts.active ~= nil) and (opts.active and true or false) or true,
+		active      = active,
 		pinned      = false,
 		chars       = (opts and opts.chars ~= nil) and opts.chars or "all",
 		unsupported = ns.Goals.Registry.unsupportedSteps(goal),

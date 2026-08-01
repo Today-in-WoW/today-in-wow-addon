@@ -53,6 +53,7 @@ goals\ui_panel.lua
 goals\ui_matrix.lua
 goals\ui_options.lua
 goals\ui_main.lua
+goals\ui_sync.lua
 goals\minimap.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua
