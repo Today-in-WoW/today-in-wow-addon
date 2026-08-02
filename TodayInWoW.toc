@@ -1,6 +1,7 @@
-## Interface: 120007
+## Interface: 120007, 120100
+## X-Min-Interface: 120000
 ## Title: Today in WoW
-## Notes: Collects world & character data for Today in WoW (todayinwow.com).
+## Notes: Manage lists of goals for collectors and collects world & character data for Today in WoW (todayinwow.com).
 ## Author: Today in WoW
 ## Version: @project-version@
 ## SavedVariables: TiWDB
