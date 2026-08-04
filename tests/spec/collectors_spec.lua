@@ -454,6 +454,43 @@ describe("delves §3.9 collector", function()
 		assert.equal(0, #ns2.session.events)
 	end)
 
+	-- Regression: the sweep used to latch on ROWS EMITTED, so a same-day relog (where
+	-- the persisted dedup set suppresses every emit) never latched, and AREA_POIS_UPDATED
+	-- relaunched a full ~1500-map sweep for the rest of the session. Latch on POIs READ.
+	it("latches the full-world sweep on POIs read, not rows emitted: a same-day relog must not re-sweep on every AREA_POIS_UPDATED", function()
+		local char = {}
+
+		local ns1 = freshNS()          -- first login of the day: emits, fills the dedup set
+		ns1.char = char
+		loadCollector(ns1)
+		mock.fireEvent("PLAYER_ENTERING_WORLD")
+		mock.tick(0)
+		assert.equal(2, #(byKind(ns1.session.events).delve_storyline_seen or {}))
+
+		-- Count root sweeps (the login walk starts at the cosmic map; scanViewedMap
+		-- walks the viewed continent instead, so it never touches WORLD_ROOT).
+		mock.frames = {}
+		local sweeps, children = 0, _G.C_Map.GetMapChildrenInfo
+		_G.C_Map.GetMapChildrenInfo = function(mapID, ...)
+			if mapID == 946 then sweeps = sweeps + 1 end
+			return children(mapID, ...)
+		end
+
+		local ns2 = freshNS()          -- relog, same character, same day
+		ns2.char = char
+		loadCollector(ns2)
+		mock.fireEvent("PLAYER_ENTERING_WORLD")
+		mock.tick(0)
+		assert.equal(1, sweeps)
+		assert.equal(0, #ns2.session.events)   -- everything deduped: nothing emitted
+
+		for _ = 1, 5 do
+			mock.fireEvent("AREA_POIS_UPDATED")
+			mock.tick(0)
+		end
+		assert.equal(1, sweeps)                -- latched anyway; no re-sweep
+	end)
+
 	it("guards a secret variant but still emits the delve", function()
 		local ns = freshNS()
 		ns.char = {}
@@ -737,6 +774,24 @@ describe("collections §3.4 (checkpoint + reconcile: mounts/pets/toys)", functio
 		assert.same({ 100, 777 }, sortedContents(ns.account.collections.mounts))   -- delta appended to checkpoint
 	end)
 
+	-- The login scan is deferred a minute past login (core/session.lua §4), so the
+	-- dedup sets cannot wait for it: an unsuppressed add APPENDS to col[cat], and a
+	-- duplicated id there serializes twice through Canonical.ids — the checkpoint
+	-- stops reconstructing. seed() populates the dedup sets with no scan at all.
+	it("seed() arms live-delta dedup from the checkpoint WITHOUT scanning", function()
+		local ns = freshNS()
+		installJournals({ mountIDs = { 100 }, mounts = { [100] = true } })
+		loadCollector(ns)
+		ns.account.collections = { mounts = { 100 }, h = "frozenhash" }   -- as restored from SVs
+
+		ns.Collections.seed()
+		mock.fireEvent("NEW_MOUNT_ADDED", 100)     -- already in the checkpoint -> suppressed
+
+		assert.equal(0, #ns.session.events)
+		assert.same({ 100 }, sortedContents(ns.account.collections.mounts))   -- no duplicate appended
+		assert.equal("frozenhash", ns.account.collections.h)                  -- and no scan ran
+	end)
+
 	it("refresh() runs the scan on the coroutine runner and establishes via pumped frames", function()
 		local ns = freshNS()
 		installJournals({
@@ -869,7 +924,7 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 		assert.same({ 555, 700 }, sortedContents(col.achievements))
 		assert.same({ 9001, 9002 }, sortedContents(col.decor))   -- entryType filter drops the 8
 		assert.is_not_nil(col.h)
-		assert.equal(3, col.counts.appearances)
+		assert.same({ [1] = 1, [2] = 2 }, col.counts.appearances)   -- per-transmog-category gate
 		assert.equal(2, col.counts.achievements)
 		assert.equal(2, col.counts.decor)
 		assert.equal(0, #ns.session.events)                       -- establishing pass emits nothing
@@ -880,7 +935,8 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 		ns.account.collections = {
 			mounts = {}, pets = {}, toys = {},
 			appearances = { 9999 }, achievements = { 1 }, decor = {},
-			counts = { appearances = 1, achievements = 1, decor = 0 },
+			counts = { appearances = { [1] = 1 }, achievements = 1, decor = 0 },
+			full_scan_at = mock.now,
 			h = "frozenhash",
 		}
 		local scanned = false
@@ -940,7 +996,7 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 		assert.is_true(seen["decor:9002"])
 		assert.equal(3, #observed)                                        -- exactly the new IDs
 		assert.equal("frozenhash", ns.account.collections.h)              -- baseline_hash frozen across reconcile
-		assert.equal(2, ns.account.collections.counts.appearances)        -- stored gate counts updated
+		assert.same({ [1] = 2 }, ns.account.collections.counts.appearances)  -- stored gate counts updated
 		assert.equal(2, ns.account.collections.counts.achievements)
 		assert.equal(2, ns.account.collections.counts.decor)
 	end)
@@ -1004,7 +1060,7 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 		assert.equal(0, #ns.session.events)                             -- silent first-scan, no flood
 		assert.same({ 5000, 5001, 5002 }, sortedContents(ns.account.collections.appearances))
 		assert.same({ 800, 801 }, sortedContents(ns.account.collections.achievements))
-		assert.equal(3, ns.account.collections.counts.appearances)      -- counts now seeded
+		assert.same({ [1] = 3 }, ns.account.collections.counts.appearances)   -- counts now seeded
 		assert.equal(2, ns.account.collections.counts.achievements)
 		assert.is_not_nil(ns.account.collections.h)
 		assert.not_equal("oldhash", ns.account.collections.h)           -- h re-frozen → re-baseline signal
@@ -1045,7 +1101,7 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 
 		assert.equal(0, #ns.session.events)                             -- massive jump → silent rebuild
 		assert.equal(5000, #ns.account.collections.appearances)
-		assert.equal(5000, ns.account.collections.counts.appearances)
+		assert.same({ [1] = 5000 }, ns.account.collections.counts.appearances)
 		assert.not_equal("oldhash", ns.account.collections.h)           -- re-baseline signal
 	end)
 
@@ -1086,17 +1142,23 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 		assert.equal("oldhash", ns.account.collections.h)               -- normal reconcile keeps h frozen
 	end)
 
-	it("a partial (wardrobe-filtered) appearance scan never shrinks the checkpoint or advances the gate", function()
+	it("a partial (wardrobe-filtered) appearance scan never shrinks the checkpoint", function()
 		-- GetCategoryAppearances honors the active wardrobe filter, so a scan run with
-		-- the journal filtered returns a SUBSET. The gate moved (3→5, filter-independent
-		-- count) so the scan runs, but it only sees {10,20}. The checkpoint must keep all
-		-- three stored sources (add-only union), emit nothing, and must NOT store the new
-		-- gate count — so the next unfiltered scan re-fires and captures what was hidden.
+		-- the journal filtered returns a SUBSET. Collections are add-only, so the union
+		-- absorbs that: source 30 stays in the checkpoint even though this scan can't
+		-- see it, and nothing is observed.
+		--
+		-- The gate DOES advance now. It used to be held back whenever `#fresh < #stored`,
+		-- and that guard latched permanently in the field: the stored set is a union
+		-- accumulated over sessions, so live scans (36571) never reached the stored count
+		-- (39507) and the full 4.5s walk ran every login forever. Bounded staleness via
+		-- the periodic full walk replaces it — see the FULL_RESCAN_DAYS test below.
 		local ns = freshNS()
 		ns.account.collections = {
 			mounts = {}, pets = {}, toys = {},
 			appearances = { 10, 20, 30 }, achievements = {}, decor = {},
-			counts = { appearances = 3, achievements = 0, decor = 0 },
+			counts = { appearances = { [1] = 3 }, achievements = 0, decor = 0 },
+			full_scan_at = mock.now,
 			h = "oldhash",
 		}
 		installHeavy({
@@ -1112,9 +1174,190 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 		ns.Collections.reconcile()
 
 		assert.same({ 10, 20, 30 }, sortedContents(ns.account.collections.appearances))  -- union: 30 retained
-		assert.equal(3, ns.account.collections.counts.appearances)         -- gate NOT advanced (scan was partial)
-		assert.equal(0, #ns.session.events)                               -- nothing observed
+		assert.equal(0, #ns.session.events)                               -- nothing new observed
 		assert.equal("oldhash", ns.account.collections.h)
+	end)
+
+	-- ---- per-transmog-category gating (the 4462ms → ~0 fix) ----------------------
+
+	it("skips transmog categories whose collected count did not move, and scans only the one that did", function()
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 10, 20 }, achievements = {}, decor = {},
+			counts = { appearances = { [1] = 1, [2] = 1 }, achievements = 0, decor = 0 },
+			full_scan_at = mock.now,
+			h = "oldhash",
+		}
+		local walked = {}
+		installHeavy({
+			transmogCategories = 2,
+			appearances = { [1] = { { visualID = 1 } }, [2] = { { visualID = 2 } } },
+			sources = { [1] = { 10 }, [2] = { 20, 21 } },
+			collectedSrc = { [10] = true, [20] = true, [21] = true },
+			catCount = { [1] = 1, [2] = 2 },        -- only category 2 moved
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		local realGet = _G.C_TransmogCollection.GetCategoryAppearances
+		_G.C_TransmogCollection.GetCategoryAppearances = function(cat)
+			walked[cat] = true
+			return realGet(cat)
+		end
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.is_nil(walked[1])                                        -- unchanged category never walked
+		assert.is_true(walked[2])
+		assert.same({ 10, 20, 21 }, sortedContents(ns.account.collections.appearances))
+		assert.equal(1, #ns.session.events)                             -- source 21 observed
+		assert.same({ [1] = 1, [2] = 2 }, ns.account.collections.counts.appearances)
+	end)
+
+	it("advances the gate even when the live scan returns FEWER ids than the checkpoint (the latch regression)", function()
+		-- The field bug: stored 39507 sources (add-only union), live scan 36571, so the
+		-- old `#fresh >= #stored` guard never let the count advance and the full walk ran
+		-- every login forever. The count must move regardless of how the totals compare.
+		local ns = freshNS()
+		local stored = {}
+		for i = 1, 50 do stored[i] = i end
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = stored, achievements = {}, decor = {},
+			counts = { appearances = { [1] = 50 }, achievements = 0, decor = 0 },
+			full_scan_at = mock.now,
+			h = "oldhash",
+		}
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 1 } } },
+			sources = { [1] = { 1 } },
+			collectedSrc = { [1] = true },          -- live scan sees 1 id vs 50 stored
+			catCount = { [1] = 7 },                 -- count moved 50 → 7
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.same({ [1] = 7 }, ns.account.collections.counts.appearances)   -- advanced, no latch
+		assert.equal(50, #ns.account.collections.appearances)                 -- union kept everything
+	end)
+
+	it("a legacy numeric counts.appearances forces one full walk, then stores the per-category table", function()
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 10 }, achievements = {}, decor = {},
+			counts = { appearances = 3, achievements = 0, decor = 0 },   -- OLD shape: a number
+			h = "oldhash",
+		}
+		installHeavy({
+			transmogCategories = 2,
+			appearances = { [1] = { { visualID = 1 } }, [2] = { { visualID = 2 } } },
+			sources = { [1] = { 10 }, [2] = { 20 } },
+			collectedSrc = { [10] = true, [20] = true },
+			catCount = { [1] = 1, [2] = 1 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.same({ [1] = 1, [2] = 1 }, ns.account.collections.counts.appearances)
+		assert.same({ 10, 20 }, sortedContents(ns.account.collections.appearances))
+		assert.equal(1, #ns.session.events)                     -- 20 is genuinely new → observed, not smothered
+		assert.is_number(ns.account.collections.full_scan_at)
+	end)
+
+	it("re-walks every category once FULL_RESCAN_DAYS have passed, bounding what a filtered scan can hide", function()
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 10 }, achievements = {}, decor = {},
+			counts = { appearances = { [1] = 1, [2] = 1 }, achievements = 0, decor = 0 },
+			full_scan_at = mock.now - (8 * 86400),        -- stale: last full walk 8 days ago
+			h = "oldhash",
+		}
+		local walked = {}
+		installHeavy({
+			transmogCategories = 2,
+			appearances = { [1] = { { visualID = 1 } }, [2] = { { visualID = 2 } } },
+			sources = { [1] = { 10 }, [2] = { 20 } },
+			collectedSrc = { [10] = true, [20] = true },
+			catCount = { [1] = 1, [2] = 1 },                     -- NOTHING moved
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		local realGet = _G.C_TransmogCollection.GetCategoryAppearances
+		_G.C_TransmogCollection.GetCategoryAppearances = function(cat)
+			walked[cat] = true
+			return realGet(cat)
+		end
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.is_true(walked[1])                               -- both walked despite unchanged counts
+		assert.is_true(walked[2])
+		assert.same({ 10, 20 }, sortedContents(ns.account.collections.appearances))
+		assert.equal(mock.now, ns.account.collections.full_scan_at)   -- timer reset
+	end)
+
+	it("leaves the stored array untouched when nothing was scanned and nothing is new", function()
+		-- Rebuilding + sorting the checkpoint array is ~17ms on a 39507-entry set and
+		-- produced a byte-identical result on every quiet login. Identity proves the
+		-- rebuild was skipped, not just that the contents matched.
+		local ns = freshNS()
+		local stored = { 10, 20, 30 }
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = stored, achievements = {}, decor = {},
+			counts = { appearances = { [1] = 1 }, achievements = 0, decor = 0 },
+			full_scan_at = mock.now,
+			h = "oldhash",
+		}
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 1 } } },
+			sources = { [1] = { 10 } },
+			collectedSrc = { [10] = true },
+			catCount = { [1] = 1 },                      -- unchanged: nothing to scan
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.is_true(ns.account.collections.appearances == stored)   -- same table, not a copy
+		assert.equal("oldhash", ns.account.collections.h)
+	end)
+
+	it("skips the walk entirely when no category moved and the full-walk timer is fresh", function()
+		local ns = freshNS()
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = { 10 }, achievements = {}, decor = {},
+			counts = { appearances = { [1] = 1 }, achievements = 0, decor = 0 },
+			full_scan_at = mock.now,
+			h = "oldhash",
+		}
+		local walked = false
+		installHeavy({
+			transmogCategories = 1,
+			appearances = { [1] = { { visualID = 1 } } },
+			sources = { [1] = { 10 } },
+			collectedSrc = { [10] = true },
+			catCount = { [1] = 1 },
+			achCategories = {}, achievements = {}, achCountChar = 0,
+			decorResults = {}, decorCount = 0,
+		})
+		_G.C_TransmogCollection.GetCategoryAppearances = function() walked = true; return nil end
+		loadCollector(ns)
+		ns.Collections.reconcile()
+
+		assert.is_false(walked)                                -- the whole 4.5s walk skipped
+		assert.same({ 10 }, sortedContents(ns.account.collections.appearances))
+		assert.equal("oldhash", ns.account.collections.h)      -- checkpoint untouched
 	end)
 
 	it("reconcile(force) re-baselines: same moderate gain stays silent and re-freezes h (/tiw collect, rebaseline_requested §6)", function()
@@ -1152,7 +1395,7 @@ describe("collections §3.4 (heavy categories: appearances / achievements / deco
 
 		assert.equal(0, #ns.session.events)                            -- silent: checkpoint re-ships, no deltas
 		assert.equal(600, #ns.account.collections.appearances)         -- full scan applied
-		assert.equal(600, ns.account.collections.counts.appearances)
+		assert.same({ [1] = 600 }, ns.account.collections.counts.appearances)
 		assert.not_equal("oldhash", ns.account.collections.h)          -- h re-frozen → site refetches checkpoint
 	end)
 
@@ -2571,5 +2814,143 @@ describe("quest_lines §3.18 collector (questline_offered, availability scan + d
 		mock.now = mock.now + 86400                   -- next day -> bucket flips, re-emits
 		process(ns, 2393, line)
 		assert.equal(2, #ns.session.events)
+	end)
+end)
+
+-- The same latch that broke appearances also sat on every gateCount category.
+-- achievements read live=4965 against stored=5308 in the field (GetCategoryList
+-- does not enumerate every earned achievement), so `#fresh >= #stored` never held
+-- and the gate never advanced.
+describe("collections §3.4 gate advance (the latch regression)", function()
+	local function gateNS()
+		local ns = { collectors = {} }
+		for _, f in ipairs({ "core/hash.lua", "core/canonical.lua", "core/chain.lua",
+		                     "core/baseline.lua", "core/eventlog.lua", "core/util.lua",
+		                     "core/secrets.lua", "core/scheduler.lua", "core/snapshot.lua" }) do
+			assert(loadfile(f))("TiW", ns)
+		end
+		ns.SCHEMA_VERSION = 1
+		ns.account = { collections = {} }
+		ns.session = { snapshot = { tail = "00000000" }, session_tail = "00000000",
+		               events = {}, next_seq = 1 }
+		return ns
+	end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; _G.TiWDB = nil
+	end)
+	after_each(function()
+		_G.C_TransmogCollection, _G.Enum = nil, nil
+		_G.GetCategoryList, _G.GetCategoryNumAchievements, _G.GetAchievementInfo = nil, nil, nil
+		_G.GetNumCompletedAchievements, _G.C_HousingCatalog = nil, nil
+		_G.debugprofilestop = nil
+	end)
+
+	it("advances the achievements gate even when the live scan enumerates FEWER than stored", function()
+		local ns = gateNS()
+		local stored = {}
+		for i = 1, 40 do stored[i] = i end
+		ns.account.collections = {
+			mounts = {}, pets = {}, toys = {},
+			appearances = {}, achievements = stored, decor = {},
+			counts = { achievements = 40, decor = 0 },
+			full_scan_at = mock.now,
+			h = "oldhash",
+		}
+		_G.Enum = { TransmogCollectionTypeMeta = { MinValue = 1, MaxValue = 1 },
+		            HousingCatalogEntryType = { Decor = 1 } }
+		_G.C_TransmogCollection = {
+			GetCategoryAppearances = function() return {} end,
+			GetAllAppearanceSources = function() return {} end,
+			PlayerHasTransmogItemModifiedAppearance = function() return false end,
+			GetCategoryCollectedCount = function() return 0 end,
+		}
+		_G.GetCategoryList = function() return { 92 } end
+		_G.GetCategoryNumAchievements = function() return 1 end
+		_G.GetAchievementInfo = function() return 1, "n", 0, true end   -- only 1 enumerable
+		_G.GetNumCompletedAchievements = function() return 100, 37 end  -- live count 37 < stored 40
+		_G.C_HousingCatalog = nil
+
+		assert(loadfile("collectors/collections.lua"))("TiW", ns)
+		ns.Collections.reconcile()
+
+		assert.equal(37, ns.account.collections.counts.achievements)   -- advanced despite 1 < 40
+		assert.equal(40, #ns.account.collections.achievements)         -- union kept everything
+	end)
+end)
+
+-- §4/§5 invisibility: the scan yields on a per-frame TIME budget. A fixed item
+-- count could not serve both regimes — the same walk measured 0.03ms and 0.7ms
+-- per item — so the pacing is measured in milliseconds of frame time.
+describe("collections scan budget", function()
+	local function loadFresh()
+		local ns = { collectors = {} }
+		for _, f in ipairs({ "core/hash.lua", "core/canonical.lua", "core/chain.lua",
+		                     "core/baseline.lua", "core/eventlog.lua", "core/util.lua",
+		                     "core/secrets.lua", "core/scheduler.lua", "core/snapshot.lua" }) do
+			assert(loadfile(f))("TiW", ns)
+		end
+		ns.SCHEMA_VERSION = 1
+		ns.account = { collections = {} }
+		ns.session = { snapshot = { tail = "00000000" }, session_tail = "00000000",
+		               events = {}, next_seq = 1 }
+		assert(loadfile("collectors/collections.lua"))("TiW", ns)
+		return ns
+	end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; _G.TiWDB = nil
+		_G.C_MountJournal = nil; _G.C_ToyBox = nil; _G.C_PetJournal = nil
+		_G.debugprofilestop = nil
+	end)
+	after_each(function() _G.C_MountJournal = nil; _G.debugprofilestop = nil end)
+
+	it("defaults to 2ms and only accepts the offered budgets", function()
+		local ns = loadFresh()
+		assert.equal(2, ns.Collections.GetScanBudget())
+		assert.same({ 0.5, 1, 2, 4 }, ns.Collections.SCAN_BUDGETS)
+
+		assert.is_true(ns.Collections.SetScanBudget(0.5))
+		assert.equal(0.5, ns.Collections.GetScanBudget())
+		assert.is_true(ns.Collections.SetScanBudget("4"))          -- the dropdown hands back strings
+		assert.equal(4, ns.Collections.GetScanBudget())
+
+		assert.is_false(ns.Collections.SetScanBudget(3))           -- not on the list
+		assert.equal(4, ns.Collections.GetScanBudget())            -- unchanged
+		assert.is_false(ns.Collections.SetScanBudget("nonsense"))
+	end)
+
+	it("falls back to the default when the stored value is junk", function()
+		local ns = loadFresh()
+		_G.TiWDB = { settings = { scanBudgetMs = 999 } }
+		assert.equal(2, ns.Collections.GetScanBudget())
+	end)
+
+	it("yields across frames once the budget is spent, instead of after a fixed item count", function()
+		local ns = loadFresh()
+		-- A clock advancing 1ms per read: with the 2ms budget the walk cannot
+		-- complete in one frame, however few items it has.
+		local t = 0
+		_G.debugprofilestop = function() t = t + 1; return t end
+		local ids = {}
+		for i = 1, 2000 do ids[i] = i end
+		_G.C_MountJournal = {
+			GetMountIDs = function() return ids end,
+			GetMountInfoByID = function() return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, true end,
+		}
+
+		local done = false
+		ns.Collections.refresh(function() done = true end)
+		mock.tick(0)
+		assert.is_false(done)                       -- yielded: one frame was not enough
+
+		-- A 1ms-per-read clock against the 2ms budget yields roughly every other
+		-- item, so a 2000-entry journal needs ~1000 frames to drain.
+		for _ = 1, 3000 do
+			if done then break end
+			mock.tick(0)
+		end
+		assert.is_true(done)
+		assert.equal(2000, #ns.account.collections.mounts)   -- and the result is complete
 	end)
 end)

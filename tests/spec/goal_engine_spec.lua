@@ -201,3 +201,73 @@ describe("engine goal-level done events", function()
 		assert.equal(base + 1, renders)             -- done change → exactly one render
 	end)
 end)
+
+-- /tiw engine: the counters that name a background drumbeat. The engine only ever
+-- works because an event marked something stale, so an event that keeps costing
+-- evaluations while never changing a result has to be identifiable.
+describe("engine diagnostics counters", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	it("attributes fires and marked refs to the event that caused them", function()
+		local ns, mock = harness()
+		fakeEvaluator(ns, "ev_one", "EV_ONE")
+		fakeEvaluator(ns, "ev_two", "EV_TWO")
+		installGoal(ns, "tiw:a", "ev_one")
+		installGoal(ns, "tiw:b", "ev_two")
+		ns.Goals.Engine.Start()
+		mock.advance(1)
+		ns.Goals.Engine.resetStats()
+
+		mock.fireEvent("EV_ONE")
+		mock.fireEvent("EV_ONE")
+		mock.advance(ns.Goals.Engine.DEBOUNCE)
+
+		local s = ns.Goals.Engine.stats()
+		assert.equal(2, s.events.EV_ONE.fires)
+		assert.equal(2, s.events.EV_ONE.marked)   -- one ref listens, marked per fire
+		assert.is_nil(s.events.EV_TWO)            -- never fired, never booked
+		assert.equal(1, s.passes)                 -- the burst collapsed into one pass
+		assert.equal(1, s.evaluated)              -- only the dirty ref re-evaluated
+		assert.equal(1, s.evaluators.ev_one)
+	end)
+
+	it("marks a noisy event: it costs evaluations but never changes a result", function()
+		local ns, mock = harness()
+		local fake = fakeEvaluator(ns, "fake", "EV_NOISE")
+		installGoal(ns, "tiw:a", "fake")
+		ns.Goals.Engine.SetRender(function() end)
+		ns.Goals.Engine.Start()
+		mock.advance(1)
+		ns.Goals.Engine.resetStats()
+
+		for _ = 1, 5 do                            -- five passes, answer never moves
+			mock.fireEvent("EV_NOISE")
+			mock.advance(ns.Goals.Engine.DEBOUNCE)
+		end
+		local s = ns.Goals.Engine.stats()
+		assert.equal(5, s.events.EV_NOISE.fires)
+		assert.equal(5, s.events.EV_NOISE.marked)
+		assert.equal(0, s.events.EV_NOISE.changed)   -- the noise signature
+		assert.equal(0, s.renders)
+
+		fake.done = true                             -- now the answer moves
+		mock.fireEvent("EV_NOISE")
+		mock.advance(ns.Goals.Engine.DEBOUNCE)
+		assert.equal(1, ns.Goals.Engine.stats().events.EV_NOISE.changed)
+	end)
+
+	it("resetStats zeroes the window", function()
+		local ns, mock = harness()
+		fakeEvaluator(ns, "fake", "EV_ONE")
+		installGoal(ns, "tiw:a", "fake")
+		ns.Goals.Engine.Start()
+		mock.advance(1)
+		assert.is_true(ns.Goals.Engine.stats().passes > 0)
+
+		ns.Goals.Engine.resetStats()
+		local s = ns.Goals.Engine.stats()
+		assert.equal(0, s.passes)
+		assert.equal(0, s.evaluated)
+		assert.same({}, s.events)
+	end)
+end)

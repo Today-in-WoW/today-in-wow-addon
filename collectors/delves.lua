@@ -90,15 +90,24 @@ local function emitDelve(mapID, delveID, info)
 	end
 end
 
+-- Returns how many delve POIs actually RESOLVED on this map (info non-nil) —
+-- the signal that POI data has streamed in, independent of whether anything was
+-- emitted (daily dedup suppresses the emits on a same-day relog). fullWorldScan
+-- latches on this, not on emits.
 local function scanMap(mapID)
-	if not mapID then return end
-	if not (C_AreaPoiInfo and C_AreaPoiInfo.GetDelvesForMap) then return end
+	if not mapID then return 0 end
+	if not (C_AreaPoiInfo and C_AreaPoiInfo.GetDelvesForMap) then return 0 end
 	local delveIDs = C_AreaPoiInfo.GetDelvesForMap(mapID)
-	if not delveIDs then return end
+	if not delveIDs then return 0 end
+	local found = 0
 	for _, delveID in ipairs(delveIDs) do
 		local info = C_AreaPoiInfo.GetAreaPOIInfo(mapID, delveID)
-		if info then emitDelve(mapID, delveID, info) end
+		if info then
+			found = found + 1
+			emitDelve(mapID, delveID, info)
+		end
 	end
+	return found
 end
 
 -- Delves live on each ZONE map, not on the continent map above them — so viewing
@@ -132,30 +141,43 @@ local WORLD_ROOT = 946   -- Cosmic map; allDescendants reaches every continent/z
 
 -- POI data is not loaded at login — it streams in shortly after, signalled by
 -- AREA_POIS_UPDATED. So fullWorldScan is RE-ATTEMPTED on that signal until one
--- attempt actually emits delves (fullScanOK), then we stop full-sweeping and let
--- scanViewedMap handle incremental navigation. `scanning` guards against launching
--- overlapping sweeps; per-delve daily dedup makes any overlap/repeat idempotent.
-local scanning, fullScanOK = false, false
+-- attempt actually READS delve POIs (fullScanOK), then we stop full-sweeping and
+-- let scanViewedMap handle incremental navigation. `scanning` guards against
+-- launching overlapping sweeps; per-delve daily dedup makes any repeat idempotent.
+--
+-- The latch is on POIs RESOLVED, not on rows emitted. Emitted-rows was wrong: the
+-- per-day dedup set is persisted on ns.char, so on any relog after the first login
+-- of the day every delve is already deduped and the sweep emits nothing — the latch
+-- never closed and AREA_POIS_UPDATED (which fires repeatedly, and on every zone
+-- change) kept relaunching a full ~1500-map sweep for the rest of the session. That
+-- was the addon's dominant CPU cost. Resolving a delve POI is the real "POI data has
+-- arrived" signal and is independent of dedup.
+--
+-- MAX_SWEEPS is the backstop for a client that never returns delve POIs at all (an
+-- old/edge build): give up full-sweeping rather than retry forever.
+local MAX_SWEEPS = 5
+local scanning, fullScanOK, sweeps = false, false, 0
 
 local function fullWorldScan()
-	if scanning or fullScanOK then return end
+	if scanning or fullScanOK or sweeps >= MAX_SWEEPS then return end
 	if not ns.session then return end
 	if not (C_Map and C_Map.GetMapChildrenInfo and ns.Schedule) then return end
 	scanning = true
+	sweeps = sweeps + 1
 	ns.Schedule.Run(function()
 		local maps = C_Map.GetMapChildrenInfo(WORLD_ROOT, nil, true) or {}
-		local before = ns.session and ns.session.next_seq or 0
+		local found = 0
 		for i = 1, #maps do
-			scanMap(maps[i].mapID)
+			found = found + scanMap(maps[i].mapID)
 			if i % 25 == 0 then coroutine.yield() end
 		end
 		scanning = false
-		-- Latch once an attempt actually produced delves; until then AREA_POIS_UPDATED
-		-- keeps retrying (POI data streams in after login). emitted counts this scan's
-		-- own rows; it over-counts if another collector emits concurrently, which is
-		-- harmless here — we only test > 0.
-		if (ns.session and ns.session.next_seq or 0) > before then fullScanOK = true end
-	end)
+		if found > 0 then fullScanOK = true end
+		if ns.dbg then
+			ns.dbg(string.format("delves: sweep %d/%d over %d maps — %d POIs%s",
+				sweeps, MAX_SWEEPS, #maps, found, fullScanOK and " (latched)" or ""))
+		end
+	end, "delves sweep")
 end
 
 -- Triggers: OnMapChanged fires on open and on every continent/zone navigation

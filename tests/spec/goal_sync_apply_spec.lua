@@ -131,6 +131,50 @@ describe("sync §9 apply — install", function()
 		assert.equal("all", st.chars)                  -- §9 default assignment
 	end)
 
+	it("pins a newly added goal to the TOP, above anything already pinned", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().crest_cap)
+		S.setPinned("tiw:dev-crests", true)
+		ns.Goals.Sync.apply(payload(500, "tiw:dev-mount",
+			{ updated_at = 100, rev = 1, active = true, def = fixtures().mount_account }))
+		assert.is_true(TiWDB.goals.state["tiw:dev-mount"].pinned)
+		assert.same({ "tiw:dev-mount", "tiw:dev-crests" }, ids(S.ordered().pinned))
+	end)
+
+	it("pins a whole batch in a stable order", function()
+		local ns = harness()
+		ns.Goals.Sync.apply({
+			generated_at = 500,
+			subs = {
+				["tiw:dev-mount"]  = { updated_at = 100, rev = 1, active = true, def = fixtures().mount_account },
+				["tiw:dev-crests"] = { updated_at = 100, rev = 2, active = true, def = fixtures().crest_cap },
+			},
+		})
+		assert.same({ "tiw:dev-crests", "tiw:dev-mount" }, ids(ns.Goals.Store.ordered().pinned))
+	end)
+
+	it("does NOT re-pin on a refresh — an unpinned goal stays unpinned", function()
+		local ns, mock = harness()
+		mock.now = 50
+		ns.Goals.Store.install(fixtures().mount_account)   -- lands unpinned
+		local newer = fixtures().mount_account
+		newer.rev = 2
+		local r = ns.Goals.Sync.apply(payload(500, "tiw:dev-mount",
+			{ updated_at = 10, rev = 2, active = true, def = newer }))
+		assert.same({ "tiw:dev-mount" }, ids(r.refreshed))
+		assert.is_false(TiWDB.goals.state["tiw:dev-mount"].pinned)
+	end)
+
+	it("does NOT pin on an active flip", function()
+		local ns, mock = harness()
+		mock.now = 50
+		ns.Goals.Store.install(fixtures().mount_account)
+		ns.Goals.Sync.apply(payload(500, "tiw:dev-mount",
+			{ updated_at = 100, rev = 1, active = false, def = fixtures().mount_account }))
+		assert.is_false(TiWDB.goals.state["tiw:dev-mount"].pinned)
+	end)
+
 	it("does not install over a newer tombstone (Case B, end to end)", function()
 		local ns, mock = harness()
 		ns.Goals.Store.install(fixtures().mount_account)

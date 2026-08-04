@@ -1831,16 +1831,10 @@ local function buildImport()
 	-- the given order: setSectionOrder renumbers the listed ids 1..N and sets
 	-- pinned=true, so prepending the new ids to the current pinned order both pins
 	-- them and makes them first. Accepts a single id or an ordered list.
+	-- Store owns ordering; the site-push path (goals/sync.lua) pins new goals the
+	-- same way, so the rule lives in one place.
 	local function pinToTop(idOrList)
-		local newIds = type(idOrList) == "table" and idOrList or { idOrList }
-		local order, seen = {}, {}
-		for _, id in ipairs(newIds) do
-			if not seen[id] then order[#order + 1] = id; seen[id] = true end
-		end
-		for _, rec in ipairs(ns.Goals.Store.ordered().pinned) do
-			if not seen[rec.id] then order[#order + 1] = rec.id end
-		end
-		ns.Goals.Store.setSectionOrder(true, order)
+		ns.Goals.Store.pinToTop(idOrList)
 	end
 
 	local importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -2572,6 +2566,15 @@ local function newSettingDropdown(parent, d)
 	field:SetScript("OnLeave", function() field:SetBackdropBorderColor(1, 1, 1, 0.18) end)
 	field:SetScript("OnClick", function() if list:IsShown() then close() else open() end end)
 
+	-- Optional setting-wide subtitle, under the control (the per-option `desc`
+	-- lives in each row's hover tooltip instead).
+	local sub
+	if d.subtitle then
+		sub = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+		sub:SetJustifyH("LEFT"); sub:SetWordWrap(true); sub:SetText(d.subtitle)
+		sub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
+	end
+
 	local c = {}
 	function c:refresh()
 		local o = ns.Goals.SettingsOption(d, d.get())
@@ -2582,7 +2585,10 @@ local function newSettingDropdown(parent, d)
 		label:ClearAllPoints(); label:SetPoint("TOPLEFT", 0, y)
 		field:ClearAllPoints(); field:SetPoint("TOPLEFT", 0, y - 20)
 		field:SetWidth(math.min(280, width))
-		return 46
+		if not sub then return 46 end
+		sub:SetWidth(width)
+		sub:ClearAllPoints(); sub:SetPoint("TOPLEFT", 0, y - 48)
+		return 48 + math.ceil(sub:GetStringHeight()) + 2
 	end
 	return c
 end

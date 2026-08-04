@@ -69,9 +69,11 @@ first-login prompt. The state lives in `core/consent.lua` and has three levels:
 
 - **Off** (default) — nothing leaves your client; collectors don't record.
 - **Generic only** — anonymous world data (world quests, events, delves, rare
-  kills, quests seen) with **no character identity**. The character GUID is
-  flattened to `Player-<realmID>-00000000`, keeping the realm (needed server-side)
-  but dropping the identity.
+  kills, quests seen) **and your goal list**, with **no character identity**. The
+  character GUID is flattened to `Player-<realmID>-00000000`, keeping the realm
+  (needed server-side) but dropping the identity. The goal list is what makes
+  two-way goal sync with the website work; it is a list of content slugs, not
+  progress.
 - **Everything** — also shares your personal character sync (progress,
   collections, currencies) *and* the anonymous generic contribution. Required for
   the site's character-tracking features. The bundling is always disclosed, never

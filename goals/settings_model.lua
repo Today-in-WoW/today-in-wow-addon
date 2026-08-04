@@ -30,12 +30,40 @@ local CONSENT_OPTIONS = {
 	{ value = "none", label = "Off",
 	  desc = "Nothing leaves your client, your data stays private." },
 	{ value = "generic", label = "Generic Only",
-	  desc = "Collects anonymous world data only (world quests, events, delves, rare kills, "
-		.. "quests seen) with no character identity. Your personal progress stays local." },
+	  desc = "Collects anonymous world data (world quests, events, delves, rare kills, "
+		.. "quests seen) and your goal list, with no character identity. "
+		.. "Your personal progress stays local." },
 	{ value = "everything", label = "Everything",
 	  desc = "Also collects your personal character sync (progress, collections, currencies) "
 		.. "and the generic world contribution. This is required if you're using "
 		.. "the character tracking features on the site." },
+}
+
+-- How much of each frame the background collection scan may spend
+-- (collectors/collections.lua SCAN_BUDGETS). The scan yields once it has used its
+-- budget, so a smaller number costs less per frame and simply takes longer to
+-- finish — the total work is the same either way.
+local SCAN_SPEED_OPTIONS = {
+	{ value = "0.5", label = "Slowest (0.5ms)",
+	  desc = "Least impact on your framerate; the scan takes the longest to finish." },
+	{ value = "1", label = "Slow (1ms)",
+	  desc = "Very light on your framerate." },
+	{ value = "2", label = "Normal (2ms)",
+	  desc = "The default. Roughly a tenth of a frame at 60fps." },
+	{ value = "4", label = "Fast (4ms)",
+	  desc = "Finishes soonest, and is the most likely to be noticeable while it runs." },
+}
+
+-- How often the world-quest collector re-walks every zone map
+-- (collectors/world_quests.lua SCAN_INTERVALS). Each walk is ~120ms of work spread
+-- over ~10 frames, so the interval is what decides its background cost.
+local WQ_SPEED_OPTIONS = {
+	{ value = "60", label = "Every 1 Minute",
+	  desc = "Freshest world-quest data, and the most frequent background work." },
+	{ value = "300", label = "Every 5 Minutes",
+	  desc = "The default. World quests turn over on the hour, so little is missed." },
+	{ value = "600", label = "Every 10 Minutes",
+	  desc = "Lightest on your framerate." },
 }
 
 -- Points layout at Edit Mode rather than duplicating position/size sliders.
@@ -72,7 +100,7 @@ end
 -- headers by both surfaces). Data collection sits last under its own category:
 -- a dropdown whose per-option tooltips carry the full disclosure.
 function ns.Goals.SettingsModel()
-	return {
+	local model = {
 		{ kind = "header", text = "Goal Settings" },
 		{
 			kind = "checkbox", key = "TIW_SHOW_TRACKER", label = "Show goal tracker",
@@ -128,7 +156,50 @@ function ns.Goals.SettingsModel()
 			get = function() return ns.Consent.get() end,
 			set = function(v) ns.Consent.set(v) end,
 		},
+		{
+			kind = "dropdown", key = "TIW_SCAN_SPEED", label = "Collection Scan Speed",
+			subtitle = "Reducing the scan speed may increase your FPS. The scan takes longer "
+				.. "to finish, but takes less of each frame while it runs.",
+			options = SCAN_SPEED_OPTIONS,
+			-- Values are STRINGS: the Blizzard panel registers dropdowns as
+			-- Settings.VarType.String, so the number round-trips through tostring.
+			get = function()
+				return tostring(ns.Collections and ns.Collections.GetScanBudget
+					and ns.Collections.GetScanBudget() or 2)
+			end,
+			set = function(v)
+				if ns.Collections and ns.Collections.SetScanBudget then
+					ns.Collections.SetScanBudget(tonumber(v))
+				end
+			end,
+		},
+		{
+			kind = "dropdown", key = "TIW_WQ_SCAN_SPEED", label = "World Quest Scan Speed",
+			subtitle = "How often world quests are re-checked. Scanning less often may "
+				.. "increase your FPS; world quests rotate on the hour, so little is missed.",
+			options = WQ_SPEED_OPTIONS,
+			get = function()
+				local wq = ns.collectors and ns.collectors.world_quests
+				return tostring(wq and wq.GetScanInterval and wq.GetScanInterval() or 300)
+			end,
+			set = function(v)
+				local wq = ns.collectors and ns.collectors.world_quests
+				if wq and wq.SetScanInterval then wq.SetScanInterval(tonumber(v)) end
+			end,
+		},
 	}
+
+	-- Companion-app health, appended rather than inlined so the model keeps its
+	-- rule that load order does not matter (core/app_status.lua is absent in
+	-- headless specs that load this file alone). Evaluated per call, so it shows
+	-- the app's state as of the last login rather than a value frozen at load —
+	-- sharing does nothing if the app is not running, and this is where a user
+	-- looks when they suspect it is not.
+	if ns.AppStatus then
+		model[#model + 1] = { kind = "note", text = ns.AppStatus.summary() }
+	end
+
+	return model
 end
 
 -- The option descriptor for a dropdown's current value (shared by both

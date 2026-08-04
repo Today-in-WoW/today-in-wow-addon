@@ -121,3 +121,98 @@ describe("SettingsModel", function()
 		assert.is_nil(ns.Goals.SettingsOption(d, "nope"))
 	end)
 end)
+
+-- "Collection Scan Speed": the per-frame CPU budget the background collection
+-- scan may spend. Bound to collectors/collections.lua, which owns the value.
+describe("SettingsModel — Collection Scan Speed", function()
+	local function withCollections()
+		local ns = harness()
+		local budget = 2
+		ns.Collections = {
+			GetScanBudget = function() return budget end,
+			SetScanBudget = function(v) budget = v end,
+		}
+		return ns, function() return budget end
+	end
+
+	it("offers the four budgets, labelled with their millisecond cost", function()
+		local ns = withCollections()
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_SCAN_SPEED")
+		assert.equal("Collection Scan Speed", d.label)
+		assert.equal("dropdown", d.kind)
+		local labels = {}
+		for _, o in ipairs(d.options) do labels[#labels + 1] = o.label end
+		assert.same({ "Slowest (0.5ms)", "Slow (1ms)", "Normal (2ms)", "Fast (4ms)" }, labels)
+	end)
+
+	it("carries a subtitle explaining the framerate trade", function()
+		local ns = withCollections()
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_SCAN_SPEED")
+		assert.is_string(d.subtitle)
+		assert.is_truthy(d.subtitle:lower():find("fps"))
+	end)
+
+	it("round-trips through Collections as a string value (the panel's VarType.String)", function()
+		local ns, budget = withCollections()
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_SCAN_SPEED")
+		assert.equal("2", d.get())                     -- string, matching option values
+		d.set("0.5")
+		assert.equal(0.5, budget())                    -- stored as a number
+		assert.equal("0.5", byKey(ns.Goals.SettingsModel(), "TIW_SCAN_SPEED").get())
+		assert.is_not_nil(ns.Goals.SettingsOption(d, "0.5"))
+	end)
+
+	it("degrades to the default when Collections isn't loaded (headless)", function()
+		local ns = harness()                           -- no ns.Collections
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_SCAN_SPEED")
+		assert.equal("2", d.get())
+		assert.has_no.errors(function() d.set("1") end)
+	end)
+end)
+
+-- "World Quest Scan Speed": how often the collector re-walks every zone map.
+describe("SettingsModel — World Quest Scan Speed", function()
+	local function withWQ()
+		local ns = harness()
+		local secs = 300
+		ns.collectors = { world_quests = {
+			GetScanInterval = function() return secs end,
+			SetScanInterval = function(v) secs = v end,
+		} }
+		return ns, function() return secs end
+	end
+
+	it("offers 1 / 5 / 10 minutes and defaults to 5", function()
+		local ns = withWQ()
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_WQ_SCAN_SPEED")
+		assert.equal("World Quest Scan Speed", d.label)
+		local labels = {}
+		for _, o in ipairs(d.options) do labels[#labels + 1] = o.label end
+		assert.same({ "Every 1 Minute", "Every 5 Minutes", "Every 10 Minutes" }, labels)
+		assert.equal("300", d.get())
+	end)
+
+	it("round-trips the interval in seconds", function()
+		local ns, secs = withWQ()
+		byKey(ns.Goals.SettingsModel(), "TIW_WQ_SCAN_SPEED").set("60")
+		assert.equal(60, secs())
+		assert.equal("60", byKey(ns.Goals.SettingsModel(), "TIW_WQ_SCAN_SPEED").get())
+	end)
+
+	it("sits directly after the collection scan speed setting", function()
+		local ns = withWQ()
+		local model, iScan, iWQ = ns.Goals.SettingsModel()
+		for i, d in ipairs(model) do
+			if d.key == "TIW_SCAN_SPEED" then iScan = i end
+			if d.key == "TIW_WQ_SCAN_SPEED" then iWQ = i end
+		end
+		assert.equal(iScan + 1, iWQ)
+	end)
+
+	it("degrades when the collector isn't loaded (headless)", function()
+		local ns = harness()
+		local d = byKey(ns.Goals.SettingsModel(), "TIW_WQ_SCAN_SPEED")
+		assert.equal("300", d.get())
+		assert.has_no.errors(function() d.set("600") end)
+	end)
+end)

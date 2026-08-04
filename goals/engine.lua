@@ -36,6 +36,40 @@ local dirty = {}            -- set of refs needing re-evaluation
 local results = {}          -- last result table per ref (change detection)
 local timerScheduled = false
 
+-- ---- diagnostics (/tiw engine) ---------------------------------------------
+-- The engine only ever works because an event marked something stale, so a
+-- background drumbeat — passes firing forever while nothing on screen moves —
+-- is always attributable to a specific event. These counters name it:
+--   events[ev].fires    how often the event arrived
+--   events[ev].marked   refs it marked dirty (the work it costs per fire)
+--   events[ev].changed  passes it contributed to that actually changed a result
+-- A high `marked` with `changed` at 0 is pure noise: that event is re-evaluating
+-- steps whose answers never move. Cost is a lookup and two adds per event; this
+-- is a diagnostic, not part of any contract.
+local stats
+local pendingEvents = {}   -- events that dirtied something since the last pass
+
+local function resetStats()
+	stats = { since = (GetTime and GetTime()) or 0, passes = 0, renders = 0,
+	          evaluated = 0, ms = 0, events = {}, evaluators = {} }
+	pendingEvents = {}
+end
+resetStats()
+
+local function noteEvent(event, marked)
+	local e = stats.events[event]
+	if not e then
+		e = { fires = 0, marked = 0, changed = 0 }
+		stats.events[event] = e
+	end
+	e.fires = e.fires + 1
+	e.marked = e.marked + marked
+	pendingEvents[event] = true
+end
+
+function Engine.stats() return stats end
+Engine.resetStats = resetStats
+
 -- display layer plugs in here (swappable: themes / richer displays later).
 function Engine.SetRender(fn)
 	Engine._render = fn
@@ -102,9 +136,26 @@ local function runPass()
 		if not sameResult(results[ref], res) then changed = true end
 		results[ref] = res
 		n = n + 1
+		if ref.ev then stats.evaluators[ref.ev] = (stats.evaluators[ref.ev] or 0) + 1 end
 	end
 	dirty = {}
-	if ns.dbg and t0 then ns.dbg(string.format("engine eval %.1fms (%d steps)", debugprofilestop() - t0, n)) end
+
+	local ms = t0 and (debugprofilestop() - t0) or 0
+	stats.passes = stats.passes + 1
+	stats.evaluated = stats.evaluated + n
+	stats.ms = stats.ms + ms
+	if changed then
+		stats.renders = stats.renders + 1
+		-- Credit every event that dirtied something since the last pass: the pass
+		-- is the only place we learn whether their work mattered.
+		for ev in pairs(pendingEvents) do
+			local e = stats.events[ev]
+			if e then e.changed = e.changed + 1 end
+		end
+	end
+	pendingEvents = {}
+
+	if ns.dbg and t0 then ns.dbg(string.format("engine eval %.1fms (%d steps)", ms, n)) end
 	if changed and Engine._render then
 		Engine._render(buildViewModel())
 	end
@@ -124,11 +175,13 @@ end
 local function onEvent(_, event)
 	if event == "PLAYER_ENTERING_WORLD" then
 		markAllDirty()
+		noteEvent(event, #steps + #doneRefs + #showRefs)
 	else
 		local refs = eventMap[event]
 		if refs then
 			for i = 1, #refs do dirty[refs[i]] = true end
 		end
+		noteEvent(event, refs and #refs or 0)
 	end
 	schedulePass()
 end
@@ -167,7 +220,8 @@ function Engine.Start()
 				local step = goal.steps[i]
 				local def = Registry.get(step.evaluator)
 				if def then
-					local ref = { id = rec.id, index = i, step = step, def = def }
+					local ref = { id = rec.id, index = i, step = step, def = def,
+					              ev = step.evaluator }   -- diagnostics only
 					steps[#steps + 1] = ref
 					listen(ref, step)
 					-- §3a showif: a second ref on the CONDITION's evaluator + events,
@@ -178,7 +232,8 @@ function Engine.Start()
 						local sdef = Registry.get(step.showif.evaluator)
 						if sdef then
 							local sref = { id = rec.id, index = i, step = step,
-							               params = step.showif.params, def = sdef, isShow = true }
+							               params = step.showif.params, def = sdef, isShow = true,
+							               ev = step.showif.evaluator .. " (showif)" }
 							ref.showRef = sref
 							showRefs[#showRefs + 1] = sref
 							listen(sref, step.showif)
@@ -192,7 +247,8 @@ function Engine.Start()
 			if goal.done then
 				local ddef = Registry.get(goal.done.evaluator)
 				if ddef then
-					local dref = { id = rec.id, isDone = true, params = goal.done.params, def = ddef }
+					local dref = { id = rec.id, isDone = true, params = goal.done.params, def = ddef,
+					               ev = goal.done.evaluator .. " (done)" }
 					doneRefs[#doneRefs + 1] = dref
 					listen(dref, goal.done)
 				end
@@ -200,9 +256,12 @@ function Engine.Start()
 		end
 	end
 
-	-- Login = everything dirty; same pass path as steady state.
+	-- Login = everything dirty; same pass path as steady state. Booked against a
+	-- synthetic name so /tiw engine's per-event marks still add up (Start also runs
+	-- on every activation change, not just login).
 	frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 	markAllDirty()
+	noteEvent("(Engine.Start)", #steps + #doneRefs + #showRefs)
 	schedulePass()
 end
 

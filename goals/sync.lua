@@ -160,6 +160,20 @@ function Sync.apply(payload, now)
 
 	for _, list in pairs(r) do sortById(list) end
 
+	-- Newly added goals pin to the top, exactly like a deliberate in-game import
+	-- (goals/ui_main.lua uses the same Store.pinToTop). The user asked for these
+	-- on the website, so arriving silently at the bottom of a long available list
+	-- would make the push look like it did nothing.
+	--
+	-- ONLY installs. A `refresh` is a definition update the user didn't ask for
+	-- right now, and re-pinning it would fight anyone who deliberately unpinned
+	-- the goal; an `active` flip isn't an arrival at all.
+	if #r.added > 0 then
+		local ids = {}
+		for i = 1, #r.added do ids[i] = r.added[i].id end
+		Store.pinToTop(ids)
+	end
+
 	Store.setAppliedPush(generated)
 	return r
 end

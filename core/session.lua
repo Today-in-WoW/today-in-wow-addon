@@ -14,6 +14,30 @@ local _, ns = ...
 
 local RETENTION_DAYS = 7   -- data_storage §4.1 (locked)
 
+-- Seconds past login before the collection scan runs (§4/§5 invisibility).
+--
+-- NOT a cost reduction. Deferring was first tried on the theory that the scan was
+-- expensive because the client's appearance data is cold at login — that was WRONG:
+-- moved to +60s it still measured 4583ms, because the scan is what warms the cache.
+-- The cost was a latched gate, fixed in collectors/collections.lua; a quiet login
+-- now scans nothing and the whole pass costs ~17ms.
+--
+-- The delay is kept for a different reason: whatever work the scan does do, it
+-- shouldn't do it in the window where the world is still streaming in and every
+-- other addon is initialising. It also waits again if the timer lands in combat.
+--
+-- The trade: a session shorter than SCAN_DELAY skips the reconcile of collectibles
+-- gained while the addon wasn't running (another PC, a crash). Live gains are
+-- unaffected — those emit immediately from the Blizzard add events with precise
+-- times — and the checkpoint is add-only, so the next session simply picks it up.
+local SCAN_DELAY = 60
+ns.COLLECTION_SCAN_DELAY = SCAN_DELAY   -- published for specs / diagnostics
+
+-- Published because core/app_status.lua's staleness warning is only meaningful
+-- relative to this number: it must fire BEFORE the prune starts deleting
+-- unshipped sessions. A spec asserts the two stay ordered.
+ns.RETENTION_DAYS = RETENTION_DAYS
+
 local function mintSessionID(guid)
 	-- guid + server time + a sub-second component (GetTime ms). No math.randomseed:
 	-- WoW doesn't expose it to addons, and GetTime gives intra-second uniqueness.
@@ -97,23 +121,45 @@ local function startSession()
 	-- correct (no checkpoint existed when the session began); the checkpoint ships
 	-- separately and the site can re-baseline (§3.4). We do NOT defer capture behind
 	-- the scan: that left ns.session nil for seconds, dropping the login's events.
+	-- Timed: this is the heaviest synchronous step of the login frame (it runs every
+	-- registered snapshot scanner and hash-chains the results, including the whole
+	-- completed-quest canonical). /tiw log makes it measurable instead of guessed.
+	local t0 = debugprofilestop and debugprofilestop()
 	finishSession(target, bundleGuid, opts, consent)
-	dbg("session minted " .. tostring(ns.session and ns.session.session_id))
+	dbg(string.format("session minted %s (capture %.1fms)",
+		tostring(ns.session and ns.session.session_id),
+		t0 and (debugprofilestop() - t0) or 0))
 	if ns.Collections then
+		-- The dedup sets seed NOW, synchronously: the scan is deferred (below) but
+		-- addOnce must be able to suppress a duplicate from the first live delta, or
+		-- it appends an id the checkpoint already holds (§3.4, collections.seed).
+		if ns.Collections.seed then ns.Collections.seed() end
+
 		-- Re-baseline only for a request NEWER than the one we last satisfied
 		-- (rebaseline_ack stores the request timestamp verbatim — clock-agnostic, no
 		-- server-vs-companion-clock comparison). The ack is recorded in onComplete, so
 		-- a relog before the async scan finishes re-tries; a relog after it is a no-op.
 		local col = ns.account and ns.account.collections
+		local start
 		if rebaselineAt > (col and col.rebaseline_ack or 0) then
-			dbg("collections: forced rebaseline (rebaseline_requested)")
-			ns.Collections.rebaseline(function()
-				if col then col.rebaseline_ack = rebaselineAt end
-				logScanDone("rebaseline")
-			end)
+			dbg("collections: forced rebaseline queued (rebaseline_requested)")
+			start = function()
+				ns.Collections.rebaseline(function()
+					if col then col.rebaseline_ack = rebaselineAt end
+					logScanDone("rebaseline")
+				end)
+			end
 		else
-			dbg("collections: gated refresh")
-			ns.Collections.refresh(function() logScanDone("refresh") end)
+			dbg(string.format("collections: gated refresh queued (+%ds, out of combat)", SCAN_DELAY))
+			start = function()
+				ns.Collections.refresh(function() logScanDone("refresh") end)
+			end
+		end
+
+		if ns.Schedule and ns.Schedule.Later then
+			ns.Schedule.Later(SCAN_DELAY, start)
+		else
+			start()
 		end
 	end
 end

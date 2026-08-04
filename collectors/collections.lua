@@ -35,21 +35,45 @@ local _, ns = ...
 -- ===========================================================================
 
 local owned = {}       -- cat -> { id = true }; dedup, seeded from the checkpoint
-local SCAN_CHUNK = 25  -- entries/frame for the LOGIN scan: small, so the background
-                       -- reconcile stays invisible (delve world-scan cadence, validated).
-local ELECTIVE_CHUNK = 2000  -- entries/frame for USER-INVOKED full scans (/tiw collections,
-                       -- /tiw collect): far fewer frame-boundary waits, so a ~48k-entry walk
-                       -- finishes in seconds, not minutes. Costs some FPS — fine for an
-                       -- elective action (the per-frame compute is cheap; it was the
-                       -- once-per-frame yield that made the timid login cadence crawl).
 
--- A `tick` that yields on the coroutine runner every `chunk` calls (see scanners).
-local function pacedTick(chunk)
-	local n = 0
-	return function()
-		n = n + 1
-		if n >= chunk then n = 0; coroutine.yield() end
+-- The scan paces on a per-frame CPU BUDGET, not an item count.
+--
+-- A fixed item count cannot work here. The same appearance walk measured 0.03ms
+-- per item in one run and 0.7ms in another (Aug 2026), so any chunk number is
+-- right in one regime and wrong in the other: 25 items was 0.7ms/frame when items
+-- were expensive and a pointless 6652 slices when they were cheap. Yielding on
+-- elapsed time caps the per-frame cost directly, whatever an item happens to cost,
+-- which is the actual requirement — the scan must be invisible, not fast.
+local SCAN_BUDGETS      = { 0.5, 1, 2, 4 }   -- the user-selectable ms budgets
+local DEFAULT_BUDGET_MS = 2                  -- ~12% of a 60fps frame, ~1% of the frame budget at 500fps
+local ELECTIVE_BUDGET_MS = 8                 -- /tiw collect, /tiw collections: the user is waiting
+
+-- Persisted budget (TiWDB.settings.scanBudgetMs), surfaced as "Collection Scan
+-- Speed" in the options menu. Read at the START of a scan, so a change applies to
+-- the next scan rather than mid-walk. Unknown/absent values fall back to default.
+local function budgetStore()
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	return TiWDB.settings
+end
+
+local function getScanBudget()
+	local v = tonumber(budgetStore().scanBudgetMs)
+	for i = 1, #SCAN_BUDGETS do
+		if SCAN_BUDGETS[i] == v then return v end
 	end
+	return DEFAULT_BUDGET_MS
+end
+
+local function setScanBudget(ms)
+	ms = tonumber(ms)
+	for i = 1, #SCAN_BUDGETS do
+		if SCAN_BUDGETS[i] == ms then
+			budgetStore().scanBudgetMs = ms
+			return true
+		end
+	end
+	return false
 end
 
 -- ---- scanners: current owned set as a sorted id array -----------------------
@@ -101,33 +125,45 @@ local function scanPets(tick)
 	return ids
 end
 
--- Appearances: walk every transmog category (Enum.TransmogCollectionTypeMeta
--- spans MinValue..MaxValue, broken-skipped ones return empty), then each
--- visual's sources, filter to collected. Tens of thousands of sources on a
--- veteran main — only ever invoked when the visual-count gate has moved.
+-- Appearances: ONE transmog category's collected sourceIDs, added into `set`.
+-- Walking a category means a GetAllAppearanceSources call per visual plus a
+-- PlayerHasTransmogItemModifiedAppearance call per source — ~127k calls across all
+-- ~29 categories on a veteran, which is why the per-category gate below matters.
+local function scanAppearanceCategory(cat, set, tick)
+	local TC = C_TransmogCollection
+	local appearances = TC.GetCategoryAppearances(cat)
+	if not appearances then return end
+	for i = 1, #appearances do
+		local sources = TC.GetAllAppearanceSources(appearances[i].visualID)
+		if sources then
+			for j = 1, #sources do
+				local sourceID = sources[j]
+				if TC.PlayerHasTransmogItemModifiedAppearance(sourceID) then
+					set[sourceID] = true
+				end
+				if tick then tick() end
+			end
+		end
+		if tick then tick() end
+	end
+end
+
+local function appearanceAPIReady()
+	local TC = C_TransmogCollection
+	return (TC and TC.GetCategoryAppearances and TC.GetAllAppearanceSources
+		and TC.PlayerHasTransmogItemModifiedAppearance and TC.GetCategoryCollectedCount
+		and Enum and Enum.TransmogCollectionTypeMeta) and Enum.TransmogCollectionTypeMeta or nil
+end
+
+-- Every transmog category (Enum.TransmogCollectionTypeMeta spans MinValue..MaxValue;
+-- broken-skipped ones return empty). The ungated whole-collection walk — used by the
+-- /tiw collections diagnostic and by a forced re-baseline, NOT by the login gate.
 local function scanAppearances(tick)
 	local set = {}
-	local TC = C_TransmogCollection
-	if TC and TC.GetCategoryAppearances and TC.GetAllAppearanceSources
-		and TC.PlayerHasTransmogItemModifiedAppearance and Enum and Enum.TransmogCollectionTypeMeta then
-		local meta = Enum.TransmogCollectionTypeMeta
+	local meta = appearanceAPIReady()
+	if meta then
 		for cat = meta.MinValue, meta.MaxValue do
-			local appearances = TC.GetCategoryAppearances(cat)
-			if appearances then
-				for i = 1, #appearances do
-					local sources = TC.GetAllAppearanceSources(appearances[i].visualID)
-					if sources then
-						for j = 1, #sources do
-							local sourceID = sources[j]
-							if TC.PlayerHasTransmogItemModifiedAppearance(sourceID) then
-								set[sourceID] = true
-							end
-							if tick then tick() end
-						end
-					end
-					if tick then tick() end
-				end
-			end
+			scanAppearanceCategory(cat, set, tick)
 		end
 	end
 	local ids = {}
@@ -136,15 +172,15 @@ local function scanAppearances(tick)
 	return ids
 end
 
-local function appearanceCount()
-	local TC = C_TransmogCollection
-	if not (TC and TC.GetCategoryCollectedCount and Enum and Enum.TransmogCollectionTypeMeta) then return nil end
-	local meta = Enum.TransmogCollectionTypeMeta
-	local sum = 0
+-- Live collected count per transmog category — the per-category gate input.
+local function appearanceCounts()
+	local meta = appearanceAPIReady()
+	if not meta then return nil end
+	local out = {}
 	for cat = meta.MinValue, meta.MaxValue do
-		sum = sum + (TC.GetCategoryCollectedCount(cat) or 0)
+		out[cat] = C_TransmogCollection.GetCategoryCollectedCount(cat) or 0
 	end
-	return sum
+	return out
 end
 
 -- Achievements: walk every category → category's earned achievements. Faster
@@ -186,7 +222,8 @@ local cats = {
 	mounts       = { obs = "mount",       kind = "mount_added",       key = "mountID",       scan = scanMounts },
 	pets         = { obs = "pet",         kind = "pet_added",         key = "speciesID",     scan = scanPets },
 	toys         = { obs = "toy",         kind = "toy_added",         key = "itemID",        scan = scanToys },
-	appearances  = { obs = "appearance",  kind = "appearance_added",  key = "sourceID",      scan = scanAppearances,   gateCount = appearanceCount },
+	-- appearances has no gateCount: it is gated PER TRANSMOG CATEGORY by passAppearances.
+	appearances  = { obs = "appearance",  kind = "appearance_added",  key = "sourceID",      scan = scanAppearances },
 	achievements = { obs = "achievement", kind = "achievement_earned", key = "achievementID", scan = scanAchievements, gateCount = achievementCount },
 	decor        = { obs = "decor",       kind = "decor_added",       key = "decorID",       async = true,             gateCount = decorCount },
 }
@@ -221,7 +258,7 @@ end
 --       (e.g. 8000 new of 500 stored) silently rebuilds. Both numbers must be
 --       crossed — pure absolute or pure ratio mis-classifies common cases.
 local NEW_ABS, NEW_RATIO = 1000, 10
-local function passCategory(cat, col, establishing, tick)
+local function passCategory(cat, col, establishing, tick, fullWalk)
 	local meta = cats[cat]
 	local liveCount = meta.gateCount and meta.gateCount() or nil
 	local storedCount = col.counts and col.counts[cat]
@@ -229,9 +266,9 @@ local function passCategory(cat, col, establishing, tick)
 
 	-- Count-gate: established checkpoint + count matches stored = no change since
 	-- last login, skip the (potentially expensive) scan entirely. Cheap categories
-	-- have no gate and always rescan; first-ever pass / per-category first-scan
-	-- always scan (storedCount nil).
-	if not establishing and not firstScanForCat and liveCount ~= nil and storedCount == liveCount then
+	-- have no gate and always rescan; a first-ever pass, a per-category first scan
+	-- (storedCount nil) and the periodic fullWalk all bypass it.
+	if not fullWalk and not firstScanForCat and liveCount ~= nil and storedCount == liveCount then
 		return col[cat] or {}, false
 	end
 
@@ -265,12 +302,20 @@ local function passCategory(cat, col, establishing, tick)
 	for id in pairs(set) do merged[#merged + 1] = id end
 	table.sort(merged)
 
-	-- Advance the gate count only when the scan was NOT partial (didn't return fewer
-	-- than we already had). A filtered/partial scan leaves the old (lower) count so
-	-- the next full scan re-fires the gate and captures whatever the filter hid —
-	-- without this, storing the true (filter-independent) liveCount would skip that
-	-- rescan and permanently miss the hidden gains.
-	if liveCount ~= nil and #fresh >= storedCt then
+	-- The gate count ALWAYS advances. It used to be held back whenever the scan
+	-- looked partial (`#fresh < #stored`), so that a wardrobe-filtered read couldn't
+	-- mark a category clean. In the field that guard never released: the checkpoint
+	-- is an add-only union accumulated across sessions, while a scan only ever sees
+	-- the currently enumerable view — appearances read 36571 live against 39507
+	-- stored, achievements 4965 against 5308 (GetCategoryList does not enumerate
+	-- every earned achievement). So the count never advanced, the gate never
+	-- matched, and the scan ran every login forever while detecting nothing.
+	--
+	-- Union semantics already make a partial read harmless: it contributes fewer
+	-- ids, never removes any. What the guard was really protecting — a gain hidden
+	-- behind a filter being missed permanently — is now covered by the periodic
+	-- FULL_RESCAN_DAYS walk in runPass, which no gate can defeat.
+	if liveCount ~= nil then
 		col.counts = col.counts or {}
 		col.counts[cat] = liveCount
 	end
@@ -279,6 +324,107 @@ local function passCategory(cat, col, establishing, tick)
 	-- contents — without that, the site has no way to learn about them).
 	return merged, (not establishing and silent and newCount > 0)
 end
+
+-- Appearances take their own pass: same scan/diff/emit contract as passCategory,
+-- but gated PER TRANSMOG CATEGORY rather than on one summed count.
+--
+-- Two problems with the old single-count gate, both measured in-game (Aug 2026):
+--   * It summed GetCategoryCollectedCount over all ~29 categories, so ONE new
+--     transmog re-walked all 39507 sources — 4462ms of CPU, 96% of the addon's
+--     entire background cost, and the reason the login scan was visible.
+--   * Worse, it had LATCHED OPEN. The count only advanced when `#fresh >= #stored`
+--     (a partial/filtered-scan guard), but the stored set is an add-only union
+--     accumulated over many sessions: live scans returned 36571 against a stored
+--     39507, so the guard failed forever and the walk ran EVERY login while
+--     detecting nothing. It could not self-heal.
+--
+-- The fix leans on collections being add-only (§3.4): a per-category scan can only
+-- contribute ids, never remove them, so a partial or filtered read is harmless — it
+-- just adds less this pass. That makes the `#fresh >= #stored` guard unnecessary,
+-- and removing it removes the latch.
+--
+-- Missing a source stays possible (a wardrobe filter hiding entries in a category
+-- whose collected count did not move), so the staleness is BOUNDED rather than
+-- argued away: an unconditional full walk runs when the last one was more than
+-- FULL_RESCAN_DAYS ago. That is the hard guarantee no gate can defeat — the worst
+-- case is one full walk a week instead of one every login.
+local FULL_RESCAN_DAYS = 7
+
+local function passAppearances(cat, col, establishing, tick, fullWalk)
+	local live = appearanceCounts()
+	if not live then return col[cat] or {}, false end
+
+	-- A legacy checkpoint stores this as a single NUMBER; that reads as "no
+	-- per-category data" and costs one full walk, after which the table sticks.
+	local stored = col.counts and col.counts[cat]
+	if type(stored) ~= "table" then stored = nil end
+
+	local full = fullWalk or stored == nil
+
+	local set = owned[cat] or {}
+	local freshSet, scanned = {}, 0
+	for c in pairs(live) do
+		if full or stored[c] ~= live[c] then
+			scanned = scanned + 1
+			scanAppearanceCategory(c, freshSet, tick)
+		end
+		if tick then tick() end
+	end
+
+	local newIDs = {}
+	for id in pairs(freshSet) do
+		if not set[id] then newIDs[#newIDs + 1] = id end
+	end
+	table.sort(newIDs)   -- deterministic emit order (pairs() is not)
+
+	-- Same guardrails as passCategory: establishing ships the genesis set wholesale,
+	-- an empty stored set means appearances were never captured (a pre-heavy-category
+	-- SV — silent, h re-freezes, the site re-baselines), and an implausible jump
+	-- rebuilds silently rather than flooding the log.
+	--
+	-- NOTE the empty-set test replaces the old `counts[cat] == nil` one. Reshaping
+	-- counts from a number to a per-category table makes `counts[cat]` read as
+	-- "never scanned" for EVERY existing user, and silencing that would force a
+	-- pointless checkpoint re-ship account-wide. What matters is whether we have
+	-- prior appearance data to diff against, not what shape the gate was in.
+	local storedCt = #(col[cat] or {})
+	local silent = establishing or storedCt == 0
+		or (#newIDs > NEW_ABS and #newIDs > NEW_RATIO * storedCt)
+	for i = 1, #newIDs do
+		local id = newIDs[i]
+		if not silent then ns.Emit("collection_observed", { cat = "appearance", id = id }) end
+		set[id] = true
+	end
+	owned[cat] = set
+
+	-- The count ALWAYS advances — that is what stops the latch. Union-only semantics
+	-- make a partial read safe, and the periodic full walk bounds what it can miss.
+	col.counts = col.counts or {}
+	col.counts[cat] = live
+
+	if ns.dbg then
+		local total = 0
+		for _ in pairs(live) do total = total + 1 end
+		ns.dbg(string.format("appearances: %d/%d categories scanned%s — %d new",
+			scanned, total, full and " (full)" or "", #newIDs))
+	end
+
+	-- Nothing scanned and nothing new: the stored array already IS the answer, so
+	-- skip rebuilding it. That rebuild is a 39507-entry table walk plus a sort, and
+	-- it ran on every login for a byte-identical result — it was the ~17ms gap
+	-- between the pacing total (8 slices at =<2.4ms) and the runner's 36ms, and it
+	-- sits outside any tick, so no budget could pace it.
+	if scanned == 0 and #newIDs == 0 then
+		return col[cat] or {}, false
+	end
+
+	local merged = {}
+	for id in pairs(set) do merged[#merged + 1] = id end
+	table.sort(merged)
+
+	return merged, (not establishing and silent and #newIDs > 0)
+end
+cats.appearances.pass = passAppearances
 
 -- The login pass: scan, diff vs the checkpoint, emit observed deltas, update the set.
 -- `tick` is threaded into the scanners (yields on the coroutine runner). On the very
@@ -295,12 +441,24 @@ local function runPass(tick, force)
 	local col = ns.account and ns.account.collections
 	if not col then return end
 	local establishing = (col.h == nil) or force
+	local now = (GetServerTime and GetServerTime()) or 0
+
+	-- Periodic gate bypass. Every gate here is a heuristic over a count that can
+	-- drift from what a scan can actually enumerate, and the checkpoint is add-only,
+	-- so a gate that wrongly reads "clean" is silent — nothing ever surfaces the
+	-- miss. An unconditional walk every FULL_RESCAN_DAYS is the backstop no gate can
+	-- defeat, and it is what lets the gates themselves stay simple.
+	local fullWalk = establishing or (col.full_scan_at or 0) + FULL_RESCAN_DAYS * 86400 <= now
+
 	local silentRebuild = false
 	for i = 1, #SCAN_ORDER do
-		local fresh, sr = passCategory(SCAN_ORDER[i], col, establishing, tick)
-		col[SCAN_ORDER[i]] = fresh
+		local cat = SCAN_ORDER[i]
+		local pass = cats[cat].pass or passCategory   -- appearances gate per transmog category
+		local fresh, sr = pass(cat, col, establishing, tick, fullWalk)
+		col[cat] = fresh
 		if sr then silentRebuild = true end
 	end
+	if fullWalk then col.full_scan_at = now end
 	-- Freeze (or re-freeze) baseline_hash. `establishing` = first-ever ship.
 	-- `silentRebuild` = a guardrail path silently populated a category outside
 	-- the establishing flow (schema migration / massive jump). Bumping h is the
@@ -394,10 +552,12 @@ local function refresh(onComplete)
 	local col = ns.account and ns.account.collections
 	if col then seedOwned(col) end
 	ns.Schedule.Run(function()
-		runPass(pacedTick(SCAN_CHUNK))
+		local tick, stats = ns.Schedule.Budget(getScanBudget())
+		runPass(tick)
 		decorScan()   -- kicks off; its callback completes independently
+		ns.Schedule.LogPacing("collections refresh", stats)
 		if onComplete then onComplete() end
-	end)
+	end, "collections refresh")
 end
 
 -- Forced re-baseline (the site's rebaseline_requested at login, §6; /tiw collect).
@@ -410,10 +570,12 @@ local function rebaseline(onComplete, fast)
 	local col = ns.account and ns.account.collections
 	if col then seedOwned(col) end
 	ns.Schedule.Run(function()
-		runPass(pacedTick(fast and ELECTIVE_CHUNK or SCAN_CHUNK), true)
+		local tick, stats = ns.Schedule.Budget(fast and ELECTIVE_BUDGET_MS or getScanBudget())
+		runPass(tick, true)
 		decorScan(true)
+		ns.Schedule.LogPacing("collections rebaseline", stats)
 		if onComplete then onComplete() end
-	end)
+	end, "collections rebaseline")
 end
 
 -- Diagnostic (/tiw collections): scan live and diff against the stored checkpoint
@@ -450,12 +612,33 @@ end
 -- onDone(rows) fires when the scan completes.
 local function diffAsync(onDone)
 	ns.Schedule.Run(function()
-		local rows = diff(pacedTick(ELECTIVE_CHUNK))
+		local tick, stats = ns.Schedule.Budget(ELECTIVE_BUDGET_MS)
+		local rows = diff(tick)
+		ns.Schedule.LogPacing("collections diff", stats)
 		if onDone then onDone(rows) end
-	end)
+	end, "collections diff")
 end
 
-ns.Collections = { refresh = refresh, reconcile = reconcile, rebaseline = rebaseline, diff = diff, diffAsync = diffAsync }
+-- Seed the live-delta dedup sets from the checkpoint WITHOUT scanning.
+--
+-- refresh/rebaseline already do this, but the login scan is now deferred a minute
+-- past login (core/session.lua) and the dedup cannot wait that long: addOnce only
+-- suppresses a duplicate if `owned` is populated, and an unsuppressed add APPENDS
+-- to col[cat], putting the same id in the checkpoint twice. Canonical.ids would
+-- then serialize it twice and the checkpoint would no longer reconstruct. So
+-- session.lua seeds at login and defers only the scan.
+local function seed()
+	local col = ns.account and ns.account.collections
+	if col then seedOwned(col) end
+end
+
+ns.Collections = { refresh = refresh, reconcile = reconcile, rebaseline = rebaseline,
+                   seed = seed, diff = diff, diffAsync = diffAsync,
+                   -- read by /tiw appr gate, which shows the scan decision per category
+                   appearanceCounts = appearanceCounts, FULL_RESCAN_DAYS = FULL_RESCAN_DAYS,
+                   -- "Collection Scan Speed" in the options menu (goals/settings_model.lua)
+                   SCAN_BUDGETS = SCAN_BUDGETS, DEFAULT_BUDGET_MS = DEFAULT_BUDGET_MS,
+                   GetScanBudget = getScanBudget, SetScanBudget = setScanBudget }
 ns.collectors.collections = { reconcile = reconcile }
 
 -- ---- live deltas (precise time, deduped, persisted to the checkpoint) --------

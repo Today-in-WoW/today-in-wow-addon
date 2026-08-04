@@ -4,9 +4,10 @@ local _, ns = ...
 -- collectors/world_quests.lua  ·  data_storage §3.1  ·  mission: world
 --
 -- A SCHEDULED scan (WQ events spam, so never event-per-WQ): one pass ~30s after
--- login (let the client load WQ data), then debounced once/60s on
--- QUEST_LOG_UPDATE. The walk runs on the coroutine runner (§4c) so it stays
--- invisible. When a freshly-seen WQ's rewards aren't loaded yet we re-scan in 2s
+-- login (let the client load WQ data), then debounced on QUEST_LOG_UPDATE at the
+-- user's "World Quest Scan Speed" interval (SCAN_INTERVALS; 5 minutes by default).
+-- The walk runs on the coroutine runner (§4c) so it stays invisible. When a
+-- freshly-seen WQ's rewards aren't loaded yet we re-scan in 2s
 -- (RequestPreloadRewardData is async), so rows ship with complete rewards.
 --
 -- Scope: EVERY task quest GetQuestsOnMap returns (world quests, bonus objectives,
@@ -196,7 +197,11 @@ end
 -- only on a genuine window rollover (both expiries non-zero and far apart); a 0→real
 -- expiry transition just records the firmed-up value silently. Returns true if anything
 -- was deferred, so the caller can arm a short retry.
-local function processVisible(list)
+-- `tick` (optional) paces the per-quest work on the coroutine runner. Without it
+-- this whole loop ran inside the walk's FINAL slice, and buildRow costs ~10-15 C
+-- calls per newly-seen quest — on a fresh login that was thousands of API calls
+-- in one frame, which no amount of pacing on the MAP walk could hide.
+local function processVisible(list, tick)
 	if not ns.session then return false end
 	local store = wqStore()
 	local now = (GetServerTime and GetServerTime()) or 0
@@ -236,6 +241,7 @@ local function processVisible(list)
 				store[id] = key   -- expiry firmed up after an untimed/capped emit; record, don't re-emit
 			end
 		end
+		if tick then tick() end
 	end
 	for id in pairs(deferrals) do if not visible[id] then deferrals[id] = nil end end
 	return deferredAny
@@ -249,7 +255,40 @@ ns.collectors.world_quests = { processVisible = processVisible, buildRow = build
 -- descendants — all continents / expansions, not just the current one. The world map
 -- has WQ data loaded for all of them (a far zone with nothing loaded just returns an
 -- empty list, harmless). Dynamic, so no static zone table to maintain or to lag a patch.
-local SCAN_CHUNK = 20   -- maps per coroutine-runner frame slice (keeps a full walk invisible)
+-- How often the QUEST_LOG_UPDATE-driven rescan may run, in seconds.
+--
+-- The scan re-walks EVERY zone map in the game, which measured ~120ms of CPU
+-- across 10 frame slices (~12ms each). At the original 60s that repeated forever,
+-- roughly once a minute for the whole session — a permanent background cost for
+-- data that turns over on the hour. 5 minutes is the default; 1 minute is there
+-- for anyone who wants the freshest world data and has the frames to spare.
+local SCAN_INTERVALS   = { 60, 300, 600 }
+local DEFAULT_INTERVAL = 300
+
+local function intervalStore()
+	_G.TiWDB = _G.TiWDB or {}
+	TiWDB.settings = TiWDB.settings or {}
+	return TiWDB.settings
+end
+
+local function getScanInterval()
+	local v = tonumber(intervalStore().wqScanSeconds)
+	for i = 1, #SCAN_INTERVALS do
+		if SCAN_INTERVALS[i] == v then return v end
+	end
+	return DEFAULT_INTERVAL
+end
+
+local function setScanInterval(secs)
+	secs = tonumber(secs)
+	for i = 1, #SCAN_INTERVALS do
+		if SCAN_INTERVALS[i] == secs then
+			intervalStore().wqScanSeconds = secs
+			return true
+		end
+	end
+	return false
+end
 
 local function mapsToScan()
 	local out, set = {}, {}
@@ -274,10 +313,20 @@ local function mapsToScan()
 	return out
 end
 ns.collectors.world_quests.mapsToScan = mapsToScan
+-- "World Quest Scan Speed" in the options menu (goals/settings_model.lua)
+ns.collectors.world_quests.SCAN_INTERVALS = SCAN_INTERVALS
+ns.collectors.world_quests.GetScanInterval = getScanInterval
+ns.collectors.world_quests.SetScanInterval = setScanInterval
 
 local function scanAll()
 	if not ns.session or not ns.Schedule then return end
 	ns.Schedule.Run(function()
+		-- Same per-frame budget the collection scan uses (the user's "Collection Scan
+		-- Speed"), so one setting governs every background scan's frame cost.
+		local budget = (ns.Collections and ns.Collections.GetScanBudget
+			and ns.Collections.GetScanBudget()) or 2
+		local tick, stats = ns.Schedule.Budget(budget)
+
 		local accum, maps = {}, mapsToScan()
 		for idx = 1, #maps do
 			local quests = (C_TaskQuest and C_TaskQuest.GetQuestsOnMap and C_TaskQuest.GetQuestsOnMap(maps[idx])) or {}
@@ -285,14 +334,21 @@ local function scanAll()
 				local q = quests[i]
 				accum[#accum + 1] = { questID = q.questID or q.questId, x = q.x, y = q.y, mapID = maps[idx] }
 			end
-			if idx % SCAN_CHUNK == 0 then coroutine.yield() end
+			if tick then tick() end
 		end
-		if processVisible(accum) and C_Timer and C_Timer.After then
+
+		local deferred = processVisible(accum, tick)
+		ns.Schedule.LogPacing("wq scan", stats)
+		if deferred and C_Timer and C_Timer.After then
 			C_Timer.After(2, scanAll)   -- rewards still loading on some — quick retry (§3.1)
 		end
-	end)
+	end, "wq scan")
 end
 ns.collectors.world_quests.rescan = scanAll
 
-if ns.Schedule then ns.Schedule.OnDirty("QUEST_LOG_UPDATE", scanAll, { throttle = 60 }) end
+-- Resolved per arm, so changing "World Quest Scan Speed" applies to the next
+-- window instead of needing a reload.
+if ns.Schedule then
+	ns.Schedule.OnDirty("QUEST_LOG_UPDATE", scanAll, { throttle = getScanInterval })
+end
 if C_Timer and C_Timer.After then C_Timer.After(30, scanAll) end   -- one pass after WQ data loads

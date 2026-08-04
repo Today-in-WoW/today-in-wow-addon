@@ -275,6 +275,25 @@ function Store.setSectionOrder(pinned, orderedIds)
 	return true
 end
 
+-- Pin the given ids and float them to the TOP of the pinned section, keeping
+-- their given order and pushing everything already pinned down beneath them.
+-- Unknown ids are skipped by setSectionOrder.
+--
+-- This is what a deliberate ADD looks like: the user just asked for these goals
+-- (imported a string, or added them on the website), so they belong where they
+-- can be seen rather than at the bottom of a long list.
+function Store.pinToTop(idOrList)
+	local ids = type(idOrList) == "table" and idOrList or { idOrList }
+	local order, seen = {}, {}
+	for _, id in ipairs(ids) do
+		if not seen[id] then order[#order + 1] = id; seen[id] = true end
+	end
+	for _, rec in ipairs(Store.ordered().pinned) do
+		if not seen[rec.id] then order[#order + 1] = rec.id end
+	end
+	return Store.setSectionOrder(true, order)
+end
+
 -- Installed goals split into the two display sections, each sorted by `order`
 -- (id as tiebreak). The single source of display order for the goals window AND
 -- the matrix tab: { pinned = { {id, goal, state}, ... }, available = { ... } }.

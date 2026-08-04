@@ -1,4 +1,4 @@
-## Interface: 120007, 120100
+﻿## Interface: 120007, 120100
 ## X-Min-Interface: 120000
 ## Title: Today in WoW
 ## Notes: Manage lists of goals for collectors and collects world & character data for Today in WoW (todayinwow.com).
@@ -29,6 +29,7 @@ core\eventlog.lua
 core\snapshot.lua
 core\retention.lua
 core\drain.lua
+core\app_status.lua
 core\secrets.lua
 core\scheduler.lua
 core\mapcache.lua
@@ -55,6 +56,7 @@ goals\ui_matrix.lua
 goals\ui_options.lua
 goals\ui_main.lua
 goals\ui_sync.lua
+goals\ui_app_status.lua
 goals\minimap.lua
 goals\evaluators\collected.lua
 goals\evaluators\flag.lua

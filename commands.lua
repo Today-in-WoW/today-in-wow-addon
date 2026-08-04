@@ -182,7 +182,7 @@ local function collectionsReport()
 			out(string.format("  %-6s stored=%d  live=%d  new=%d  removed=%d",
 				r.cat, r.stored, r.live, #r.newIds, #r.removedIds))
 			if #r.newIds > 0 then out("    new→observe: " .. sample(r.newIds)) end
-			if #r.removedIds > 0 then out("    removed:     " .. sample(r.removedIds) .. "  (add-only — likely a wardrobe filter was active during the scan)") end
+			if #r.removedIds > 0 then out("    removed:     " .. sample(r.removedIds) .. "  (add-only — the checkpoint is a union built over many sessions; a live scan only sees what the client currently enumerates, so it reads lower)") end
 		end
 	end)
 end
@@ -227,6 +227,57 @@ local function logReport(arg)
 	out("log  ·  " .. #log .. " entries (oldest→newest)")
 	for i = 1, #log do
 		out(string.format("  |cff808080%10d|r %s", log[i].ms or 0, tostring(log[i].msg)))
+	end
+end
+
+-- /tiw engine: who is waking the goal engine, and whether it was worth it.
+-- The engine only works when an event marks a step stale, so a pass that fires
+-- forever while nothing on screen moves is always attributable to one event. Rows
+-- are sorted by `marked` (steps re-evaluated = the actual cost). A row with a big
+-- `marked` and `changed` at 0 is pure noise — that event never moved a result.
+--   /tiw engine reset   zero the counters and time the window from now
+local function engineReport(arg)
+	local E = ns.Goals and ns.Goals.Engine
+	if not (E and E.stats) then out("goal engine not loaded"); return end
+	if arg == "reset" then
+		E.resetStats()
+		out("engine counters reset"); return
+	end
+
+	local s = E.stats()
+	local secs = math.max(0, ((GetTime and GetTime()) or 0) - (s.since or 0))
+	out(string.format("engine  ·  %.0fs window  ·  %d passes, %d changed, %d steps evaluated, %.1fms total",
+		secs, s.passes, s.renders, s.evaluated, s.ms))
+	if s.passes > 0 and secs > 0 then
+		out(string.format("  |cff808080%.2f passes/s  ·  %.2fms/s spent evaluating|r",
+			s.passes / secs, s.ms / secs))
+	end
+
+	local rows = {}
+	for ev, e in pairs(s.events) do rows[#rows + 1] = { ev = ev, e = e } end
+	table.sort(rows, function(a, b)
+		if a.e.marked ~= b.e.marked then return a.e.marked > b.e.marked end
+		return a.ev < b.ev
+	end)
+	out("  event                             fires   marked  changed")
+	for _, r in ipairs(rows) do
+		-- Noise = it cost real evaluations and never changed anything.
+		local noise = r.e.changed == 0 and r.e.marked > 0
+		out(string.format("  %-32s %6d %8d %8d%s", r.ev, r.e.fires, r.e.marked, r.e.changed,
+			noise and "  |cffff5050← noise|r" or ""))
+	end
+
+	local evs = {}
+	for name, n in pairs(s.evaluators) do evs[#evs + 1] = { name = name, n = n } end
+	table.sort(evs, function(a, b)
+		if a.n ~= b.n then return a.n > b.n end
+		return a.name < b.name
+	end)
+	if #evs > 0 then
+		out("  steps re-evaluated, by evaluator")
+		for i = 1, math.min(#evs, 10) do
+			out(string.format("    %-28s %8d", evs[i].name, evs[i].n))
+		end
 	end
 end
 
@@ -478,6 +529,46 @@ end
 -- One line per step, grouped by goal id. The view-model is the §6 render
 -- contract: { id, index, label, result } rows; result follows the §5 result
 -- conventions (stale renders as "can't track", never as a confident un-done).
+-- /tiw appr: the appearance-scan gate. Shows, per transmog category, whether the
+-- next scan would walk it — WITHOUT scanning. After a login where nothing was
+-- collected every row should read "skip"; that is the cheap proof the per-category
+-- gate is doing its job. Cross-check with /tiw collections, which runs an UNGATED
+-- full live scan: new=0 there means the gate has missed nothing.
+local function apprCmd()
+	local C = ns.Collections
+	if not (C and C.appearanceCounts) then out("collections not loaded"); return end
+	local live = C.appearanceCounts()
+	if not live then out("C_TransmogCollection unavailable"); return end
+
+	local col = (ns.account and ns.account.collections) or {}
+	local stored = col.counts and col.counts.appearances
+	if type(stored) ~= "table" then
+		out("appr gate  ·  |cffff5050stored counts are " .. type(stored)
+			.. ", not a per-category table|r — next scan is a full walk (legacy/first run)")
+		stored = nil
+	end
+
+	local lastFull = col.full_scan_at or 0
+	local age = lastFull > 0 and ((GetServerTime() - lastFull) / 86400) or nil
+	out(string.format("appr gate  ·  last full walk %s  ·  forced every %d days",
+		age and string.format("%.1f days ago", age) or "|cffff5050never|r", C.FULL_RESCAN_DAYS or 0))
+
+	local scan, skip, ids = 0, 0, {}
+	for c in pairs(live) do ids[#ids + 1] = c end
+	table.sort(ids)
+	for _, c in ipairs(ids) do
+		local s = stored and stored[c]
+		if (stored == nil) or s ~= live[c] then
+			scan = scan + 1
+			out(string.format("  cat %-3d stored=%-6s live=%-6d |cffffd100SCAN|r", c, tostring(s), live[c]))
+		else
+			skip = skip + 1
+		end
+	end
+	out(string.format("  → %d categories would scan, %d skip%s", scan, skip,
+		scan == 0 and "  |cff40ff40(a login now costs nothing)|r" or ""))
+	out("  |cff808080cross-check with '/tiw collections': new=0 for appearances means the gate missed nothing|r")
+end
 local function renderChat(vm)
 	out("goals  ·  " .. #vm .. " step(s)")
 	local lastId
@@ -685,6 +776,26 @@ local function consentCmd(arg)
 		.. (arg ~= "everything" and "  |cff808080(stored data beyond this level was deleted)|r" or ""))
 end
 
+-- Is the pipe working? One line for the companion app, one for what is queued
+-- locally — enough for a support answer without asking for a log dump.
+local function statusCmd()
+	out(ns.AppStatus.summary())
+
+	local queued, oldest = 0, nil
+	for _, rec in pairs((TiWDB and TiWDB.characters) or {}) do
+		for _, s in ipairs(rec.sessions or {}) do
+			queued = queued + 1
+			local t = tonumber(s.started_at) or tonumber(s.snapshot and s.snapshot.at)
+			if t and (not oldest or t < oldest) then oldest = t end
+		end
+	end
+
+	local age = oldest and ns.AppStatus.since(oldest)
+	out("sessions waiting to upload: |cffffd100" .. queued .. "|r"
+		.. (age and ("  |cff808080(oldest " .. age .. ")|r") or ""))
+	out("data collection: |cffffd100" .. ns.Consent.get() .. "|r")
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	local raw = (msg or ""):gsub("^%s*(.-)%s*$", "%1")
@@ -715,6 +826,8 @@ SlashCmdList["TIW"] = function(msg)
 		exportCmd(arg)
 	elseif cmd == "consent" then
 		consentCmd(arg)
+	elseif msg == "status" then
+		statusCmd()
 	elseif msg == "options" or msg == "settings" then
 		if ns.Goals and ns.Goals.UIOptions then
 			ns.Goals.UIOptions.Open()
@@ -734,6 +847,10 @@ SlashCmdList["TIW"] = function(msg)
 		end
 	elseif cmd == "log" then
 		logReport(arg)
+	elseif cmd == "engine" then
+		engineReport(arg)
+	elseif msg == "appr" or msg == "appearances" then
+		apprCmd()
 	elseif msg == "wq" then
 		wqReport()
 	elseif cmd == "ql" then
@@ -749,7 +866,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw wq  ·  /tiw ql  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
+		out("commands:  /tiw status  ·  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw engine  ·  /tiw appr  ·  /tiw wq  ·  /tiw ql  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
 	end
 end
 

@@ -57,9 +57,15 @@ local function buildOptions()
 				for _, o in ipairs(d.options) do c:Add(o.value, o.label, o.desc) end
 				return c:GetData()
 			end
+			-- The panel shows one description line under the control. A descriptor
+			-- `subtitle` applies to the setting as a whole, so it follows the
+			-- selected option's own description rather than replacing it.
 			local function liveDesc()
 				local o = ns.Goals.SettingsOption(d, d.get())
-				return o and o.desc or ""
+				local parts = {}
+				if o and o.desc and o.desc ~= "" then parts[#parts + 1] = o.desc end
+				if d.subtitle then parts[#parts + 1] = d.subtitle end
+				return table.concat(parts, "\n")
 			end
 			Settings.CreateDropdown(category, setting, options, liveDesc)
 		elseif d.kind == "checkbox" then
@@ -108,7 +114,7 @@ local function registerPopup()
 		text = "Today in WoW collects world and character data to power todayinwow.com."
 			.. "\n\nHow much would you like to share?\n\n"
 			.. "|cffaaaaaaEnable everything: personal character sync + anonymous world data."
-			.. "\nGeneric only: anonymous world data, no character information."
+			.. "\nGeneric only: anonymous world data and your goal list, no character information."
 			.. "\nNothing: nothing leaves your client.|r\n\n"
 			.. "You can change this any time with /tiw options.",
 		button1 = "Enable everything",

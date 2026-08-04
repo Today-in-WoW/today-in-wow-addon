@@ -223,6 +223,26 @@ describe("store ordering (display order for the goals window + matrix)", functio
 		assert.same({ "tiw:dev-crests", "tiw:dev-mount" }, ids(S.ordered().available))
 	end)
 
+	it("pinToTop pins and floats above the existing pinned goals", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		S.install(fixtures().crest_cap)
+		S.setPinned("tiw:dev-mount", true)
+		S.pinToTop("tiw:dev-crests")
+		assert.same({ "tiw:dev-crests", "tiw:dev-mount" }, ids(S.ordered().pinned))
+	end)
+
+	it("pinToTop keeps the given order for a batch and dedupes", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		S.install(fixtures().crest_cap)
+		S.install(fixtures().invincible_farm)
+		S.pinToTop({ "tiw:dev-invincible", "tiw:dev-crests", "tiw:dev-invincible" })
+		assert.same({ "tiw:dev-invincible", "tiw:dev-crests" }, ids(S.ordered().pinned))
+	end)
+
 	it("setSectionOrder skips unknown ids without error", function()
 		local ns = harness()
 		local S = ns.Goals.Store

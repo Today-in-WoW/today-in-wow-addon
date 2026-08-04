@@ -140,7 +140,7 @@ local function scanAll(withRequest)
 			processAvailable(m, QL.GetAvailableQuestLines(m) or {})
 			if idx % SCAN_CHUNK == 0 then coroutine.yield() end
 		end
-	end)
+	end, "questlines scan")
 end
 ns.collectors.quest_lines.rescan = scanAll
 
