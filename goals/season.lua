@@ -69,6 +69,15 @@ end
 -- e.g. Midsummer Fire Festival = 341, matching the authored `event` id.)
 local activeEvents
 
+-- While grouped, personal calendar entries (guild/community events, raid
+-- invites) come back with every field a secret value — and a secret can't be
+-- used as a table key, nor safely compared. Only holidays carry the eventIDs we
+-- gate on, and those stay plain, so secret entries are skipped. issecretvalue is
+-- absent in the unit specs' bare Lua, hence the nil guard.
+local function isSecret(v)
+	return issecretvalue ~= nil and issecretvalue(v)
+end
+
 local function sameSet(a, b)
 	if a == nil or b == nil then return a == b end
 	for k in pairs(a) do if not b[k] then return false end end
@@ -91,7 +100,9 @@ local function refreshEvents()
 	local set = {}
 	for i = 1, n do
 		local e = C.GetDayEvent(off, cd, i)
-		if e and e.eventID then set[e.eventID] = true end
+		local id = e and e.eventID
+		-- secret check first: `id` must not even be truth-tested while secret.
+		if not isSecret(id) and id then set[id] = true end
 	end
 	local changed = not sameSet(activeEvents, set)
 	activeEvents = set

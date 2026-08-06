@@ -112,6 +112,16 @@ describe("Season.active — event mode (calendar matcher)", function()
 		assert.is_false(S.active({ event = 341 }))
 	end)
 
+	it("skips secret entries (grouped: personal calendar events are secret)", function()
+		local secretID = setmetatable({}, { __tostring = function() return "secret" end })
+		_G.issecretvalue = function(v) return v == secretID end
+		finally(function() _G.issecretvalue = nil end)
+		local S = season()
+		setCalendar({ { eventID = secretID }, { eventID = 341 } })
+		S.refresh()
+		assert.is_true(S.active({ event = 341 }))   -- the holiday still registers
+	end)
+
 	it("translates the viewed-month offset to today's month", function()
 		setToday(2026, 6, 21)
 		local gotOff
