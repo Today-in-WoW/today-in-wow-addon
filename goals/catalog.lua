@@ -88,6 +88,12 @@ function Catalog.entries()
 							{
 								evaluator = "flag",
 								params = {
+									quest = 93751,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
 									quest = 93752,
 								},
 							},
@@ -100,25 +106,7 @@ function Catalog.entries()
 							{
 								evaluator = "flag",
 								params = {
-									quest = 93751,
-								},
-							},
-							{
-								evaluator = "flag",
-								params = {
-									quest = 93758,
-								},
-							},
-							{
-								evaluator = "flag",
-								params = {
 									quest = 93754,
-								},
-							},
-							{
-								evaluator = "flag",
-								params = {
-									quest = 93756,
 								},
 							},
 							{
@@ -130,7 +118,19 @@ function Catalog.entries()
 							{
 								evaluator = "flag",
 								params = {
+									quest = 93756,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
 									quest = 93757,
+								},
+							},
+							{
+								evaluator = "flag",
+								params = {
+									quest = 93758,
 								},
 							},
 						},
@@ -139,15 +139,725 @@ function Catalog.entries()
 				icon = "inv_1205_voidforge_sovereignvoidcores_midnight",
 				id = "tiw:weekly-dungeon-quest",
 				name = "Weekly Dungeon Quest",
-				rev = 1,
+				rev = 2,
 				scope = "account",
 				steps = {
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93751]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93751,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93751,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93751,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93752]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93752,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93752,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93752,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93753]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93753,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93753,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93753,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93754]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93754,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93754,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93754,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93755]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93755,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93755,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93755,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93756]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93756,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93756,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93756,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93757]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93757,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93757,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93757,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Pick up [quest=93758]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93758,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93758,
+									},
+								},
+							},
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93758,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93751]",
+						params = {
+							quest = 93751,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93751,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93752]",
+						params = {
+							quest = 93752,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93752,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93753]",
+						params = {
+							quest = 93753,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93753,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93754]",
+						params = {
+							quest = 93754,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93754,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93755]",
+						params = {
+							quest = 93755,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93755,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93756]",
+						params = {
+							quest = 93756,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93756,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93757]",
+						params = {
+							quest = 93757,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93757,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=93758]",
+						params = {
+							quest = 93758,
+						},
+						require = {
+							level = 90,
+						},
+						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93758,
+										},
+									},
+								},
+							},
+						},
+					},
 					{
 						evaluator = "group",
 						label = "Obtain the weekly dungeon quest.",
 						params = {
 							need = 1,
 							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93751,
+									},
+								},
 								{
 									evaluator = "questlog",
 									params = {
@@ -163,25 +873,7 @@ function Catalog.entries()
 								{
 									evaluator = "questlog",
 									params = {
-										quest = 93751,
-									},
-								},
-								{
-									evaluator = "questlog",
-									params = {
-										quest = 93758,
-									},
-								},
-								{
-									evaluator = "questlog",
-									params = {
 										quest = 93754,
-									},
-								},
-								{
-									evaluator = "questlog",
-									params = {
-										quest = 93756,
 									},
 								},
 								{
@@ -193,7 +885,19 @@ function Catalog.entries()
 								{
 									evaluator = "questlog",
 									params = {
+										quest = 93756,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
 										quest = 93757,
+									},
+								},
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 93758,
 									},
 								},
 							},
@@ -202,6 +906,159 @@ function Catalog.entries()
 							level = 90,
 						},
 						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							negate = true,
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93758,
+										},
+									},
+								},
+							},
+						},
 					},
 					{
 						evaluator = "group",
@@ -212,6 +1069,12 @@ function Catalog.entries()
 								{
 									evaluator = "flag",
 									params = {
+										quest = 93751,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
 										quest = 93752,
 									},
 								},
@@ -224,25 +1087,7 @@ function Catalog.entries()
 								{
 									evaluator = "flag",
 									params = {
-										quest = 93751,
-									},
-								},
-								{
-									evaluator = "flag",
-									params = {
-										quest = 93758,
-									},
-								},
-								{
-									evaluator = "flag",
-									params = {
 										quest = 93754,
-									},
-								},
-								{
-									evaluator = "flag",
-									params = {
-										quest = 93756,
 									},
 								},
 								{
@@ -254,7 +1099,19 @@ function Catalog.entries()
 								{
 									evaluator = "flag",
 									params = {
+										quest = 93756,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
 										quest = 93757,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 93758,
 									},
 								},
 							},
@@ -263,10 +1120,164 @@ function Catalog.entries()
 							level = 90,
 						},
 						resets = "weekly",
+						showif = {
+							evaluator = "group",
+							negate = true,
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93751,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93752,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93753,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93754,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93755,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93756,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93757,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 93758,
+										},
+									},
+									{
+										evaluator = "flag",
+										params = {
+											quest = 93758,
+										},
+									},
+								},
+							},
+						},
 					},
 				},
-				v = 1,
+				v = 2,
 			},
+			tag = "Midnight",
 		},
 		{
 			bucket = "reputation",
@@ -629,10 +1640,10 @@ function Catalog.entries()
 						},
 					},
 				},
-				icon = 7505700,
+				icon = "inv_helm_misc_starpartyhat",
 				id = "tiw:soiree",
 				name = "Soiree",
-				rev = 1,
+				rev = 2,
 				scope = "account",
 				steps = {
 					{
@@ -1460,6 +2471,141 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
+		},
+		{
+			bucket = "mounts",
+			goal = {
+				category = "Mounts",
+				desc = "Defeat rare spawns for a chance of getting [item=276803] and [item=276549].",
+				done = {
+					evaluator = "group",
+					params = {
+						need = 2,
+						of = {
+							{
+								evaluator = "collected",
+								params = {
+									mount = 3061,
+								},
+							},
+							{
+								evaluator = "collected",
+								params = {
+									mount = 3051,
+								},
+							},
+						},
+					},
+				},
+				icon = "ability_hunter_snaketrap",
+				id = "tiw:mounts-coiled-isle",
+				name = "Rares of Coiled Isle",
+				require = {
+					level = 80,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "Big Mon",
+						params = {
+							quest = 93829,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Coin-Eye Skully",
+						params = {
+							quest = 94619,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Destra",
+						params = {
+							quest = 95452,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Farthik the Plunderer",
+						params = {
+							quest = 96491,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Garsecg",
+						params = {
+							quest = 94856,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Hisstara",
+						params = {
+							quest = 96464,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Kari'zah the Forgotten",
+						params = {
+							quest = 97122,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Lockjaw",
+						params = {
+							quest = 96456,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Nar'zira",
+						params = {
+							quest = 94860,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Siltmouth",
+						params = {
+							quest = 97112,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Sss'alik",
+						params = {
+							quest = 95447,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Szarith the Fanged",
+						params = {
+							quest = 96030,
+						},
+						resets = "daily",
+					},
+				},
+				v = 1,
+			},
+			popular = true,
 		},
 		{
 			bucket = "reputation",
@@ -4913,6 +6059,138 @@ function Catalog.entries()
 			},
 		},
 		{
+			bucket = "endgame",
+			goal = {
+				category = "Midnight Season 2 • Raid Prep",
+				date = {
+					from = "2026-08-11",
+					to = "2026-08-19",
+				},
+				desc = "Week 0 of the Larias' Raider's Guide for Midnight Season 2. You can read it on https://docs.google.com/document/d/e/2PACX-1vQE61MBpAnZR342cdIpz3AujVaeeg8JYB5Ltzuua884lXKqLqtjg8OfWmEd6uuVQONZ-vUQ_jzWDY0E/pub",
+				icon = "inv_offhand_1h_ulatek_d_01",
+				id = "tiw:larias-week-0-midnight-s2",
+				name = "Larias' Week 0 Recommendation - Aug 11th",
+				require = {
+					level = 90,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "Complete the intro campaign",
+						params = {
+							quest = 95530,
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete Azta'rec",
+						params = {
+							quest = 96434,
+						},
+					},
+					{
+						evaluator = "group",
+						label = "M0 World Tour - Complete all Mythic0 dungeons",
+						note = "Altar of Fangs, Den of Nalorakk, Murder Row, The Blinding Vale, Voidscar Arena, Kings' Rest, Ruby Life Pools, Temple of Sethraliss.",
+						params = {
+							need = 8,
+							of = {
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 2993,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 2825,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 2813,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 2859,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 2923,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 1762,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 2521,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 23,
+										instance = 1877,
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "currency",
+						label = "Cap your weekly Sparks of Tides",
+						params = {
+							cap = true,
+							currency = 3509,
+						},
+						resets = "weekly",
+						tooltip = "[currency=3509]",
+					},
+					{
+						evaluator = "vault",
+						label = "Unlock 3 Great Vault slots",
+						params = {
+							slots = 3,
+							track = "any",
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "lockout",
+						label = "Clear The Tidebound Grotto on World difficulty",
+						params = {
+							difficulty = 250,
+							instance = 2987,
+						},
+					},
+				},
+				v = 1,
+			},
+			popular = true,
+			reward = "Season 2 raid-ready by Week 1",
+			tag = "Larias' Raider's Guide",
+		},
+		{
 			bucket = "professions",
 			goal = {
 				category = "Professions",
@@ -4969,6 +6247,297 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
+		},
+		{
+			bucket = "endgame",
+			goal = {
+				category = "Midnight Season 2 • Raid Prep",
+				date = {
+					from = "2026-08-18",
+					to = "2026-08-26",
+				},
+				desc = "Goal based on the Week 1 of the Larias' Raider's Guide for Midnight Season 2. You can read it on https://docs.google.com/document/d/e/2PACX-1vQE61MBpAnZR342cdIpz3AujVaeeg8JYB5Ltzuua884lXKqLqtjg8OfWmEd6uuVQONZ-vUQ_jzWDY0E/pub",
+				icon = "inv_jewelcrafting_purpleserpent",
+				id = "tiw:larias-week-1-midnight-s2",
+				name = "Larias' Week 1 Recommendation - Aug 18th",
+				require = {
+					level = 90,
+				},
+				rev = 1,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "group",
+						label = "Complete LFR",
+						note = "Nek'zali the Soulcoiler, Entombed Sentinels, Vashnik the Malignant.",
+						params = {
+							need = 3,
+							of = {
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 17,
+										encounter = 1,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 17,
+										encounter = 2,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 17,
+										encounter = 4,
+										instance = 3004,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "currency",
+						label = "Get Weekly Spark",
+						params = {
+							cap = true,
+							currency = 3509,
+						},
+						resets = "weekly",
+						tooltip = "[currency=3509]",
+					},
+					{
+						evaluator = "achievement",
+						label = "Complete ?? Azta'rec for 60 Uncapped Hero Crests",
+						params = {
+							achievement = 63333,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Obtain your Weekly [item=274374]",
+						params = {
+							quest = 86371,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Complete a Tier 11 Delve (with Map)",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "questlog",
+									params = {
+										quest = 97910,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 97910,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Turn in your Cracked Keystone",
+						params = {
+							quest = 97910,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "lockout",
+						label = "Complete Tidebound Grotto Normal",
+						params = {
+							difficulty = 14,
+							instance = 2987,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "lockout",
+						label = "Complete Tidebound Grotto Heroic",
+						params = {
+							difficulty = 15,
+							instance = 2987,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "lockout",
+						label = "Complete Tidebound Grotto Mythic",
+						params = {
+							difficulty = 16,
+							instance = 2987,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Full Clear Venomous Abyss Normal",
+						params = {
+							need = 8,
+							of = {
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 1,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 2,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 3,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 4,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 5,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 6,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 7,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 14,
+										encounter = 8,
+										instance = 3004,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "group",
+						label = "Full Clear Venomous Abyss Heroic",
+						params = {
+							need = 8,
+							of = {
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 1,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 2,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 3,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 4,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 5,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 6,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 7,
+										instance = 3004,
+									},
+								},
+								{
+									evaluator = "lockout",
+									params = {
+										difficulty = 15,
+										encounter = 8,
+										instance = 3004,
+									},
+								},
+							},
+						},
+						resets = "weekly",
+					},
+				},
+				v = 1,
+			},
+			popular = true,
+			reward = "Week 1 raid + vault progress",
+			tag = "Larias' Raider's Guide",
 		},
 		{
 			bucket = "professions",
@@ -5099,6 +6668,1378 @@ function Catalog.entries()
 				},
 				v = 1,
 			},
+		},
+		{
+			bucket = "open-world",
+			goal = {
+				desc = "Your daily to-do list in The Coiled Isle and Vaults of Atal'Utek",
+				icon = "inv_12_trinket_amanitrollthemedtrinkets",
+				id = "tiw:patch-12-1-daily-checklist",
+				name = "Patch 12.1 Daily Checklist",
+				require = {
+					level = 90,
+				},
+				rev = 3,
+				scope = "perchar",
+				steps = {
+					{
+						evaluator = "flag",
+						label = "Coiled Isle: [quest=96995]",
+						params = {
+							quest = 96995,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: [quest=95520]",
+						params = {
+							quest = 95520,
+						},
+						resets = "weekly",
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: [quest=98420]",
+						params = {
+							quest = 98420,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 98420,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 98420,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: [quest=98419]",
+						params = {
+							quest = 98419,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 98419,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 98419,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96644]",
+						params = {
+							quest = 96644,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96644,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96644,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96643]",
+						params = {
+							quest = 96643,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96643,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96643,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96642]",
+						params = {
+							quest = 96642,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96642,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96642,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96641]",
+						params = {
+							quest = 96641,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96641,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96641,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96640]",
+						params = {
+							quest = 96640,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96640,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96640,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96639]",
+						params = {
+							quest = 96639,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96639,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96639,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96361]",
+						params = {
+							quest = 96361,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96361,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96361,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96360]",
+						params = {
+							quest = 96360,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96360,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96360,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96354]",
+						params = {
+							quest = 96354,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96354,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96354,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96352]",
+						params = {
+							quest = 96352,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96352,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96352,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Vault: Complete [quest=96349]",
+						params = {
+							quest = 96349,
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96349,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96349,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Vault: Complete Daily quests",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 98420,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 98419,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96644,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96643,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96642,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96641,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96640,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96639,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96361,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96360,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96354,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96352,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 96349,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							negate = true,
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 98420,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 98420,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 98419,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 98419,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96644,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96644,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96643,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96643,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96642,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96642,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96641,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96641,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96640,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96640,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96639,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96639,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96361,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96361,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96360,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96360,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96354,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96354,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96352,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96352,
+										},
+									},
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96349,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96349,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "renown",
+						label = "Reach Renown 10 for [item=273838]",
+						params = {
+							faction = 2772,
+							level = 10,
+						},
+						showif = {
+							evaluator = "renown",
+							negate = true,
+							params = {
+								faction = 2772,
+								level = 10,
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "[item=273838]: Complete [quest=96267]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										account = true,
+										quest = 96267,
+									},
+								},
+								{
+									evaluator = "collected",
+									params = {
+										mount = 2980,
+									},
+								},
+							},
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96267,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96267,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "[item=273838]: Complete [quest=96276]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										account = true,
+										quest = 96276,
+									},
+								},
+								{
+									evaluator = "collected",
+									params = {
+										mount = 2980,
+									},
+								},
+							},
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96276,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96276,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "[item=273838]: Complete [quest=96273]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										account = true,
+										quest = 96273,
+									},
+								},
+								{
+									evaluator = "collected",
+									params = {
+										mount = 2980,
+									},
+								},
+							},
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96273,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96273,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "[item=273838]: Complete [quest=96275]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										account = true,
+										quest = 96275,
+									},
+								},
+								{
+									evaluator = "collected",
+									params = {
+										mount = 2980,
+									},
+								},
+							},
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96275,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96275,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "[item=273838]: Complete [quest=96271]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										account = true,
+										quest = 96271,
+									},
+								},
+								{
+									evaluator = "collected",
+									params = {
+										mount = 2980,
+									},
+								},
+							},
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96271,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96271,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "[item=273838]: Complete [quest=96305]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										account = true,
+										quest = 96305,
+									},
+								},
+								{
+									evaluator = "collected",
+									params = {
+										mount = 2980,
+									},
+								},
+							},
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 96305,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96305,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=96528]",
+						params = {
+							quest = 96528,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "Unlock Captain Tokka Reputation",
+						params = {
+							account = true,
+							quest = 96113,
+						},
+						showif = {
+							evaluator = "flag",
+							negate = true,
+							params = {
+								account = true,
+								quest = 96113,
+							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Complete [quest=95931]",
+						params = {
+							account = true,
+							quest = 95931,
+						},
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 2,
+								of = {
+									{
+										evaluator = "flag",
+										params = {
+											account = true,
+											quest = 96113,
+										},
+									},
+									{
+										evaluator = "group",
+										params = {
+											need = 1,
+											of = {
+												{
+													evaluator = "taskquest",
+													params = {
+														quest = 95931,
+													},
+												},
+												{
+													evaluator = "questlog",
+													params = {
+														quest = 95931,
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94806]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94806,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94806,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94806,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94805]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94805,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94805,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94805,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94804]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94804,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94804,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94804,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94803]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94803,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94803,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94803,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94802]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94802,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94802,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94802,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94800]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94800,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94800,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94800,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94798]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94798,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94798,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94798,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete [quest=94796]",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "flag",
+									params = {
+										quest = 94796,
+									},
+								},
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "taskquest",
+										params = {
+											quest = 94796,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 94796,
+										},
+									},
+								},
+							},
+						},
+					},
+					{
+						evaluator = "group",
+						label = "Complete Tokka Daily Fish Turn In",
+						params = {
+							need = 1,
+							of = {
+								{
+									evaluator = "reputation",
+									params = {
+										faction = 2773,
+										standing = 6,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 97535,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 97557,
+									},
+								},
+								{
+									evaluator = "flag",
+									params = {
+										quest = 97571,
+									},
+								},
+							},
+						},
+						resets = "daily",
+						showif = {
+							evaluator = "flag",
+							params = {
+								account = true,
+								quest = 96113,
+							},
+						},
+					},
+				},
+				v = 2,
+			},
+			popular = true,
 		},
 		{
 			bucket = "professions",
