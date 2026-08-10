@@ -4,19 +4,31 @@
 -- assertions are derived from whatever the catalog ships, so they survive the v1
 -- content growing. Run from the repo root: busted
 
+-- Every evaluator the addon actually ships, read from the .toc in load order.
+-- The support check below is only meaningful against the shipped set, and a
+-- hand-kept list here silently fails the whole catalog the first time a curator
+-- uses a newly added evaluator.
+local function evaluatorFiles()
+	local out = {}
+	for line in io.lines("TodayInWoW.toc") do
+		local path = line:match("^%s*(goals\\evaluators\\[%w_]+%.lua)%s*$")
+		if path then out[#out + 1] = (path:gsub("\\", "/")) end
+	end
+	assert(#out > 0, "no evaluators found in TodayInWoW.toc")
+	return out
+end
+
 local function harness()
 	local mock = dofile("tests/wow_mock.lua")
 	mock.install()
 	_G.TiWDB = nil
 	local ns = {}
-	for _, f in ipairs({
+	local files = {
 		"goals/registry.lua", "goals/store.lua", "goals/catalog.lua",
 		"goals/presenter.lua",
-		"goals/evaluators/lockout.lua", "goals/evaluators/currency.lua",
-		"goals/evaluators/collected.lua", "goals/evaluators/flag.lua",
-		"goals/evaluators/questlog.lua", "goals/evaluators/group.lua",
-		"goals/evaluators/vault.lua", "goals/evaluators/taskquest.lua",
-	}) do
+	}
+	for _, f in ipairs(evaluatorFiles()) do files[#files + 1] = f end
+	for _, f in ipairs(files) do
 		assert(loadfile(f))("TiW", ns)
 	end
 	mock.fireEvent("ADDON_LOADED", "TiW")
