@@ -816,8 +816,9 @@ local function configStep(fr, step, y, width, size, active)
 	else fr.sub:SetText(subtext) end
 	fr.sub:SetShown(subtext ~= "")
 
-	-- Right-aligned progress (n/m).
-	if (not ignored) and r and r.progress then
+	-- Right-aligned progress (n/m). A 1-of-1 is redundant with the check mark
+	-- (see ui_panel), so it is skipped here too.
+	if (not ignored) and r and r.progress and r.max ~= 1 then
 		fr.prog:ClearAllPoints()
 		fr.prog:SetPoint("TOPRIGHT", -2, -2)
 		local pcol = done and GREEN or GOLD

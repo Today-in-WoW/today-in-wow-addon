@@ -470,7 +470,10 @@ local function configStep(fr, step, y, contentW)
 		fr.icon:Hide()
 	end
 
-	local count = (r and r.progress and r.max) and (r.progress .. "/" .. r.max .. " ") or ""
+	-- A 1-of-1 count says nothing the checkbox doesn't (a need = 1 group, e.g.
+	-- "this quest OR the mount is collected"), so it stays off the label.
+	local count = (r and r.progress and r.max and r.max ~= 1)
+		and (r.progress .. "/" .. r.max .. " ") or ""
 	fr.text:ClearAllPoints()
 	fr.text:SetPoint("TOPLEFT", textX, 0)
 	fr.text:SetWidth(contentW - textX - 2)
