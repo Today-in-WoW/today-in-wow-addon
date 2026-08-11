@@ -14,10 +14,24 @@ ns.tables = ns.tables or {}
 -- Shape:  ns.tables.prey_quests[questID] = { tier, criteriaID }
 --   tier ∈ 1 Normal | 2 Hard | 3 Nightmare. criteriaID = the achievement
 --   criterion the quest ticks (tier achievements 42701/42702/42703).
--- Seeded from the TWW table in DelverView/Plumber (Khaz Algar expedition).
+-- Seeded from the table in DelverView/Plumber. Preys are Midnight content
+-- (Quel'Thalas) — the block below is the launch set.
+--
+-- criteriaID is INFORMATIONAL — the site resolves a prey observation by questID
+-- alone (app/addon_ingest/sink.py `_resolve_prey_source`). The launch block
+-- carries in-game criteria IDs; the Coiled Isle block below carries the site's
+-- criteria IDs. Nothing reads either, so the mismatch is cosmetic — do not "fix"
+-- one to match the other without checking who consumes it first.
+--
+-- THIS TABLE IS THE ONLY PREY LIST THE ADDON HAS. There is no server push for
+-- prey (decided 2026-08-10, data_storage §3.10): preys change once a content
+-- drop, so an addon release is already the right cadence. A new season means
+-- editing this file and bumping the version below — the site's /admin/preys
+-- list is for the website, not for here.
 -- ===========================================================================
 
-ns.tables.prey_quests_version = 1
+-- Bumped whenever the shipped set changes. 2 = + Coiled Isle (2026-08).
+ns.tables.prey_quests_version = 2
 
 ns.tables.prey_quests = {
 	-- Normal (tier 1)
@@ -53,6 +67,19 @@ ns.tables.prey_quests = {
 	[91261] = { 3, 105993 }, [91262] = { 3, 105994 }, [91263] = { 3, 105995 },
 	[91264] = { 3, 105996 }, [91265] = { 3, 105997 }, [91266] = { 3, 105998 },
 	[91267] = { 3, 105999 }, [91268] = { 3, 106000 }, [91269] = { 3, 106001 },
+
+	-- Coiled Isle content drop (2026-08). Achievement "Prey: Coiled Nightmares"
+	-- (63415). Nightmare-only: these four targets have no Normal or Hard quest,
+	-- which is why the site renders one tickbox for them instead of three.
+	--
+	-- "Coiled Isle" names the DROP, not a spawn location. These four can spawn in
+	-- any zone, and launch targets spawn on the isle — the isle's own weekly
+	-- rotation is one Nightmare plus two Hard, drawn from the whole pool. Never
+	-- treat this block as a zone filter.
+	[95021] = { 3, 230236 },   -- Janoa the Fang
+	[95022] = { 3, 230237 },   -- Kursak the Coiled
+	[95023] = { 3, 230238 },   -- Batani the Scaled
+	[95024] = { 3, 230239 },   -- Kadani the Claw
 }
 
 return ns

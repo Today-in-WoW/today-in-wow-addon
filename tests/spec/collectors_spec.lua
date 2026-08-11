@@ -2392,6 +2392,20 @@ describe("prey_quests §3.10 collector (prey_quest, daily dedup)", function()
 			m.prey_quest[1].data)
 	end)
 
+	it("emits the Coiled Isle targets, which are Nightmare-only", function()
+		-- 12.1 added four targets with no Normal or Hard quest. Nothing in the
+		-- collector needed changing for them — this pins that the floor carries
+		-- them, since a missing entry fails silently (the pin is just ignored).
+		local ns = setup()
+		local observe = ns.collectors.prey_quests.observePrey
+		for _, questID in ipairs({ 95021, 95022, 95023, 95024 }) do observe(questID) end
+		local m = byKind(ns.session.events)
+		assert.equal(4, #(m.prey_quest or {}))
+		for _, e in ipairs(m.prey_quest) do
+			assert.equal(3, e.data.difficultyTier)
+		end
+	end)
+
 	it("ignores a questID that is not a prey quest", function()
 		local ns = setup()
 		ns.collectors.prey_quests.observePrey(70123)   -- a normal quest, not in the table
