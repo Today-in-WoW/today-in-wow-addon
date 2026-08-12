@@ -2137,6 +2137,33 @@ describe("reputation_changed §3.11 collector (change event; renown folded in)",
 		assert.equal(1010, m.reputation_changed[1].data.factionID)
 	end)
 
+	it("a faction that drops out of one scan and returns unchanged does not re-emit", function()
+		-- The in-game bug (screenshots, Aug 2026): every loading screen replayed the SAME
+		-- handful of reputation_changed events with the SAME values. A faction going
+		-- missing for one tick (partial list, or a cold C_MajorFactions/C_GossipInfo read
+		-- that makes repPair return 0,0 and the zero-filter drop it) must not make its
+		-- return look like a change — the baseline keeps the last known pair.
+		local ns = setup()
+		factions = {}
+		for i = 1, 10 do factions[i] = { factionID = 1000 + i, currentStanding = 100 } end
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)   -- seed 10 factions
+
+		local full = factions
+		for _ = 1, 3 do                                      -- three loading screens
+			factions = { full[1], full[2] }                  -- 8 factions vanish for one tick
+			mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+			factions = full                                  -- ...and come back unchanged
+			mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		end
+		assert.equal(0, #ns.session.events)
+
+		factions[3].currentStanding = 250                    -- a real gain still lands
+		mock.fireEvent("UPDATE_FACTION"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.reputation_changed or {}))
+		assert.same({ factionID = 1003, level = 0, value = 250 }, m.reputation_changed[1].data)
+	end)
+
 	it("guardrail does not clip a normal small drop in factions", function()
 		local ns = setup()
 		factions = {}

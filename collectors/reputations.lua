@@ -84,7 +84,11 @@ ns.Snapshot.Register("reputations", scan)
 -- One event covers both reputation gains and renown level-ups (a level-up is just
 -- `level` rising); the site derives standing/renown transitions from the pair. The
 -- first scan seeds silently (same negligible login→first-event window as §3.14).
-local lastRep   -- factionID -> "level:value"; nil until the first scan seeds it
+--
+-- factionID -> "level:value". STICKY: an entry is only ever written, never removed.
+-- A faction that drops out of one scan keeps its last known pair, so its return is
+-- not a "change". nil until the first scan seeds it.
+local lastRep
 
 -- Guardrail against a bad read (same class of bug as quest_completion.lua /
 -- collections.lua's massive-jump guardrail, the 44k-event schema-migration bug,
@@ -93,14 +97,23 @@ local lastRep   -- factionID -> "level:value"; nil until the first scan seeds it
 -- dungeon enter/leave — not just login) — either a partial faction list, OR
 -- (observed in-game) a full list whose currentStanding reads come back pinned to
 -- sentinel extremes (±42000, the classic Hated/Exalted bar bounds) for many
--- factions at once. Either shape moves an implausible fraction of the tracked set
--- in one scan; naively emitting/adopting it either floods reputation_changed
--- outright or corrupts lastRep so the FOLLOW-UP scan (once real data returns)
--- mirrors the flood back. So: count how many factions actually differ (changed
--- value + vanished + newly seen) against the size of the last known set — if
--- that's implausible, suppress the emit for this pass. lastRep still resyncs to
--- the fresh read either way (guarded or not) so a bad scan self-heals within one
--- more scan instead of comparing against a stale baseline forever.
+-- factions at once.
+--
+-- The partial-list shape is why lastRep is sticky. A faction MISSING from a scan
+-- is unknowable, not zero — and it goes missing for two different reasons: it fell
+-- out of the returned list, or its secondary API (C_MajorFactions / C_GossipInfo)
+-- was cold for that tick so repPair returned 0,0 and the zero-filter in scan()
+-- dropped it. Dropping it from the baseline emitted nothing THAT pass, but the next
+-- scan saw it as newly-tracked and emitted its (unchanged) pair — one burst per
+-- loading screen, the same factions with the same values every time (observed
+-- in-game, Aug 2026). Keeping the old pair makes the round trip a no-op.
+--
+-- The sentinel shape still needs a count: many factions PRESENT with implausible
+-- values moves a large fraction of the tracked set in one scan. Emitting that
+-- floods reputation_changed outright, so suppress the emit for this pass. lastRep
+-- still adopts the fresh values so a bad scan self-heals on the next scan (which
+-- mirrors back over threshold, and is suppressed too) instead of comparing against
+-- a stale baseline forever.
 local CHANGED_ABS, CHANGED_RATIO = 20, 0.5
 
 local function emitChanges()
@@ -112,29 +125,25 @@ local function emitChanges()
 		return
 	end
 
-	local lastCount, nChanged = 0, 0
-	for id in pairs(lastRep) do
-		lastCount = lastCount + 1
-		local d = cur[id]
-		if not d or (d.level .. ":" .. d.value) ~= lastRep[id] then nChanged = nChanged + 1 end
-	end
-	for id in pairs(cur) do
-		if lastRep[id] == nil then nChanged = nChanged + 1 end   -- newly-tracked faction
-	end
-	local guarded = nChanged > CHANGED_ABS and nChanged > lastCount * CHANGED_RATIO
-
-	if not guarded then
-		for id, d in pairs(cur) do
-			local key = d.level .. ":" .. d.value
-			if lastRep[id] ~= key then
-				ns.Emit("reputation_changed", { factionID = id, level = d.level, value = d.value })
-			end
+	-- Only factions PRESENT in this scan can have changed; a vanished one is unknowable.
+	local changed, nChanged, known = {}, 0, 0
+	for _ in pairs(lastRep) do known = known + 1 end
+	for id, d in pairs(cur) do
+		local key = d.level .. ":" .. d.value
+		if lastRep[id] ~= key then
+			changed[id] = key
+			nChanged = nChanged + 1
 		end
 	end
 
-	local fresh = {}
-	for id, d in pairs(cur) do fresh[id] = d.level .. ":" .. d.value end
-	lastRep = fresh
+	local guarded = nChanged > CHANGED_ABS and nChanged > known * CHANGED_RATIO
+	for id, key in pairs(changed) do
+		if not guarded then
+			local d = cur[id]
+			ns.Emit("reputation_changed", { factionID = id, level = d.level, value = d.value })
+		end
+		lastRep[id] = key   -- adopt either way; a guarded scan self-heals on the next one
+	end
 end
 
 if ns.Schedule then
