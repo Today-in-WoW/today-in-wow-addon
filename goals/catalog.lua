@@ -6073,21 +6073,21 @@ function Catalog.entries()
 				require = {
 					level = 90,
 				},
-				rev = 1,
+				rev = 2,
 				scope = "perchar",
 				steps = {
 					{
 						evaluator = "flag",
 						label = "Complete the intro campaign",
 						params = {
-							quest = 95530,
+							quest = 92937,
 						},
 					},
 					{
-						evaluator = "flag",
+						evaluator = "achievement",
 						label = "Complete Azta'rec",
 						params = {
-							quest = 96434,
+							achievement = 63326,
 						},
 					},
 					{
@@ -6679,7 +6679,7 @@ function Catalog.entries()
 				require = {
 					level = 90,
 				},
-				rev = 3,
+				rev = 6,
 				scope = "perchar",
 				steps = {
 					{
@@ -7590,20 +7590,40 @@ function Catalog.entries()
 							quest = 96528,
 						},
 						resets = "daily",
+						showif = {
+							evaluator = "group",
+							params = {
+								need = 1,
+								of = {
+									{
+										evaluator = "flag",
+										params = {
+											quest = 96528,
+										},
+									},
+									{
+										evaluator = "questlog",
+										params = {
+											quest = 96528,
+										},
+									},
+								},
+							},
+						},
 					},
 					{
 						evaluator = "flag",
 						label = "Unlock Captain Tokka Reputation",
 						params = {
 							account = true,
-							quest = 96113,
+							quest = 98343,
 						},
 						showif = {
 							evaluator = "flag",
 							negate = true,
 							params = {
 								account = true,
-								quest = 96113,
+								quest = 98343,
 							},
 						},
 					},
@@ -7623,7 +7643,7 @@ function Catalog.entries()
 										evaluator = "flag",
 										params = {
 											account = true,
-											quest = 96113,
+											quest = 98343,
 										},
 									},
 									{
@@ -8010,7 +8030,7 @@ function Catalog.entries()
 								{
 									evaluator = "flag",
 									params = {
-										quest = 97535,
+										quest = 97562,
 									},
 								},
 								{
@@ -8032,8 +8052,15 @@ function Catalog.entries()
 							evaluator = "flag",
 							params = {
 								account = true,
-								quest = 96113,
+								quest = 98343,
 							},
+						},
+					},
+					{
+						evaluator = "flag",
+						label = "Unlock World Quests",
+						params = {
+							quest = 93419,
 						},
 					},
 				},
