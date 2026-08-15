@@ -23,6 +23,7 @@ ns.Snapshot = Snapshot
 -- only; account-wide collections live in the checkpoint (core/baseline.lua), not here.
 Snapshot.ORDER = {
 	"basics", "professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
+	"perks",
 }
 
 local scanners = {}
@@ -40,6 +41,7 @@ local function canonicalOf(cat, r, C)
 	if cat == "currencies" then return C.currencies(r.contents or {}, r.data or {}) end
 	if cat == "greatvault" then return C.greatvault(r.activities or {}) end
 	if cat == "instancelocks" then return C.instancelocks(r.locks or {}) end
+	if cat == "perks" then return C.perks(r.contents or {}, r.meta) end
 	if type(r.contents) == "string" then return r.contents end   -- already the joined id string (storage trim, §3.3)
 	return C.ids(r.contents or {})   -- mounts/toys/pets/appearances/decor/achievements/quests
 end

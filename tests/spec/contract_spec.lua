@@ -80,6 +80,13 @@ describe("canonical(category)", function()
 	it("instancelocks", function()
 		assert.equal(cat.instancelocks.expected, C.instancelocks(cat.instancelocks.input.locks))
 	end)
+	it("perks", function()
+		local p = cat.perks.input
+		assert.equal(cat.perks.expected, C.perks(p.contents, p.meta))
+	end)
+	it("perks (not served yet -> empty, not a 0-earned row)", function()
+		assert.equal(cat.perks_empty.expected, C.perks(cat.perks_empty.input.contents, nil))
+	end)
 end)
 
 describe("chain", function()

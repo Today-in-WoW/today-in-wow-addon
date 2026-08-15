@@ -84,6 +84,17 @@ def c_instancelocks(locks) -> str:
     return ",".join(f"{l['instanceID']}:{l['difficultyID']}:{l['encountersDone']}" for l in rows)
 
 
+# perks (Trading Post, §3.19): scalars then the completed-activity ids. `meta` is
+# absent while the client has not served the month's activities yet — that state
+# canonicalizes to the empty string, distinct from a real "0 earned" row.
+def c_perks(meta, contents) -> str:
+    if not meta:
+        return ""
+    return "%d:%d:%d:%d|%s" % (
+        meta["month"], meta["earned"], meta["max"], meta["pending"], c_ids(contents)
+    )
+
+
 def genesis(sid, guid, sv, bh) -> str:
     return fnv1a(f"{sid}^{guid}^{sv}^{bh}")
 
@@ -166,6 +177,8 @@ def build():
              {"type": 1, "index": 2, "threshold": 4, "progress": 3, "level": 636}]
     locks = [{"instanceID": 2657, "difficultyID": 16, "encountersDone": 6},
              {"instanceID": 2657, "difficultyID": 14, "encountersDone": 8}]
+    perks_c = [279, 13, 645]
+    perks_m = {"month": 44, "earned": 1000, "max": 1000, "pending": 2}
 
     v["canonical_category"] = {
         "basics": {"input": basics, "expected": c_payload(basics)},
@@ -174,6 +187,9 @@ def build():
         "currencies": {"input": {"contents": cur_c, "data": cur_d}, "expected": c_currencies(cur_c, cur_d)},
         "greatvault": {"input": {"activities": vault}, "expected": c_greatvault(vault)},
         "instancelocks": {"input": {"locks": locks}, "expected": c_instancelocks(locks)},
+        "perks": {"input": {"contents": perks_c, "meta": perks_m}, "expected": c_perks(perks_m, perks_c)},
+        # the not-yet-served state: contents empty, no meta -> empty canonical
+        "perks_empty": {"input": {"contents": []}, "expected": c_perks(None, [])},
     }
 
     # 6. account checkpoint (baseline_hash) — the six collection categories

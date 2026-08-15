@@ -55,6 +55,7 @@ describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
 	after_each(function()
 		_G.GetProfessions, _G.GetProfessionInfo, _G.C_TradeSkillUI = nil, nil, nil
 		_G.C_CurrencyInfo, _G.C_WeeklyRewards = nil, nil
+		_G.C_PerksActivities, _G.C_PerksProgram = nil, nil
 		_G.C_Reputation, _G.C_MajorFactions, _G.C_GossipInfo = nil, nil, nil
 		_G.RequestRaidInfo, _G.GetNumSavedInstances, _G.GetSavedInstanceInfo = nil, nil, nil
 		_G.GetNumSavedWorldBosses, _G.GetSavedWorldBossInfo = nil, nil
@@ -132,6 +133,34 @@ describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
 		local r = captureCat("collectors/great_vault.lua", "greatvault")
 		assert.equal(2, #r.activities)
 		assert.same({ type = 1, index = 1, threshold = 2, progress = 2, level = 639 }, r.activities[1])
+	end)
+
+	it("perks §3.19: completed ids + { month, earned, max, pending }; bar clamped to the top threshold", function()
+		_G.C_PerksActivities = { GetPerksActivitiesInfo = function()
+			return {
+				activePerksMonth = 44,
+				thresholds = { { requiredContributionAmount = 200 }, { requiredContributionAmount = 1000 } },
+				activities = { { ID = 279, completed = true, thresholdContributionAmount = 200 },
+				               { ID = 13, completed = true, thresholdContributionAmount = 900 },
+				               { ID = 6, completed = false, thresholdContributionAmount = 200 } },
+			}
+		end }
+		_G.C_PerksProgram = { GetPendingChestRewards = function()
+			return { { activityMonthID = 44, thresholdOrderIndex = 5 },
+			         { activityMonthID = 0, thresholdOrderIndex = 0 } }   -- legacy row, other month
+		end }
+		local r = captureCat("collectors/perks.lua", "perks")
+		assert.same({ 13, 279 }, sortedContents(r.contents))
+		assert.same({ month = 44, earned = 1000, max = 1000, pending = 1 }, r.meta)
+	end)
+
+	it("perks §3.19: an unserved month stays empty rather than hashing a 0-earned row", function()
+		_G.C_PerksActivities = { GetPerksActivitiesInfo = function()
+			return { activePerksMonth = 44, thresholds = { { requiredContributionAmount = 1000 } }, activities = {} }
+		end }
+		local r = captureCat("collectors/perks.lua", "perks")
+		assert.same({}, r.contents)
+		assert.is_nil(r.meta)   -- canonicalizes to "" (contract_spec), not "0:0:1000:0|"
 	end)
 
 	it("instance_locks §3.14: locked raids + world bosses; resetsAt absolute, world boss difficulty 0", function()
@@ -2006,6 +2035,90 @@ describe("currency_changed §3.12 collector (change event, CURRENCY_DISPLAY_UPDA
 		list = { { quantity = 100, maxQuantity = 2000 } }; links = { "currency:3008" }
 		fire(); fire(); fire()
 		assert.equal(0, #ns.session.events)
+	end)
+end)
+
+describe("perks_activity_completed §3.19 collector (Trading Post; late-served data)", function()
+	local acts, month, chest   -- mutated between scans
+	local function setup()
+		local ns = freshNS()
+		_G.C_PerksActivities = { GetPerksActivitiesInfo = function()
+			return { activePerksMonth = month,
+			         thresholds = { { requiredContributionAmount = 1000 } },
+			         activities = acts }
+		end }
+		_G.C_PerksProgram = {
+			GetPendingChestRewards = function() return chest end,
+			RequestPendingChestRewards = function() end,
+		}
+		assert(loadfile("collectors/perks.lua"))("TiW", ns)
+		-- A real captured bundle, not freshNS's stub: Recapture re-chains from the
+		-- session genesis, which is exactly what the late-data path exercises.
+		ns.session = ns.Snapshot.Capture({ session_id = "S-perks", char_guid = "Player-1-CAFE", schema_version = 1 })
+		return ns
+	end
+	local function activity(id, completed) return { ID = id, completed = completed, thresholdContributionAmount = 200 } end
+	local function fire() mock.fireEvent("PERKS_ACTIVITIES_UPDATED"); mock.advance(1) end
+
+	before_each(function()
+		mock.now = 1747776000; mock.frames = {}; mock.timers = {}
+		acts, month, chest = {}, 44, {}
+	end)
+	after_each(function() _G.C_PerksActivities, _G.C_PerksProgram = nil, nil end)
+
+	it("emits nothing while the client has not served the month yet", function()
+		local ns = setup()
+		fire(); fire()
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("seeds the whole served set silently, then emits only later completions", function()
+		local ns = setup()
+		acts = { activity(13, true), activity(279, true), activity(6, false) }
+		fire()                                              -- first data: 2 already done, silent
+		assert.equal(0, #ns.session.events)
+		acts[3].completed = true
+		fire()
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.perks_activity_completed or {}))
+		assert.same({ activityID = 6, month = 44, earned = 600 }, m.perks_activity_completed[1].data)
+	end)
+
+	it("folds late data into this session's snapshot (Recapture, not a new session)", function()
+		local ns = setup()
+		assert.equal("", ns.Canonical.perks(ns.session.snapshot.perks.contents, ns.session.snapshot.perks.meta))
+		acts = { activity(13, true) }
+		fire()
+		assert.same({ 13 }, ns.session.snapshot.perks.contents)
+		assert.same({ month = 44, earned = 200, max = 1000, pending = 0 }, ns.session.snapshot.perks.meta)
+	end)
+
+	it("seeds at login, so a completion arriving as the session's FIRST perks event still emits", function()
+		local ns = setup()
+		acts = { activity(13, true) }
+		mock.fireEvent("PLAYER_ENTERING_WORLD"); mock.advance(1)   -- seed at login, not on the completion
+		acts[#acts + 1] = activity(6, true)
+		mock.fireEvent("PERKS_ACTIVITY_COMPLETED"); mock.advance(1)
+		local m = byKind(ns.session.events)
+		assert.equal(1, #(m.perks_activity_completed or {}))
+		assert.equal(6, m.perks_activity_completed[1].data.activityID)
+	end)
+
+	it("a month rollover reseeds silently instead of re-emitting the new month", function()
+		local ns = setup()
+		acts = { activity(13, true) }
+		fire()
+		month, acts = 45, { activity(900, true) }
+		fire()
+		assert.equal(0, #ns.session.events)
+	end)
+
+	it("counts only this month's unclaimed chests", function()
+		local ns = setup()
+		acts = { activity(13, true) }
+		chest = { { activityMonthID = 44 }, { activityMonthID = 44 }, { activityMonthID = 0 } }
+		fire()
+		assert.equal(2, ns.collectors.perks.rescan().meta.pending)
 	end)
 end)
 

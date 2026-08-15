@@ -11,6 +11,7 @@
 -- here as the spec, independent of any value the module might expose.
 local ORDER = {
 	"basics", "professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
+	"perks",
 }
 
 local function freshSnapshot()
@@ -39,6 +40,8 @@ local locks = { { instanceID = 2657, difficultyID = 16, encountersDone = 6 },
 local CHECKPOINT = { mounts = { 1589, 1581 }, pets = { 2891 }, toys = {},
                      appearances = {}, achievements = { 6, 503 }, decor = {} }
 
+local perks_c, perks_m = { 279, 13 }, { month = 44, earned = 1000, max = 1000, pending = 2 }
+
 local SESSION = { session_id = "S-abc123", char_guid = "Player-1234-DEADBEEF", schema_version = 1 }
 
 -- Register the seven per-character categories (the test sets scrambled order itself).
@@ -50,6 +53,7 @@ local function registerAll(ns)
 	ns.Snapshot.Register("greatvault", function() return { activities = vault } end)
 	ns.Snapshot.Register("professions", function() return { contents = prof_c, data = prof_d } end)
 	ns.Snapshot.Register("reputations", function() return { contents = rep_c, data = rep_d } end)
+	ns.Snapshot.Register("perks", function() return { contents = perks_c, meta = perks_m } end)
 end
 
 describe("§5/§7/§8 snapshot Capture", function()
@@ -69,6 +73,7 @@ describe("§5/§7/§8 snapshot Capture", function()
 			greatvault = C.greatvault(vault),
 			instancelocks = C.instancelocks(locks),
 			quests = C.ids({ 70123, 70200, 71000 }),
+			perks = C.perks(perks_c, perks_m),
 		}
 
 		local baseline_hash = ns.Baseline.hash(CHECKPOINT)

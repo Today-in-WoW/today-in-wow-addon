@@ -796,6 +796,309 @@ local function statusCmd()
 	out("data collection: |cffffd100" .. ns.Consent.get() .. "|r")
 end
 
+-- ===========================================================================
+-- /tiw perks · Trading Post (Traveler's Log) API probe — research for the
+-- planned `perks` snapshot category. Read-only: no Emit, no stored state.
+--
+-- It exists to settle the four unknowns the collector design hangs on:
+--   1. WHEN GetPerksActivitiesInfo() first returns data after login (the
+--      Snapshot.Recapture trigger) and whether PERKS_ACTIVITIES_UPDATED
+--      announces it — the poll ladder + watch log time both.
+--   2. Whether GetPendingChestRewards() fills WITHOUT opening the Trading Post
+--      (`/tiw perks chest` sends RequestPendingChestRewards and the watch log
+--      records the CHEST_REWARDS_UPDATED_FROM_SERVER reply).
+--   3. Whether another character's completion reaches THIS session live — a
+--      "newly completed" line with no preceding PERKS_ACTIVITY_COMPLETED.
+--   4. What activePerksMonth actually numbers (the site's month join key:
+--      PerksActivityThresholdGroup.PerksMonth counter, or the group's ID) —
+--      cross-checkable against a chest row's activityMonthID.
+-- Also dumps one completed + one open activity in full, including the raw
+-- localized requirementText, so we can judge what is safe to ship (§7).
+-- ===========================================================================
+
+local PERKS_LOG_CAP = 30
+local PERKS_POLLS = { 0, 1, 3, 5, 10, 20, 30 }   -- seconds after PLAYER_LOGIN
+local perksWatch = { log = {}, loginAt = nil, firstData = nil, done = nil, month = nil }
+
+local function perksRead()
+	if not (C_PerksActivities and C_PerksActivities.GetPerksActivitiesInfo) then return nil end
+	local ok, info = pcall(C_PerksActivities.GetPerksActivitiesInfo)
+	if not ok or type(info) ~= "table" then return nil end
+	return info
+end
+
+local function perksActivities(info)
+	local a = info and info.activities
+	return (type(a) == "table" and a) or {}
+end
+
+-- Blizzard's own bar math (Blizzard_MonthlyActivities.lua, UpdateActivities):
+-- earned = sum of the completed activities' contributions, clamped to the largest
+-- threshold. There is no "current points" field in the API.
+local function perksTally(info)
+	local max = 0
+	for _, th in pairs((info and info.thresholds) or {}) do
+		local need = th.requiredContributionAmount or 0
+		if need > max then max = need end
+	end
+	local earned, done, inprog, tracked = 0, 0, 0, 0
+	for _, a in pairs(perksActivities(info)) do
+		if a.completed then
+			earned = earned + (a.thresholdContributionAmount or 0)
+			done = done + 1
+		elseif a.inProgress then
+			inprog = inprog + 1
+		end
+		if a.tracked then tracked = tracked + 1 end
+	end
+	if max > 0 and earned > max then earned = max end
+	return earned, max, done, inprog, tracked
+end
+
+local function perksDoneSet(info)
+	local set = {}
+	for _, a in pairs(perksActivities(info)) do
+		if a.completed and a.ID then set[a.ID] = true end
+	end
+	return set
+end
+
+-- Unclaimed chest rewards. month = nil returns every month's rows, which is how we
+-- see whether activityMonthID uses the same numbering as activePerksMonth.
+local function perksChest(month)
+	local rows = {}
+	if C_PerksProgram and C_PerksProgram.GetPendingChestRewards then
+		local ok, pend = pcall(C_PerksProgram.GetPendingChestRewards)
+		if ok and type(pend) == "table" then
+			for _, r in pairs(pend) do
+				if month == nil or r.activityMonthID == month then rows[#rows + 1] = r end
+			end
+		end
+	end
+	return rows
+end
+
+local function perksChestLine(r)
+	return string.format("idx=%s amount=%s rewardType=%s month=%s monthRewarded=%s vendorItem=%s",
+		tostring(r.thresholdOrderIndex), tostring(r.rewardAmount), tostring(r.rewardTypeID),
+		tostring(r.activityMonthID), tostring(r.monthRewarded), tostring(r.perksVendorItemID))
+end
+
+local function perksElapsed()
+	return perksWatch.loginAt and (GetTime() - perksWatch.loginAt) or 0
+end
+
+local function perksPush(line)
+	local log = perksWatch.log
+	log[#log + 1] = string.format("+%5.1fs  %s", perksElapsed(), line)
+	if #log > PERKS_LOG_CAP then table.remove(log, 1) end
+end
+
+-- One watch-log line per observation, carrying the completed-set diff. The diff is
+-- the answer to unknown 3: an id appearing here under a poll or a bare
+-- PERKS_ACTIVITIES_UPDATED (no PERKS_ACTIVITY_COMPLETED) is an off-character completion.
+local function perksMark(label, info)
+	if not info then perksPush(label .. "  (no data)"); return end
+
+	if perksWatch.month and info.activePerksMonth ~= perksWatch.month then
+		perksPush(string.format("month rolled %s -> %s", tostring(perksWatch.month), tostring(info.activePerksMonth)))
+		perksWatch.done = nil
+	end
+	perksWatch.month = info.activePerksMonth
+
+	local acts = perksActivities(info)
+	if #acts > 0 and not perksWatch.firstData then perksWatch.firstData = perksElapsed() end
+
+	local cur, added = perksDoneSet(info), {}
+	if perksWatch.done then
+		for id in pairs(cur) do
+			if not perksWatch.done[id] then added[#added + 1] = id end
+		end
+		table.sort(added)
+	end
+	perksWatch.done = cur
+
+	local earned, max, done = perksTally(info)
+	local line = string.format("%-38s n=%d done=%d earned=%d/%d", label, #acts, done, earned, max)
+	if #added > 0 then line = line .. "  newly completed: " .. table.concat(added, ",") end
+	perksPush(line)
+end
+
+local function perksDur(secs)
+	secs = secs or 0
+	if secs <= 0 then return "?" end
+	return string.format("%dd %dh", math.floor(secs / 86400), math.floor((secs % 86400) / 3600))
+end
+
+local function perksSample(label, a)
+	if not a then return end
+	out(string.format("  sample %-4s id=%s  contrib=%s  completed=%s  inProgress=%s  supersedes=%s  uiPriority=%s  conditionsMet=%s",
+		label, tostring(a.ID), tostring(a.thresholdContributionAmount), tostring(a.completed),
+		tostring(a.inProgress), tostring(a.supersedes), tostring(a.uiPriority), tostring(a.areAllConditionsMet)))
+	out(string.format("               name=%q  tags=%s  event=%s", tostring(a.activityName),
+		table.concat(a.tagNames or {}, "/"), tostring(a.eventName)))
+	for i, c in ipairs(a.criteriaList or {}) do
+		out(string.format("               criteria[%d] id=%s required=%s  (no current value in the API)",
+			i, tostring(c.criteriaID), tostring(c.requiredValue)))
+	end
+	-- The locale question: this is the ONLY place per-activity progress exists.
+	for i, r in ipairs(a.requirementsList or {}) do
+		out(string.format("               req[%d] completed=%s text=%q", i, tostring(r.completed), tostring(r.requirementText)))
+	end
+end
+
+--   /tiw perks         the full picture: bar, thresholds, chest, readiness, watch log
+--   /tiw perks list    every activity (id, state, contribution) — the month's catalog
+--   /tiw perks chest   fire RequestPendingChestRewards and dump what's pending
+local function perksReport(arg)
+	if not (C_PerksActivities and C_PerksActivities.GetPerksActivitiesInfo) then
+		out("perks  C_PerksActivities unavailable on this client")
+		return
+	end
+
+	if arg == "chest" then
+		local rows = perksChest(nil)
+		out("perks chest  " .. #rows .. " pending row(s) right now")
+		for _, r in ipairs(rows) do out("    " .. perksChestLine(r)) end
+		if C_PerksProgram and C_PerksProgram.RequestPendingChestRewards then
+			C_PerksProgram.RequestPendingChestRewards()
+			out("    RequestPendingChestRewards() sent — the reply lands as")
+			out("    CHEST_REWARDS_UPDATED_FROM_SERVER in the watch log; re-run to see the rows")
+		else
+			out("    RequestPendingChestRewards unavailable")
+		end
+		return
+	end
+
+	local info = perksRead()
+	if not info then
+		out("perks  GetPerksActivitiesInfo returned nothing (Trading Post disabled, or data not in yet)")
+		return
+	end
+	local acts = perksActivities(info)
+	local earned, max, done, inprog, tracked = perksTally(info)
+
+	if arg == "list" then
+		local sorted = {}
+		for _, a in pairs(acts) do sorted[#sorted + 1] = a end
+		table.sort(sorted, function(x, y) return (x.ID or 0) < (y.ID or 0) end)
+		out("perks list  " .. #sorted .. " activities  ·  month=" .. tostring(info.activePerksMonth))
+		for _, a in ipairs(sorted) do
+			out(string.format("  %-6s %-4s contrib=%-4s %s", tostring(a.ID),
+				a.completed and "done" or (a.inProgress and "wip" or "-"),
+				tostring(a.thresholdContributionAmount), tostring(a.activityName)))
+		end
+		return
+	end
+
+	out(string.format("perks  ·  activePerksMonth=%s  ends in %s  displayMonthName=%q",
+		tostring(info.activePerksMonth), perksDur(info.secondsRemaining), tostring(info.displayMonthName)))
+	out(string.format("  bar        earned=%d / max=%d   activities done=%d/%d  inProgress=%d  tracked=%d",
+		earned, max, done, #acts, inprog, tracked))
+
+	local ths = {}
+	for _, th in pairs(info.thresholds or {}) do ths[#ths + 1] = th end
+	table.sort(ths, function(x, y) return (x.thresholdOrderIndex or 0) < (y.thresholdOrderIndex or 0) end)
+	for _, th in ipairs(ths) do
+		out(string.format("  threshold  idx=%s need=%s tender=%s item=%s pendingReward=%s%s",
+			tostring(th.thresholdOrderIndex), tostring(th.requiredContributionAmount),
+			tostring(th.currencyAwardAmount), tostring(th.itemReward), tostring(th.pendingReward),
+			earned >= (th.requiredContributionAmount or 0) and "  |cff40ff40reached|r" or ""))
+	end
+
+	-- Blizzard derives pendingReward from GetPendingChestRewards rather than trusting
+	-- the struct field, so print both and compare.
+	local chestMonth, chestAll = perksChest(info.activePerksMonth), perksChest(nil)
+	out(string.format("  chest      pending this month=%d  (all months=%d)", #chestMonth, #chestAll))
+	for _, r in ipairs(chestAll) do out("    " .. perksChestLine(r)) end
+
+	local pc = C_PerksActivities.GetPerksActivitiesPendingCompletion
+		and C_PerksActivities.GetPerksActivitiesPendingCompletion()
+	local pcIDs = pc and pc.pendingIDs
+	out("  pending    just-completed (unacknowledged): "
+		.. ((pcIDs and #pcIDs > 0) and table.concat(pcIDs, ",") or "none"))
+
+	-- Tender already ships as currency 2032 (§3.12) — cross-check the two reads to
+	-- confirm the perks collector never needs to carry it.
+	local ci = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(2032)
+	out(string.format("  tender     C_PerksProgram=%s  currency2032=%s",
+		tostring(C_PerksProgram and C_PerksProgram.GetCurrencyAmount and C_PerksProgram.GetCurrencyAmount()),
+		tostring(ci and ci.quantity)))
+
+	out(string.format("  readiness  first non-empty read at login+%s   (a /reload is not a cold login — relog to time it honestly)",
+		perksWatch.firstData and string.format("%.1fs", perksWatch.firstData) or "not yet"))
+
+	-- Everything above reads the API directly. This line is the COLLECTOR: whether it
+	-- registered, what it seeded (a seeded set is the precondition for any event), and
+	-- what actually landed in this session's snapshot.
+	local col = ns.collectors and ns.collectors.perks
+	if not col then
+		out("  collector  |cffff5050not loaded|r")
+	else
+		local st = col.state()
+		local snap = ns.session and ns.session.snapshot and ns.session.snapshot.perks
+		out(string.format("  collector  seeded=%s done=%d month=%s chestRequested=%s",
+			tostring(st.seeded), st.done, tostring(st.month), tostring(st.requested)))
+		out(string.format("             snapshot  ids=%d  meta=%s  h=%s",
+			snap and #(snap.contents or {}) or 0,
+			snap and snap.meta and ns.Canonical.payload(snap.meta) or "nil (unserved)",
+			tostring(snap and snap.h)))
+	end
+
+	local sampleDone, sampleTodo
+	for _, a in pairs(acts) do
+		if a.completed then sampleDone = sampleDone or a else sampleTodo = sampleTodo or a end
+	end
+	perksSample("done", sampleDone)
+	perksSample("todo", sampleTodo)
+
+	-- What the proposed `perks` snapshot category would hash for this state:
+	-- month:earned:max:pendingChest | sorted completed ids
+	local ids = {}
+	for id in pairs(perksDoneSet(info)) do ids[#ids + 1] = id end
+	out(string.format("  proposed   perks = %q", string.format("%d:%d:%d:%d",
+		info.activePerksMonth or 0, earned, max, #chestMonth) .. "|" .. ns.Canonical.ids(ids)))
+
+	if #perksWatch.log > 0 then
+		out("  watch (since login)")
+		for _, line in ipairs(perksWatch.log) do out("    " .. line) end
+	end
+end
+
+-- The watcher arms at file load so PLAYER_LOGIN itself is timed. The poll ladder
+-- covers the case where data lands with no event at all; it stops at the first
+-- non-empty read, so a normal login costs one or two reads.
+local perksFrame = CreateFrame("Frame")
+for _, ev in ipairs({ "PLAYER_LOGIN", "PERKS_ACTIVITIES_UPDATED", "PERKS_ACTIVITY_COMPLETED",
+	"CHEST_REWARDS_UPDATED_FROM_SERVER", "PERKS_PROGRAM_CURRENCY_AWARDED", "PERKS_PROGRAM_DISABLED",
+	-- zone events, logged only while we are still waiting for data: they show whether a
+	-- late arrival correlates with a loading screen (the 12.1 zone that serves no perks
+	-- data) or lands on its own.
+	"PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA" }) do
+	pcall(perksFrame.RegisterEvent, perksFrame, ev)   -- a renamed event must not break /tiw
+end
+local PERKS_ZONE_EVENTS = { PLAYER_ENTERING_WORLD = true, ZONE_CHANGED_NEW_AREA = true }
+perksFrame:SetScript("OnEvent", function(_, event, arg1)
+	if event == "PLAYER_LOGIN" then
+		perksWatch.loginAt = GetTime()
+		for _, delay in ipairs(PERKS_POLLS) do
+			ns.Schedule.Later(delay, function()
+				if perksWatch.firstData then return end
+				perksMark(string.format("poll %ds", delay), perksRead())
+			end)
+		end
+		return
+	end
+	if PERKS_ZONE_EVENTS[event] then
+		if perksWatch.firstData then return end
+		local zone = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+		local info = zone and C_Map.GetMapInfo and C_Map.GetMapInfo(zone)
+		perksMark(event .. " map=" .. tostring(zone) .. " " .. tostring(info and info.name), perksRead())
+		return
+	end
+	perksMark(arg1 ~= nil and (event .. "(" .. tostring(arg1) .. ")") or event, perksRead())
+end)
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	local raw = (msg or ""):gsub("^%s*(.-)%s*$", "%1")
@@ -855,6 +1158,8 @@ SlashCmdList["TIW"] = function(msg)
 		wqReport()
 	elseif cmd == "ql" then
 		qlReport(arg)
+	elseif cmd == "perks" then
+		perksReport(arg)
 	elseif msg == "trace" then
 		if ns.OnEmit then
 			ns.OnEmit = nil
@@ -866,7 +1171,7 @@ SlashCmdList["TIW"] = function(msg)
 			out("trace on — one line per new record (persists across /reload)")
 		end
 	else
-		out("commands:  /tiw status  ·  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw engine  ·  /tiw appr  ·  /tiw wq  ·  /tiw ql  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
+		out("commands:  /tiw status  ·  /tiw debug  ·  /tiw probe  ·  /tiw collections  ·  /tiw collect  ·  /tiw export  ·  /tiw engine  ·  /tiw appr  ·  /tiw wq  ·  /tiw ql  ·  /tiw perks  ·  /tiw log  ·  /tiw trace  ·  /tiw goal  ·  /tiw consent  ·  /tiw options  ·  /tiw window reset")
 	end
 end
 

@@ -284,6 +284,28 @@
         ]
       },
       "expected": "2657:14:8,2657:16:6"
+    },
+    "perks": {
+      "input": {
+        "contents": [
+          279,
+          13,
+          645
+        ],
+        "meta": {
+          "month": 44,
+          "earned": 1000,
+          "max": 1000,
+          "pending": 2
+        }
+      },
+      "expected": "44:1000:1000:2|13,279,645"
+    },
+    "perks_empty": {
+      "input": {
+        "contents": []
+      },
+      "expected": ""
     }
   },
   "baseline": {

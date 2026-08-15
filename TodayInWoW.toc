@@ -76,6 +76,7 @@ collectors\level_up.lua
 collectors\professions.lua
 collectors\reputations.lua
 collectors\currencies.lua
+collectors\perks.lua
 collectors\great_vault.lua
 collectors\instance_locks.lua
 collectors\collections.lua

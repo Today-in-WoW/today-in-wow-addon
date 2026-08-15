@@ -65,6 +65,7 @@ Consent.CLASS = {
 	encounter_defeated   = "personal",
 	lockout_changed      = "personal",
 	loot_item            = "personal",
+	perks_activity_completed = "personal",
 	profession_learned   = "personal",
 	profession_levelup   = "personal",
 	profession_unlearned = "personal",

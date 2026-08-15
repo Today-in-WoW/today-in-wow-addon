@@ -118,6 +118,14 @@ function C.instancelocks(locks)
 	return concat(parts, ",")
 end
 
+-- perks (§3.19): month/bar scalars, then the completed-activity ids. `meta` is nil
+-- until the client serves the month's activities (it can lag login by minutes), and
+-- that state canonicalizes to "" — deliberately NOT the same as a real 0-earned row.
+function C.perks(contents, meta)
+	if not meta then return "" end
+	return format("%d:%d:%d:%d", meta.month, meta.earned, meta.max, meta.pending) .. "|" .. C.ids(contents)
+end
+
 -- basics is hashed as a plain payload (locale-invariant tokens only)
 C.basics = C.payload
 
