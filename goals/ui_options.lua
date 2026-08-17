@@ -14,10 +14,9 @@ local _, ns = ...
 --      must be STATED, and layout points at Edit Mode, never duplicated here).
 --
 --   B. A one-time StaticPopup at PLAYER_LOGIN (Consent.shouldPrompt) asking how
---      much to share. Each of its three choice buttons sets consent AND calls
---      Consent.markPrompted so it never reappears; closing via Escape/X does NOT
---      mark — consent is a deliberate choice, so an unanswered prompt re-asks
---      next login.
+--      much to share. Every way out of it — all three buttons AND Escape/X, which
+--      counts as "Nothing" — sets consent and calls Consent.markPrompted, so it is
+--      asked exactly once.
 --
 -- Like ui_panel, every frame/Settings/StaticPopup touch lives behind a
 -- PLAYER_LOGIN listener so requiring this file headless never hits an in-game-
@@ -118,17 +117,28 @@ local function registerPopup()
 			.. "\nNothing: nothing leaves your client.|r\n\n"
 			.. "You can change this any time with /tiw options.",
 		button1 = "Enable everything",
-		button2 = "Generic only",
-		button3 = "Nothing",
-		-- Modern StaticPopup dispatches OnButton1/2/3 by index. Defining all three
-		-- (and no OnAccept/OnCancel) means Escape/X hides without marking prompted,
-		-- so an unanswered prompt deliberately re-asks next login.
+		button2 = "Nothing",
+		button3 = "Generic only",
+		-- selectCallbackByIndex is REQUIRED for OnButton2/OnButton3 to fire at all:
+		-- without it Blizzard's StaticPopup_OnClick consults only OnAccept/OnCancel/
+		-- OnAlt, so buttons 2 and 3 hid the dialog without running anything — consent
+		-- was never set, never marked prompted, and the prompt returned every login.
+		-- "Nothing" is button2 because index 2 dispatches `OnCancel or OnButton2` and
+		-- StaticPopup_Show errors if both are defined.
+		selectCallbackByIndex = true,
 		OnButton1 = function() choose("everything") end,
-		OnButton2 = function() choose("generic") end,
-		OnButton3 = function() choose("none") end,
+		OnButton3 = function() choose("generic") end,
+		-- Button2 and Escape/X both land here: dismissing the prompt IS the "Nothing"
+		-- answer, so it marks prompted and never re-asks. Guarded on reason ==
+		-- "clicked" — Blizzard also calls OnCancel with no dialog when the popup could
+		-- not be shown (no free dialog frame) and with "override"/"timeout" when it is
+		-- displaced; none of those is a choice the player made.
+		OnCancel = function(_, _, reason)
+			if reason == "clicked" then choose("none") end
+		end,
 		timeout = 0,
 		whileDead = true,
-		hideOnEscape = true,   -- close without choosing -> not marked -> re-ask
+		hideOnEscape = true,   -- escape routes through OnCancel above = "Nothing"
 		showAlert = false,
 	}
 end

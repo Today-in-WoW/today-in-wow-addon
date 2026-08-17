@@ -106,6 +106,8 @@ local function registerPopup()
 		button1 = "Generic only",
 		button2 = "Everything",
 		button3 = "Not now",
+		-- Required for OnButton2/OnButton3 to run at all — see goals/ui_options.lua.
+		selectCallbackByIndex = true,
 		OnButton1 = function() choose("generic") end,
 		OnButton2 = function() choose("everything") end,
 		OnButton3 = function() end,     -- already stamped at show time
