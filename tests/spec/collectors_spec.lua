@@ -167,10 +167,11 @@ describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
 		_G.RequestRaidInfo = function() end
 		_G.GetNumSavedInstances = function() return 2 end
 		_G.GetSavedInstanceInfo = function(i)
-			-- name, id, reset, difficulty, locked, _, _, isRaid, _, _, numEnc, encProgress, _, instanceID
+			-- name, id, reset, difficulty, locked, extended, instanceIDMostSig, isRaid,
+			-- maxPlayers, difficultyName, numEnc, encProgress, extendDisabled, instanceID
 			local d = ({ [1] = { 3600, 16, true, 8, 6, 2657 },
 			             [2] = { 0, 14, false, 8, 0, 2657 } })[i]   -- not locked -> skipped
-			return "n", 123, d[1], d[2], d[3], false, false, true, 30, "M", d[4], d[5], false, d[6]
+			return "n", 123, d[1], d[2], d[3], false, 7, true, 30, "M", d[4], d[5], false, d[6]
 		end
 		_G.GetNumSavedWorldBosses = function() return 1 end
 		_G.GetSavedWorldBossInfo = function() return "WB", 9000, 7200 end
@@ -179,10 +180,25 @@ describe("snapshot baselines §3.7/§3.11/§3.12/§3.14/§3.15", function()
 		assert.equal(2, #r.locks)                       -- one locked raid + one world boss
 		local byID = {}
 		for _, l in ipairs(r.locks) do byID[l.instanceID] = l end
+		-- lockID/lockIDMostSig = the group-shared run identity (returns 2 and 7), kept
+		-- as two ints and OUT of the hash — see the instancelocks canonical test below.
 		assert.same({ instanceID = 2657, difficultyID = 16, encountersDone = 6,
-		              encountersTotal = 8, resetsAt = mock.now + 3600 }, byID[2657])
+		              encountersTotal = 8, resetsAt = mock.now + 3600,
+		              lockID = 123, lockIDMostSig = 7 }, byID[2657])
+		-- World bosses have no lock id: GetSavedWorldBossInfo exposes none.
 		assert.same({ instanceID = 9000, difficultyID = 0, encountersDone = 1,
 		              encountersTotal = 1, resetsAt = mock.now + 7200 }, byID[9000])
+	end)
+
+	it("instance_locks: the lock id stays OUT of the hashed canonical form", function()
+		-- Adding it to canonical(instancelocks) would change the snapshot tail of every
+		-- retained bundle. Only instanceID:difficultyID:encountersDone are hashed (§8).
+		local withLock = { { instanceID = 2657, difficultyID = 16, encountersDone = 6,
+		                     encountersTotal = 8, resetsAt = 1, lockID = 123, lockIDMostSig = 7 } }
+		local without  = { { instanceID = 2657, difficultyID = 16, encountersDone = 6,
+		                     encountersTotal = 8, resetsAt = 999 } }
+		local C = freshNS().Canonical
+		assert.equal(C.instancelocks(without), C.instancelocks(withLock))
 	end)
 
 	it("reputations §3.11: normalizes standard/renown/friendship to {level,value}; skips headers + zero", function()
@@ -686,6 +702,389 @@ describe("loot §3.17 collector", function()
 		assert.equal(1, #items)
 		assert.equal("object", items[1].data.sourceType)
 		assert.equal(88001, items[1].data.sourceID)
+	end)
+
+	-- ── loot_source: the §9.4 gate-2 denominator ───────────────────────────
+	-- Scope is "wherever an attempt event already exists": inside an instance
+	-- (encounter_defeated) or on a whitelisted rare (npc_defeated).
+	describe("loot_source denominator", function()
+		local function setScope(ns, opts)
+			opts = opts or {}
+			_G.IsInInstance = function() return opts.instance or false end
+			local listed = {}
+			if type(opts.whitelisted) == "table" then
+				for _, id in ipairs(opts.whitelisted) do listed[id] = true end
+			elseif opts.whitelisted then
+				listed[opts.whitelisted] = true
+			end
+			ns.Whitelist = { has = function(id) return listed[id] == true end }
+		end
+		after_each(function() _G.IsInInstance = nil end)
+
+		-- The failure this whole event exists to fix, and the one measured in a real
+		-- Heroic raid: items dropped, none collectible, so loot_item says nothing and
+		-- "looted, no drop" is indistinguishable from "never opened the loot". A CHEST
+		-- is where that still matters, because nothing else records an attempt at one.
+		it("marks an instance chest observed even with nothing collectible", function()
+			local ns = freshNS()
+			installLootEnv({
+				{ stype = 1, link = "L-armor", itemID = 5555, classID = 4, subclassID = 1,
+				  quality = 3, sources = { OBJECT, 1 } },
+			})
+			setScope(ns, { instance = true })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local ev = byKind(ns.session.events)
+			assert.equal(0, #(ev.loot_item or {}))          -- nothing collectible
+			assert.equal(1, #(ev.loot_source or {}))        -- but the attempt IS observed
+			assert.equal("object", ev.loot_source[1].data.sourceType)
+			assert.equal(88001, ev.loot_source[1].data.sourceID)
+		end)
+
+		-- The narrowing that keeps this event affordable. A dungeon run loots ~100
+		-- corpses; none of them is an attempt at anything we measure, because the boss
+		-- is, and `encounter_defeated` already records it with difficulty, group size
+		-- and loot method attached. One row per boss beats one row per mob.
+		it("ignores trash corpses inside an instance", function()
+			local ns = freshNS()
+			installLootEnv({
+				{ stype = 1, link = "L-armor", itemID = 5555, classID = 4, subclassID = 1,
+				  quality = 3, sources = { CREATURE, 1 } },
+			})
+			setScope(ns, { instance = true })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(0, #(byKind(ns.session.events).loot_source or {}))
+		end)
+
+		-- ...but a collectible off that same trash mob is STILL recorded. loot_item is
+		-- dual-purpose: it is the collection timeline entry ("got this mount, from this
+		-- NPC, at this second"), which is worth keeping with or without a denominator.
+		it("still records a collectible dropped by instance trash", function()
+			local ns = freshNS()
+			installLootEnv({
+				{ stype = 1, link = "L-mount", itemID = 1234, classID = 15, subclassID = 5,
+				  quality = 4, sources = { CREATURE, 1 } },
+			})
+			setScope(ns, { instance = true })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local ev = byKind(ns.session.events)
+			assert.equal(1, #(ev.loot_item or {}))
+			assert.equal(0, #(ev.loot_source or {}))
+		end)
+
+		it("stays silent in the open world for a non-whitelisted mob", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-junk", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 1, sources = { CREATURE, 1 } } })
+			setScope(ns, {})                                 -- no instance, no whitelist
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(0, #(byKind(ns.session.events).loot_source or {}))
+		end)
+
+		it("records a whitelisted rare in the open world", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-junk", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 1, sources = { CREATURE, 1 } } })
+			setScope(ns, { whitelisted = 77001 })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local rows = byKind(ns.session.events).loot_source or {}
+			assert.equal(1, #rows)
+			assert.equal(77001, rows[1].data.sourceID)
+		end)
+
+		-- Independent of the link, which fails separately from the source GUID: a
+		-- window whose links are all secret still proves the source was looted.
+		it("records the source even when every slot link is secret", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-secret", itemID = 5555, classID = 15,
+			                   subclassID = 5, quality = 4, sources = { OBJECT, 1 } } })
+			mock.setSecret("L-secret")
+			setScope(ns, { instance = true })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(0, #(byKind(ns.session.events).loot_item or {}))
+			assert.equal(1, #(byKind(ns.session.events).loot_source or {}))
+		end)
+
+		it("emits once per spawn — reopening the same chest does not restack", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-junk", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 1, sources = { OBJECT, 1 } } })
+			setScope(ns, { instance = true })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(1, #(byKind(ns.session.events).loot_source or {}))
+		end)
+
+		-- Two rares AoE-tagged into one loot window: each is its own attempt, so each
+		-- needs its own denominator row.
+		it("emits one row per source for AoE multi-source loot", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-junk", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 1,
+			                   sources = { CREATURE, 1, CREATURE2, 1 } } })
+			setScope(ns, { whitelisted = { 77001, 77002 } })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local rows = byKind(ns.session.events).loot_source or {}
+			assert.equal(2, #rows)
+			local ids = {}
+			for _, e in ipairs(rows) do ids[e.data.sourceID] = true end
+			assert.is_true(ids[77001])
+			assert.is_true(ids[77002])
+		end)
+
+		-- Money and currency slots carry no item link at all, but they still prove
+		-- the source was looted — so the denominator pass must not filter on slot type.
+		it("counts a money-only loot window", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 2, sources = { CREATURE, 1 } } })
+			setScope(ns, { whitelisted = 77001 })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(1, #(byKind(ns.session.events).loot_source or {}))
+		end)
+	end)
+
+	-- ── killID: the per-kill identity that makes group loot measurable ─────
+	-- A spawned NPC's GUID is unique per spawn and identical for every player who fights it,
+	-- so twenty raiders reporting one drop collapse to the one event that happened. It is
+	-- the ONLY such key: lock ids exist only for Mythic and legacy raids, current
+	-- Normal/Heroic use flexible lockouts with no hard id.
+	describe("killID", function()
+		local function setScope(ns, opts)
+			opts = opts or {}
+			_G.IsInInstance = function() return opts.instance or false end
+			local listed = {}
+			if type(opts.whitelisted) == "table" then
+				for _, id in ipairs(opts.whitelisted) do listed[id] = true end
+			elseif opts.whitelisted then
+				listed[opts.whitelisted] = true
+			end
+			ns.Whitelist = { has = function(id) return listed[id] == true end }
+		end
+		after_each(function() _G.IsInInstance = nil end)
+
+		it("is carried on loot_item and derived from the source GUID", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-mount", itemID = 1234, classID = 15,
+			                   subclassID = 5, quality = 4, sources = { CREATURE, 1 } } })
+			setScope(ns, {})
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			-- fnv1a returns 8 hex CHARS; killID is that value as a masked integer.
+			local id = byKind(ns.session.events).loot_item[1].data.killID
+			assert.equal("number", type(id))
+			assert.equal(tonumber(ns.Hash.fnv1a(CREATURE), 16) % 2147483648, id)
+		end)
+
+		-- 31 bits, not 32: `delta` and `sub_id` are signed 32-bit columns and a full FNV-1a
+		-- would overflow them. Dedup only compares ids within one encounter, so the halved
+		-- space costs at most a single merged kill out of thousands in a boss-week.
+		it("fits a signed 32-bit column", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-mount", itemID = 1234, classID = 15,
+			                   subclassID = 5, quality = 4, sources = { CREATURE, 1 } } })
+			setScope(ns, {})
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local id = byKind(ns.session.events).loot_item[1].data.killID
+			assert.is_true(id >= 0 and id < 2147483648)
+		end)
+
+		-- The whole point: the same corpse yields the same id, so two players reporting it
+		-- collapse to one kill. Different corpses of the SAME npc must not.
+		it("is stable per corpse and distinct between spawns of the same npc", function()
+			local ns = freshNS()
+			local sameNpcOtherSpawn = "Creature-0-1-1-1-77001-zzzz"
+			installLootEnv({ { stype = 1, link = "L-junk", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 1,
+			                   sources = { CREATURE, 1, sameNpcOtherSpawn, 1 } } })
+			setScope(ns, { whitelisted = 77001 })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local rows = byKind(ns.session.events).loot_source or {}
+			assert.equal(2, #rows)
+			assert.equal(77001, rows[1].data.sourceID)
+			assert.equal(77001, rows[2].data.sourceID)              -- same npc...
+			assert.are_not.equal(rows[1].data.killID, rows[2].data.killID)   -- ...two kills
+		end)
+
+		it("is carried on loot_source", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 2, sources = { CREATURE, 1 } } })
+			setScope(ns, { whitelisted = 77001 })
+			loadCollector(ns)
+			mock.fireEvent("LOOT_OPENED")
+
+			local row = byKind(ns.session.events).loot_source[1]
+			assert.equal(tonumber(ns.Hash.fnv1a(CREATURE), 16) % 2147483648, row.data.killID)
+		end)
+
+		-- encounter_looted is the marker that says a boss's loot was opened; keying it to the
+		-- corpse is what turns twenty raiders' markers into one observed kill.
+		it("ties encounter_looted to the corpse that satisfied it", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { CREATURE, 1 } } })
+			setScope(ns, { instance = true })
+			assert(loadfile("collectors/encounter_defeated.lua"))("TiW", ns)
+			loadCollector(ns)
+			mock.fireEvent("ENCOUNTER_END", 2418, "Huntsman Altimor", 14, 10, 1)
+			mock.fireEvent("LOOT_OPENED")
+
+			local row = byKind(ns.session.events).encounter_looted[1]
+			assert.equal(2418, row.data.encounterID)
+			assert.equal(tonumber(ns.Hash.fnv1a(CREATURE), 16) % 2147483648, row.data.killID)
+		end)
+	end)
+
+	-- ── encounter_looted: gate 2 for BOSS attempts ─────────────────────────
+	-- The counterpart to loot_source, and separate from it on purpose. A boss's
+	-- observability has to be keyed on the ENCOUNTER, not on the corpse's npcID:
+	-- there is no map from npcID back to encounterID (JournalEncounterCreature
+	-- carries CreatureDisplayInfoIDs, which reach barely a quarter of encounters
+	-- and are shared between NPCs). ENCOUNTER_END already hands us the id, so the
+	-- join is exact and costs one row per boss looted instead of ~100 per run.
+	describe("encounter_looted", function()
+		local function setScope(ns, opts)
+			opts = opts or {}
+			_G.IsInInstance = function() return opts.instance ~= false end
+			ns.Whitelist = { has = function() return false end }
+		end
+
+		local function loadBoth(ns)
+			assert(loadfile("collectors/encounter_defeated.lua"))("TiW", ns)
+			assert(loadfile("collectors/loot.lua"))("TiW", ns)
+		end
+
+		local function kill(encounterID, difficultyID)
+			mock.fireEvent("ENCOUNTER_END", encounterID or 2820, "Some Boss",
+			               difficultyID or 16, 20, 1)
+		end
+
+		after_each(function() _G.IsInInstance = nil end)
+
+		it("marks the encounter observed when its corpse is looted", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { CREATURE, 1 } } })
+			setScope(ns, { instance = true })
+			loadBoth(ns)
+			kill(2820, 16)
+			mock.fireEvent("LOOT_OPENED")
+
+			local ev = byKind(ns.session.events)
+			assert.equal(1, #(ev.encounter_looted or {}))
+			assert.equal(2820, ev.encounter_looted[1].data.encounterID)
+			assert.equal(16, ev.encounter_looted[1].data.difficultyID)
+			-- The corpse itself is still NOT a loot_source row. That narrowing stands:
+			-- the encounter is the attempt unit, and this event observes it.
+			assert.equal(0, #(ev.loot_source or {}))
+		end)
+
+		-- The whole point of gate 2. Without this event, "killed the boss and looted
+		-- nothing collectible" and "killed the boss and logged off" are the same empty
+		-- record, and counting the second as a failed attempt biases the rate downward.
+		it("fires even when nothing collectible dropped", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 2, sources = { CREATURE, 1 } } })   -- money only
+			setScope(ns, { instance = true })
+			loadBoth(ns)
+			kill()
+			mock.fireEvent("LOOT_OPENED")
+
+			local ev = byKind(ns.session.events)
+			assert.equal(0, #(ev.loot_item or {}))
+			assert.equal(1, #(ev.encounter_looted or {}))
+		end)
+
+		it("stays silent when no encounter has been defeated", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { CREATURE, 1 } } })
+			setScope(ns, { instance = true })
+			loadBoth(ns)
+			mock.fireEvent("LOOT_OPENED")           -- trash, no kill
+
+			assert.equal(0, #(byKind(ns.session.events).encounter_looted or {}))
+		end)
+
+		-- The reason the pending slot is cleared by the next pull rather than after N
+		-- seconds. A player who kills a boss, walks past the corpse and pulls the next
+		-- pack has observed NOTHING, and inventing an observation there is exactly the
+		-- lie gate 2 exists to prevent. An elapsed-time rule would have to guess.
+		it("does not fire if the player pulls again without looting", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { CREATURE, 1 } } })
+			setScope(ns, { instance = true })
+			loadBoth(ns)
+			kill()
+			mock.fireEvent("PLAYER_REGEN_DISABLED")   -- next pull
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(0, #(byKind(ns.session.events).encounter_looted or {}))
+		end)
+
+		it("fires at most once per defeated encounter", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { CREATURE, 1 } } })
+			setScope(ns, { instance = true })
+			loadBoth(ns)
+			kill()
+			mock.fireEvent("LOOT_OPENED")
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(1, #(byKind(ns.session.events).encounter_looted or {}))
+		end)
+
+		-- A Mythic+ cache is an object and its own attempt unit, already covered by
+		-- loot_source. Reading it as having observed the boss would attach an
+		-- observation to an encounter whose corpse was never opened.
+		it("is not satisfied by opening an object", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { OBJECT, 1 } } })
+			setScope(ns, { instance = true })
+			loadBoth(ns)
+			kill()
+			mock.fireEvent("LOOT_OPENED")
+
+			local ev = byKind(ns.session.events)
+			assert.equal(0, #(ev.encounter_looted or {}))
+			assert.equal(1, #(ev.loot_source or {}))     -- the cache IS its own attempt
+		end)
+
+		it("stays silent outside an instance", function()
+			local ns = freshNS()
+			installLootEnv({ { stype = 1, link = "L-armor", itemID = 5555, classID = 4,
+			                   subclassID = 1, quality = 3, sources = { CREATURE, 1 } } })
+			setScope(ns, { instance = false })
+			loadBoth(ns)
+			kill()
+			mock.fireEvent("LOOT_OPENED")
+
+			assert.equal(0, #(byKind(ns.session.events).encounter_looted or {}))
+		end)
 	end)
 end)
 
@@ -1846,6 +2245,92 @@ describe("encounter_defeated §3.14 collector (path 3, ENCOUNTER_END + BOSS_KILL
 		assert.equal(0, #ns.session.events)
 	end)
 
+	-- lootMethod decides whether the attempt needs group-wide dedup, and therefore
+	-- which statistic it feeds (§9.2). Stored verbatim so a future Blizzard change
+	-- stays reinterpretable over history we already hold.
+	-- ⚠ The GLOBAL GetLootMethod() is REMOVED in current retail. Reading it produced no
+	-- field at all, silently, on every kill — caught on a live trace, not by this suite,
+	-- because the old fixture stubbed the global that no longer exists. The replacement
+	-- returns an Enum.LootMethod INTEGER (Group=3, Personal=5), so the type check moved too.
+	it("carries lootMethod verbatim when the API offers one", function()
+		_G.C_PartyInfo = { GetLootMethod = function() return 3 end }   -- Group
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		local m = byKind(ns.session.events)
+		assert.equal(3, m.encounter_defeated[1].data.lootMethod)
+		_G.C_PartyInfo = nil
+	end)
+
+	-- The regression that matters: the removed global must never be read again. If someone
+	-- reinstates it, this fails rather than quietly dropping the discriminator that decides
+	-- whether a kill is deduped.
+	it("does not fall back to the removed global GetLootMethod", function()
+		_G.GetLootMethod = function() return "group" end
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		assert.is_nil(byKind(ns.session.events).encounter_defeated[1].data.lootMethod)
+		_G.GetLootMethod = nil
+	end)
+
+	-- Absent rather than a placeholder: event payloads are canonicalized as
+	-- "k=v;k=v" over the keys present, so a sentinel would enter the hash as data.
+	it("omits lootMethod entirely when the value is secret or unavailable", function()
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		assert.is_nil(byKind(ns.session.events).encounter_defeated[1].data.lootMethod)
+
+		_G.C_PartyInfo = { GetLootMethod = function() return 3 end }
+		mock.setSecret(3)
+		local ns2 = freshNS(); loadCollector(ns2)
+		mock.fireEvent("ENCOUNTER_END", 2821, "Other Boss", 16, 20, 1)
+		assert.is_nil(byKind(ns2.session.events).encounter_defeated[1].data.lootMethod)
+		_G.C_PartyInfo = nil
+	end)
+
+	-- ── legacy loot mode: the half lootMethod cannot answer ────────────────
+	-- Measured in legacy Castle Nathria: two characters, one corpse, identical item lists —
+	-- loot demonstrably shared — while C_PartyInfo.GetLootMethod() returned 5 (Personal).
+	-- C_Loot.IsLegacyLootModeEnabled() returned true on the same run, so it is the signal
+	-- that actually describes the instance rather than the party.
+
+	it("records legacy loot mode when it is on", function()
+		_G.C_Loot = { IsLegacyLootModeEnabled = function() return true end }
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2418, "Huntsman Altimor", 14, 10, 1)
+		assert.equal(1, byKind(ns.session.events).encounter_defeated[1].data.legacyLoot)
+		_G.C_Loot = nil
+	end)
+
+	-- Absent, not `false`. Event payloads canonicalize as "k=v" over the keys PRESENT, so a
+	-- false would enter the hash as data on every current-tier kill — the common case paying
+	-- for the rare one.
+	it("omits legacy loot mode entirely when it is off or unavailable", function()
+		_G.C_Loot = { IsLegacyLootModeEnabled = function() return false end }
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2820, "Some Boss", 16, 20, 1)
+		assert.is_nil(byKind(ns.session.events).encounter_defeated[1].data.legacyLoot)
+
+		_G.C_Loot = nil
+		local ns2 = freshNS(); loadCollector(ns2)
+		mock.fireEvent("ENCOUNTER_END", 2821, "Other Boss", 16, 20, 1)
+		assert.is_nil(byKind(ns2.session.events).encounter_defeated[1].data.legacyLoot)
+	end)
+
+	-- The exact shape of the live Castle Nathria trace, as a fixture: a kill that reports
+	-- Personal loot AND legacy mode is a SHARED corpse. Reading lootMethod alone would call
+	-- it an independent roll and refuse to dedup two raiders reporting the same drop.
+	it("a legacy kill reports personal loot and legacy mode together", function()
+		_G.C_PartyInfo = { GetLootMethod = function() return 5 end }      -- Personal
+		_G.C_Loot = { IsLegacyLootModeEnabled = function() return true end }
+		local ns = freshNS(); loadCollector(ns)
+		mock.fireEvent("ENCOUNTER_END", 2418, "Huntsman Altimor", 14, 10, 1)
+
+		local data = byKind(ns.session.events).encounter_defeated[1].data
+		assert.equal(5, data.lootMethod)
+		assert.equal(1, data.legacyLoot)
+		_G.C_PartyInfo, _G.C_Loot = nil, nil
+	end)
+
 	it("emits on BOSS_KILL, backfilling difficulty/groupSize from GetInstanceInfo", function()
 		local ns = freshNS(); loadCollector(ns)
 		mock.fireEvent("BOSS_KILL", 2733, "Another Boss")   -- no difficulty/size in the event
@@ -1915,6 +2400,69 @@ describe("lockout_changed §3.14 collector (change event, UPDATE_INSTANCE_INFO d
 		assert.equal(0, #ns.session.events)
 	end)
 
+	-- ── the empty-read trap ────────────────────────────────────────────────
+	-- Observed live on a zone-in: ten `lockout_changed` events for lockouts that had not
+	-- changed in days, then the same ten again a minute later. RequestRaidInfo is async, so
+	-- UPDATE_INSTANCE_INFO can fire before the saved-instance cache is populated, and
+	-- GetNumSavedInstances then returns 0 — indistinguishable from "nothing saved".
+
+	it("ignores an empty read rather than seeding a blank baseline from it", function()
+		local ns = setup()
+		locks = {}                                     -- cache not ready yet
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 4 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- the real data arrives
+
+		-- Before the fix this emitted, because the blank seed made every existing lockout
+		-- look newly appeared.
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	it("an empty read does not wipe the baseline and re-emit everything", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 4 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- seed
+		locks = {}
+		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- cache momentarily unavailable
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 4 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+
+		-- The prune loop used to clear every key (nothing is in `seen`), so the next real
+		-- read reported the whole set as new. That is the second batch in the live trace.
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	it("a real kill still emits after an empty read", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		locks = {}
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 2 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+
+		local rows = byKind(ns.session.events).lockout_changed or {}
+		assert.equal(1, #rows)
+		assert.equal(2, rows[1].data.encountersDone)
+	end)
+
+	-- Skipping empty reads must not break the genuine case, which looks identical for one
+	-- read and only diverges on the next: after a weekly reset the locks really are gone,
+	-- and the first non-empty read afterwards prunes the stale keys and emits the new one.
+	it("a weekly reset followed by a fresh kill emits as newly appeared", function()
+		local ns = setup()
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 4 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- seed at 4/…
+		locks = {}
+		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- reset week: nothing saved
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- first kill of the new week
+
+		local rows = byKind(ns.session.events).lockout_changed or {}
+		assert.equal(1, #rows)
+		assert.equal(1, rows[1].data.encountersDone)
+	end)
+
 	it("emits lockout_changed when an encounter count rises", function()
 		local ns = setup()
 		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
@@ -1928,10 +2476,26 @@ describe("lockout_changed §3.14 collector (change event, UPDATE_INSTANCE_INFO d
 		assert.equal(2, m.lockout_changed[1].data.encountersDone)
 	end)
 
-	it("emits for a brand-new lockout (first kill in a fresh instance)", function()
+	-- ⚠ Behaviour CHANGED deliberately. This used to emit, by seeding `last` from an empty
+	-- read and then treating every lock that appeared as new. That is also exactly how the
+	-- live zone-in spam happened, because an empty read is ambiguous: "nothing is saved" and
+	-- "the saved-instance cache has not loaded yet" are byte-identical, and the second is
+	-- overwhelmingly more common (every zone-in, every difficulty change).
+	--
+	-- The trade is worth taking because nothing is actually lost. The kill itself is still
+	-- recorded by `encounter_defeated`, and the session's opening lock state by the
+	-- `instancelocks` snapshot — so "you had no lockout, now you have one" is derivable
+	-- server-side from data we already keep. A redundant change event is a cheap price for
+	-- not writing ten false ones per zone-in, permanently, for every user.
+	it("stays silent for the session's first observed lockout, rather than guessing", function()
 		local ns = setup()
-		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed: nothing saved yet
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- empty: cache cold, or nothing saved
 		locks = { { instanceID = 5678, difficultyID = 1, encountersDone = 1 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- first data we can trust: seed it
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+
+		-- ...and the very next change does emit, so only the seeding read is silent.
+		locks = { { instanceID = 5678, difficultyID = 1, encountersDone = 2 } }
 		mock.fireEvent("UPDATE_INSTANCE_INFO")
 		local m = byKind(ns.session.events)
 		assert.equal(1, #(m.lockout_changed or {}))

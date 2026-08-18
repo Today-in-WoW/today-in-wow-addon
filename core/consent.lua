@@ -65,6 +65,14 @@ Consent.CLASS = {
 	encounter_defeated   = "personal",
 	lockout_changed      = "personal",
 	loot_item            = "personal",
+	-- Personal, matching loot_item: a record of what this character looted. The
+	-- consequence is accepted knowingly — under "generic" there is no observability
+	-- marker, so whitelisted-rare drop rates come only from "everything" users.
+	loot_source          = "personal",
+	-- The boss-loot observability marker (§9.4 gate 2). Personal for the same reason as
+	-- loot_source: it is a record of what THIS character opened. Same accepted cost —
+	-- under "generic" consent boss rates come only from "everything" users.
+	encounter_looted     = "personal",
 	perks_activity_completed = "personal",
 	profession_learned   = "personal",
 	profession_levelup   = "personal",

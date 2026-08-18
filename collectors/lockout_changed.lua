@@ -38,6 +38,20 @@ end
 local function diffAndEmit()
 	if not ns.session then return end
 	local locks = currentLocks()
+	-- An EMPTY read carries no information, and must not be mistaken for "no lockouts".
+	-- RequestRaidInfo is async: UPDATE_INSTANCE_INFO can fire before the saved-instance
+	-- cache is populated, and GetNumSavedInstances then returns 0 exactly as it does for a
+	-- player with nothing saved. Acting on that read corrupted `last` two different ways,
+	-- both observed on a live zone-in (10 spurious events, twice, for lockouts that had not
+	-- changed in days):
+	--   * seeding from it left `last` empty, so the next real read saw every existing
+	--     lockout as prev == nil and emitted all of them as "newly appeared";
+	--   * diffing against it pruned EVERY key (nothing is in `seen`), so the next real read
+	--     did the same thing again.
+	-- Skipping the read entirely is also correct for a genuine weekly reset: `last` is
+	-- retained, and the first non-empty read after the reset prunes the stale keys and emits
+	-- the new lock as new.
+	if #locks == 0 then return end
 	if not last then
 		last = {}
 		for _, l in ipairs(locks) do last[keyOf(l)] = l.encountersDone end
@@ -48,11 +62,22 @@ local function diffAndEmit()
 		local k = keyOf(l)
 		seen[k] = true
 		local prev = last[k]
-		if prev == nil or l.encountersDone > prev then
+		-- Any CHANGE, not just an increase. Within one lock the count only ever rises, so a
+		-- DECREASE means the lock reset and a fresh kill has already landed in the new week
+		-- — the most interesting event there is, and `>` silently swallowed it. That used to
+		-- be covered by pruning vanished keys, which no longer happens on an empty read
+		-- because an empty read is now (correctly) treated as "no data" rather than "reset".
+		if prev == nil or l.encountersDone ~= prev then
+			-- lockID carries through from InstanceLocks.read so a kill ties to the
+			-- RUN it happened in, not just the map: it is the group-shared identity
+			-- every player saved to that run reads. Two ints, never pre-combined
+			-- (see instance_locks.lua).
 			ns.Emit("lockout_changed", {
 				instanceID     = l.instanceID,
 				difficultyID   = l.difficultyID,
 				encountersDone = l.encountersDone,
+				lockID         = l.lockID,
+				lockIDMostSig  = l.lockIDMostSig,
 			})
 		end
 		last[k] = l.encountersDone

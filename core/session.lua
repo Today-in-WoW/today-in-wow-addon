@@ -105,6 +105,16 @@ local function startSession()
 		opts = { generic = true }
 	end
 
+	-- Account fingerprint (personal-data-ingestion §3.3). Refreshed before the
+	-- bundle is built so this login's upload already carries it — the site gates
+	-- every personal domain on it, and an upload without one is held back.
+	-- Deliberately NOT part of the snapshot or the chain: it is account identity,
+	-- not collected data, and it must not perturb baseline_hash.
+	if ns.Fingerprint then
+		local fp = ns.Fingerprint.refresh()
+		dbg("fingerprint: " .. (fp and ("set " .. fp) or "unavailable (no salt or no BattleTag)"))
+	end
+
 	-- Bound stored growth before adding today's bundle. Drain also surfaces the
 	-- site's rebaseline_requested timestamp (§6) — a gap it detected that a forced
 	-- re-baseline this login repairs.

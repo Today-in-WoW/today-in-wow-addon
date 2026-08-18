@@ -5,11 +5,14 @@ local _, ns = ...
 --
 -- Snapshot baseline only — the per-session `instancelocks` category. Authoritative
 -- weekly/daily boss-kill state, the secret-safe CLEU-free channel for instanced
--- content (§3.14). GetSavedInstanceInfo(i) -> name, id, reset, difficultyID, locked,
--- …, numEncounters (11th), encounterProgress (12th), …, instanceID (14th). Only
+-- content (§3.14). GetSavedInstanceInfo(i) -> name, id (2nd), reset, difficultyID,
+-- locked, extended, instanceIDMostSig (7th), …, numEncounters (11th),
+-- encounterProgress (12th), …, instanceID (14th). Only
 -- instanceID:difficultyID:encountersDone are hashed (§8); encountersTotal/resetsAt
--- ride along as data the site uses but stay out of the chain. `resetsAt` is stored
--- ABSOLUTE (GetServerTime() + reset) — never the relative seconds-remaining (§3.14).
+-- and the lock id ride along as data the site uses but stay out of the chain —
+-- adding them to the hash would change every retained bundle's snapshot tail.
+-- `resetsAt` is stored ABSOLUTE (GetServerTime() + reset) — never the relative
+-- seconds-remaining (§3.14).
 --
 -- RequestRaidInfo() refreshes async (UPDATE_INSTANCE_INFO); at login the saved data
 -- is normally already cached, so the baseline reads what's there and a stale read
@@ -26,7 +29,7 @@ local function readLocks()
 
 	if GetNumSavedInstances and GetSavedInstanceInfo then
 		for i = 1, GetNumSavedInstances() do
-			local _, _, reset, difficultyID, locked, _, _, _, _, _, numEncounters, encounterProgress, _, instanceID =
+			local _, lockID, reset, difficultyID, locked, _, lockIDMostSig, _, _, _, numEncounters, encounterProgress, _, instanceID =
 				GetSavedInstanceInfo(i)
 			if locked and instanceID then
 				locks[#locks + 1] = {
@@ -35,6 +38,19 @@ local function readLocks()
 					encountersDone  = encounterProgress or 0,
 					encountersTotal = numEncounters or 0,
 					resetsAt        = now + (reset or 0),
+					-- The in-game Instance ID (2nd + 7th returns): the exact,
+					-- secret-safe, GROUP-SHARED run identity — every player saved to
+					-- the same run reads the same value, which is the only exact
+					-- dedup key available inside instances (creature GUIDs are secret
+					-- there). Distinct from `instanceID` above, which is the MAP id.
+					--
+					-- Kept as two separate integers on purpose: the value is 64-bit
+					-- split across the two returns, and Lua 5.1 has no integer type,
+					-- so combining as mostSig * 2^32 + id is a double and only exact
+					-- below 2^53. Silent precision loss on a dedup key is not worth
+					-- saving a field; the site combines safely.
+					lockID          = lockID,
+					lockIDMostSig   = lockIDMostSig,
 				}
 			end
 		end

@@ -1099,6 +1099,141 @@ perksFrame:SetScript("OnEvent", function(_, event, arg1)
 	perksMark(arg1 ~= nil and (event .. "(" .. tostring(arg1) .. ")") or event, perksRead())
 end)
 
+-- ===========================================================================
+-- /tiw mock <scenario>  ·  synthetic event injection for end-to-end testing
+--
+-- Collectibles do not drop on demand, and waiting for a real 1-in-100 mount to verify the
+-- drop-rate pipeline is not a test plan. These scenarios emit the exact event sequences the
+-- collectors would, through the REAL ns.Emit — so they pass the consent gate, take sequence
+-- numbers, extend the hash chain, and ride the wire identically. Everything downstream
+-- (verification, ledger, personal sink, collection fold, drop attempts, aggregates) is
+-- exercised for real; only the game is simulated.
+--
+-- ⚠ Every mocked event carries `mock = 1`. That is deliberate and load-bearing:
+--   * it is on the wire, so the server can always find and purge these rows;
+--   * `drop_attempt` and `collectible_drop_stat` are both rebuildable, so purging is
+--     "delete the mock events, press rebuild" rather than a migration;
+--   * and the admin drop-data page surfaces the count, so contamination is never silent.
+-- Ids below are REAL and resolve against the live dimension tables, which is the point —
+-- Invincible is DungeonEncounter 1106 at difficulty 6 with a weekly cadence, and the
+-- community says 1-in-100, so a mocked drop lands somewhere checkable.
+-- ===========================================================================
+
+local MOCK = {}
+
+-- A fresh per-spawn identity each run, so repeated invocations look like distinct kills
+-- rather than one corpse reported twice. Same 31-bit space the addon's real killIdOf uses.
+local function newKillID()
+	return math.random(1, 2147483647)
+end
+
+local function emit(kind, data)
+	data.mock = 1
+	ns.Emit(kind, data)
+end
+
+-- Heroic-25 Lich King, killed and looted, nothing collectible. The §9.4 gate-2 case: an
+-- attempt whose outcome WAS observed, which is what makes "no drop" a real data point
+-- instead of an absence.
+MOCK.boss = function()
+	local killID = newKillID()
+	emit("encounter_defeated", { encounterID = 1106, difficultyID = 6, groupSize = 25,
+	                             lootMethod = 3 })
+	emit("lockout_changed", { instanceID = 631, difficultyID = 6, encountersDone = 12 })
+	emit("encounter_looted", { encounterID = 1106, difficultyID = 6, killID = killID })
+	return "Heroic-25 Lich King killed + looted, no drop (killID " .. killID .. ")"
+end
+
+-- The same kill, but Invincible drops. Exercises attribution end to end: loot_item ties the
+-- item to the corpse, mount_added is the "direct learn" channel, and the fold has to land
+-- an EXACT acquisition inside the same session so gate 1 reads eligible.
+MOCK.bossdrop = function()
+	local killID = newKillID()
+	emit("encounter_defeated", { encounterID = 1106, difficultyID = 6, groupSize = 25,
+	                             lootMethod = 3 })
+	emit("encounter_looted", { encounterID = 1106, difficultyID = 6, killID = killID })
+	emit("loot_item", { sourceType = "creature", sourceID = 36597, itemID = 50818,
+	                    quantity = 1, quality = 5, killID = killID })
+	emit("mount_added", { mountID = 363 })
+	return "Heroic-25 Lich King DROPPED Invincible (killID " .. killID .. ")"
+end
+
+-- Legacy loot rules: shared corpse reported as Personal. The combination that disproved
+-- lootMethod-alone, so it is worth being able to reproduce on demand.
+MOCK.legacy = function()
+	local killID = newKillID()
+	emit("encounter_defeated", { encounterID = 2383, difficultyID = 14, groupSize = 10,
+	                             lootMethod = 5, legacyLoot = 1 })
+	emit("encounter_looted", { encounterID = 2383, difficultyID = 14, killID = killID })
+	return "legacy raid kill, shared corpse reported as Personal (killID " .. killID .. ")"
+end
+
+-- A whitelisted open-world rare, looted with nothing collectible. loot_source IS the
+-- observation here, so this is a genuine miss rather than an unobserved outcome.
+MOCK.rare = function()
+	local killID = newKillID()
+	emit("loot_source", { sourceType = "creature", sourceID = 258328, mapID = 2371,
+	                      killID = killID })
+	return "whitelisted rare looted, no drop (killID " .. killID .. ")"
+end
+
+-- The same rare, dropping its mount.
+MOCK.raredrop = function()
+	local killID = newKillID()
+	emit("loot_source", { sourceType = "creature", sourceID = 258328, mapID = 2371,
+	                      killID = killID })
+	emit("loot_item", { sourceType = "creature", sourceID = 258328, itemID = 257448,
+	                    quantity = 1, quality = 4, mapID = 2371, killID = killID })
+	emit("mount_added", { mountID = 2792 })
+	return "whitelisted rare DROPPED Frenzied Shredclaw (killID " .. killID .. ")"
+end
+
+-- An instance object: a Mythic+ cache or a delve chest. Its own attempt unit, and the one
+-- creature-free case that still produces a loot_source.
+MOCK.chest = function()
+	local killID = newKillID()
+	emit("loot_source", { sourceType = "object", sourceID = 420827, mapID = 2371,
+	                      killID = killID })
+	return "instance chest opened (killID " .. killID .. ")"
+end
+
+-- A turned-in quest, the tracking-quest rare's attempt unit. Deliberately `turned_in`:
+-- a `scan` completion is dated when the addon looked, not when the quest was done, and the
+-- drop builder refuses those.
+MOCK.quest = function()
+	emit("quest_completed", { questID = 50316, mapID = 1735, source = "turned_in" })
+	return "quest 50316 turned in"
+end
+
+-- Everything at once, for a single-command smoke test of the whole stream.
+MOCK.all = function()
+	local out = {}
+	for _, name in ipairs({ "boss", "bossdrop", "legacy", "rare", "raredrop",
+	                        "chest", "quest" }) do
+		out[#out + 1] = MOCK[name]()
+	end
+	return table.concat(out, "\n  ")
+end
+
+local function mockCmd(arg)
+	if not ns.session then
+		out("no active session — log in first")
+		return
+	end
+	local scenario = (arg or ""):match("^%S*") or ""
+	local run = MOCK[scenario]
+	if not run then
+		local names = {}
+		for k in pairs(MOCK) do names[#names + 1] = k end
+		table.sort(names)
+		out("usage: /tiw mock <" .. table.concat(names, "|") .. ">")
+		out("|cffff8080writes REAL events into your session, tagged mock=1|r")
+		return
+	end
+	out("|cffff8080MOCK|r " .. run())
+	out("|cff808080tagged mock=1 — purge server-side and rebuild to undo|r")
+end
+
 SLASH_TIW1 = "/tiw"
 SlashCmdList["TIW"] = function(msg)
 	local raw = (msg or ""):gsub("^%s*(.-)%s*$", "%1")
@@ -1148,6 +1283,8 @@ SlashCmdList["TIW"] = function(msg)
 		else
 			out("usage: /tiw window reset")
 		end
+	elseif cmd == "mock" then
+		mockCmd(rawArg)
 	elseif cmd == "log" then
 		logReport(arg)
 	elseif cmd == "engine" then

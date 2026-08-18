@@ -38,6 +38,7 @@ tables\prey_quests.lua
 core\whitelist.lua
 core\migrations.lua
 core\consent.lua
+core\fingerprint.lua
 core\export.lua
 goals\registry.lua
 goals\codec.lua
