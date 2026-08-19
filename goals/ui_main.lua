@@ -94,7 +94,8 @@ local M_COL_W  = 96     -- per-goal column width
 local M_ROW_H  = 58     -- character row height
 local M_HEAD_H = 64     -- frozen goal-header row height (icon + name)
 local M_SB     = 10     -- scrollbar thickness (both axes)
-local M_CHIP   = 32     -- completion chip size
+local M_CHIP   = 32     -- completion chip height
+local M_CHIP_W = 46     -- completion chip width (fits an n/m progress count)
 local M_HEADER = 64     -- title + subtitle band above the grid
 local M_LEGEND = 30     -- legend band below the grid
 
@@ -151,11 +152,11 @@ local CHAR_MARK = {
 -- `mark` selects the centered glyph; nil def = an empty (unassigned) cell.
 local CELL = {
 	done       = { mark = "check", bg = { 0.16, 0.30, 0.16, 0.55 }, edge = { 0.40, 0.70, 0.40, 0.85 } },
-	partial    = { mark = "dot",   bg = { 0.34, 0.26, 0.07, 0.55 }, edge = { 0.85, 0.65, 0.20, 0.85 } },
+	partial    = { mark = "count", bg = { 0.34, 0.26, 0.07, 0.55 }, edge = { 0.85, 0.65, 0.20, 0.85 } },
 	todo       = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
 	stale      = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
 	nodata     = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
-	ineligible = { mark = "lock",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.08 } },
+	ineligible = { mark = "lock",  bg = { 0.32, 0.11, 0.11, 0.55 }, edge = { 0.70, 0.30, 0.30, 0.55 } },
 }
 
 local function hex(c)
@@ -1070,23 +1071,40 @@ end
 -- A completion chip: tinted bordered square + centered marker (texture or dash).
 local function newChip(parent)
 	local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-	f:SetSize(M_CHIP, M_CHIP)
+	f:SetSize(M_CHIP_W, M_CHIP)
 	f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	local tex = f:CreateTexture(nil, "ARTWORK"); tex:SetPoint("CENTER"); f.tex = tex
 	local dash = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	dash:SetPoint("CENTER", 0, 1); dash:SetText("\226\128\148"); dash:SetTextColor(0.5, 0.5, 0.5)
 	f.dash = dash
+	-- In-progress cells carry the count itself (2/17) rather than a marker — the
+	-- same n/m the goal pane shows.
+	local count = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	count:SetPoint("CENTER", 0, 0); count:SetTextColor(AMBER[1], AMBER[2], AMBER[3])
+	f.count = count
 	return f
 end
 
-local function styleChip(f, state)
-	local def = CELL[state]
+-- n/m for an in-progress cell: a single-step goal's own progress when it has one
+-- (60/90 crests), otherwise completed steps out of total (2/17) — the same rule
+-- the goal pane's header count uses.
+local function cellCount(cell)
+	if cell.progress and cell.max then return cell.progress .. "/" .. cell.max end
+	return tostring(cell.done or 0) .. "/" .. tostring(cell.total or 0)
+end
+
+local function styleChip(f, cell)
+	local def = CELL[cell and cell.state]
 	if not def then f:Hide(); return end
 	f:Show()
 	f:SetBackdropColor(def.bg[1], def.bg[2], def.bg[3], def.bg[4])
 	f:SetBackdropBorderColor(def.edge[1], def.edge[2], def.edge[3], def.edge[4])
-	if def.mark == "dash" then
+	f.count:Hide()
+	if def.mark == "count" then
+		f.tex:Hide(); f.dash:Hide()
+		f.count:SetText(cellCount(cell)); f.count:Show()
+	elseif def.mark == "dash" then
 		f.tex:Hide(); f.dash:Show()
 	else
 		f.dash:Hide(); f.tex:Show()
@@ -1265,9 +1283,8 @@ function refreshMatrix()
 			local chip = row.chips[ci]
 			if not chip then chip = newChip(row.body); row.chips[ci] = chip end
 			chip:ClearAllPoints()
-			chip:SetPoint("LEFT", (ci - 1) * M_COL_W + (M_COL_W - M_CHIP) / 2, 0)
-			local cell = g.cells[col.key]
-			styleChip(chip, cell and cell.state)
+			chip:SetPoint("LEFT", (ci - 1) * M_COL_W + (M_COL_W - M_CHIP_W) / 2, 0)
+			styleChip(chip, g.cells[col.key])
 		end
 		for j = #vm.goals + 1, #row.chips do row.chips[j]:Hide() end
 	end
@@ -2373,7 +2390,7 @@ local function buildMatrixTab(pane)
 	legend:SetPoint("BOTTOMLEFT", 2, 8)
 	legend:SetText(
 		"|TInterface\\RaidFrame\\ReadyCheck-Ready:13:13|t COMPLETE     "
-		.. "|TInterface\\COMMON\\Indicator-Yellow:11:11|t IN PROGRESS     "
+		.. "|c" .. hex(AMBER) .. "n/m|r IN PROGRESS     "
 		.. "|cff808080\226\128\148|r NOT STARTED     "
 		.. "|TInterface\\LFGFrame\\UI-LFG-ICON-LOCK:13:13|t LOCKED")
 
