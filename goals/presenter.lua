@@ -20,6 +20,11 @@ local _, ns = ...
 --   current-character column consistent with the live panel and avoids a second
 --   evaluator that could diverge from the Engine.
 --
+-- Characters the user hid (Store.setCharHidden) are absent from every
+-- multi-character surface here: matrix columns, goalChars rows and the nextAlt
+-- hint. Store.chars() already filters them; the assignment-derived column sets
+-- check Store.isCharHidden directly.
+--
 -- Sources: ns.Goals.Store (installed goals, state, assignment, Store.chars),
 --   ns.Goals.Offline (alt columns / the hint), ns.Goals.Substrate.charKey()
 --   (who "current" is). Per-step `require` filtering for the CURRENT character
@@ -371,7 +376,9 @@ function Presenter.matrix(flatVM)
 	for _, rec in ipairs(active) do
 		if type(rec.state.chars) == "table" then
 			for key in pairs(rec.state.chars) do
-				if key ~= current then colSet[key] = true end
+				-- assignment can name a character Store.chars() never returns
+				-- (unseen alt) — hidden ones stay out either way
+				if key ~= current and not Store.isCharHidden(key) then colSet[key] = true end
 			end
 		end
 	end
@@ -464,6 +471,7 @@ function Presenter.goalChars(flatVM, goalId)
 	local others = {}
 	local function consider(key)
 		if key == current or seen[key] or not isAssigned(st.chars, key) then return end
+		if Store.isCharHidden(key) then return end
 		seen[key] = true
 		others[#others + 1] = key
 	end

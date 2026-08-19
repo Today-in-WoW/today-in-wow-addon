@@ -16,6 +16,7 @@ local addonName, ns = ...
 --                                 currencies, quests } },-- (§5 charKey / §6)
 --     tombstones   = { [id] = ts },                     -- sync §6.2
 --     applied_push = ts,                                -- sync §6.1.1
+--     hidden       = { [charKey] = true },              -- display filter
 --   }
 --
 -- Sync bookkeeping (goal-sync-plan §6.2) — the site and the addon both curate
@@ -58,6 +59,7 @@ function Store._bind()
 	g.state      = g.state or {}
 	g.substrate  = g.substrate or {}
 	g.tombstones = g.tombstones or {}
+	g.hidden     = g.hidden or {}
 	ns.Goals.db = g
 end
 
@@ -179,10 +181,37 @@ function Store.getSubstrate(charKey)
 	return ns.Goals.db.substrate[charKey]
 end
 
--- Sorted array of known charKeys (the registry the display iterates).
+-- Sorted array of known charKeys (the registry the display iterates), minus
+-- the ones the user hid. Store.hiddenChars is the other half of the registry.
 function Store.chars()
 	local keys = {}
-	for k in pairs(ns.Goals.db.substrate) do keys[#keys + 1] = k end
+	local hidden = ns.Goals.db.hidden
+	for k in pairs(ns.Goals.db.substrate) do
+		if not hidden[k] then keys[#keys + 1] = k end
+	end
+	table.sort(keys)
+	return keys
+end
+
+-- Hide/unhide a character. A hidden character drops out of every
+-- multi-character surface — the completion matrix, the per-goal progress list,
+-- the "do it here next" hint and the assignment picker — so a one-off alt stops
+-- cluttering the account view. Purely a display filter: the substrate record is
+-- untouched, so unhiding brings the character back with all of its data.
+-- Local-only, like pinned/order (sync §5.3): no mtime, never pushed.
+function Store.setCharHidden(charKey, on)
+	ns.Goals.db.hidden[charKey] = on and true or nil
+	return true
+end
+
+function Store.isCharHidden(charKey)
+	return ns.Goals.db.hidden[charKey] == true
+end
+
+-- Sorted array of hidden charKeys — the restore list.
+function Store.hiddenChars()
+	local keys = {}
+	for k in pairs(ns.Goals.db.hidden) do keys[#keys + 1] = k end
 	table.sort(keys)
 	return keys
 end

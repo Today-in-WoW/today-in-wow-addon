@@ -432,6 +432,46 @@ describe("store sync §6.2 syncRecord (the view Sync.decide consumes)", function
 	end)
 end)
 
+describe("store hidden characters (local display filter)", function()
+	after_each(function() _G.TiWDB = nil end)
+
+	local function seed(ns, key)
+		ns.Goals.Store.writeSubstrate(key, { seen = 1, meta = { level = 80 } })
+	end
+
+	it("chars() drops hidden characters; hiddenChars() lists them", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		seed(ns, "Abe-Realm"); seed(ns, "Zed-Realm")
+		S.setCharHidden("Abe-Realm", true)
+		assert.same({ "Zed-Realm" }, S.chars())
+		assert.same({ "Abe-Realm" }, S.hiddenChars())
+		assert.is_true(S.isCharHidden("Abe-Realm"))
+		assert.is_false(S.isCharHidden("Zed-Realm"))
+	end)
+
+	it("unhiding puts the character back with its substrate untouched", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		seed(ns, "Abe-Realm")
+		S.setCharHidden("Abe-Realm", true)
+		S.setCharHidden("Abe-Realm", false)
+		assert.same({ "Abe-Realm" }, S.chars())
+		assert.same({}, S.hiddenChars())
+		assert.is_table(S.getSubstrate("Abe-Realm"))
+	end)
+
+	it("hiding is local-only: no mtime stamp on any goal state", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(fixtures().mount_account)
+		local before = TiWDB.goals.state["tiw:dev-mount"].mtime
+		seed(ns, "Abe-Realm")
+		S.setCharHidden("Abe-Realm", true)
+		assert.equal(before, TiWDB.goals.state["tiw:dev-mount"].mtime)
+	end)
+end)
+
 describe("store §6 sole-writer guard", function()
 	after_each(function() _G.TiWDB = nil end)
 
