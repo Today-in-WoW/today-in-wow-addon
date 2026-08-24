@@ -632,6 +632,66 @@ describe("Presenter.matrix — axes", function()
 	end)
 end)
 
+describe("Presenter — hidden characters", function()
+	it("a hidden character is not a matrix column", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gCrests())
+		seedAlt(ns, "Abe-Realm", {})
+		seedAlt(ns, "Zed-Realm", {})
+		S.setCharHidden("Abe-Realm", true)
+		local vm = ns.Goals.Presenter.matrix({})
+		assert.equal(2, #vm.chars)
+		assert.equal(ME, vm.chars[1].key)
+		assert.equal("Zed-Realm", vm.chars[2].key)
+	end)
+
+	it("stays out even when a goal names it in its assignment set", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gCrests())
+		S.setChars("g:crests", { [ME] = true, ["Abe-Realm"] = true })
+		S.setCharHidden("Abe-Realm", true)
+		local vm = ns.Goals.Presenter.matrix({})
+		assert.equal(1, #vm.chars)
+		assert.equal(ME, vm.chars[1].key)
+	end)
+
+	it("is never the nextAlt hint", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gFarm()); S.setPinned("g:farm", true)
+		seedAlt(ns, "Aaa-Realm", { lockouts = { iccRow(false) } })   -- todo, but hidden
+		seedAlt(ns, "Bbb-Realm", { lockouts = { iccRow(false) } })   -- todo
+		S.setCharHidden("Aaa-Realm", true)
+		local g = ns.Goals.Presenter.pinned({ row("g:farm", 1, "Kill LK", { done = true }) }).goals[1]
+		assert.equal("Bbb-Realm", g.nextAlt)
+	end)
+
+	it("is not a goalChars row (per-goal detail panel)", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gFarm())
+		seedAlt(ns, "Abe-Realm", { lockouts = { iccRow(false) } })
+		S.setCharHidden("Abe-Realm", true)
+		local list = ns.Goals.Presenter.goalChars(
+			{ row("g:farm", 1, "Kill LK", { done = false }) }, "g:farm")
+		assert.equal(1, #list)
+		assert.equal(ME, list[1].key)
+	end)
+
+	it("unhiding brings the column back", function()
+		local ns = harness()
+		local S = ns.Goals.Store
+		S.install(gCrests())
+		seedAlt(ns, "Abe-Realm", {})
+		S.setCharHidden("Abe-Realm", true)
+		S.setCharHidden("Abe-Realm", false)
+		local vm = ns.Goals.Presenter.matrix({})
+		assert.equal("Abe-Realm", vm.chars[2].key)
+	end)
+end)
+
 describe("Presenter.matrix — cell states", function()
 	-- Build a matrix with gFarm + a set of alts, return the goal's cells.
 	local function farmCells(ns, flat)

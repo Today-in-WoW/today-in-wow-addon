@@ -54,6 +54,7 @@ local catSelectedId         -- selected catalog goal id (drives the detail panel
 local catSearch = ""        -- search-box filter text
 local catCards, catCardN = {}, 0   -- pooled catalog cards
 local refreshCatalog, selectCatalog, openAssign
+local refreshMatrix         -- assigned below; matrix rows re-render on hide/restore
 local assignFrame           -- §6a assignment modal, built on first use
 
 local WIDTH, HEIGHT = 900, 600
@@ -93,7 +94,8 @@ local M_COL_W  = 96     -- per-goal column width
 local M_ROW_H  = 58     -- character row height
 local M_HEAD_H = 64     -- frozen goal-header row height (icon + name)
 local M_SB     = 10     -- scrollbar thickness (both axes)
-local M_CHIP   = 32     -- completion chip size
+local M_CHIP   = 32     -- completion chip height
+local M_CHIP_W = 46     -- completion chip width (fits an n/m progress count)
 local M_HEADER = 64     -- title + subtitle band above the grid
 local M_LEGEND = 30     -- legend band below the grid
 
@@ -150,11 +152,11 @@ local CHAR_MARK = {
 -- `mark` selects the centered glyph; nil def = an empty (unassigned) cell.
 local CELL = {
 	done       = { mark = "check", bg = { 0.16, 0.30, 0.16, 0.55 }, edge = { 0.40, 0.70, 0.40, 0.85 } },
-	partial    = { mark = "dot",   bg = { 0.34, 0.26, 0.07, 0.55 }, edge = { 0.85, 0.65, 0.20, 0.85 } },
+	partial    = { mark = "count", bg = { 0.34, 0.26, 0.07, 0.55 }, edge = { 0.85, 0.65, 0.20, 0.85 } },
 	todo       = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
 	stale      = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
 	nodata     = { mark = "dash",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.10 } },
-	ineligible = { mark = "lock",  bg = { 1, 1, 1, 0.02 },          edge = { 1, 1, 1, 0.08 } },
+	ineligible = { mark = "lock",  bg = { 0.32, 0.11, 0.11, 0.55 }, edge = { 0.70, 0.30, 0.30, 0.55 } },
 }
 
 local function hex(c)
@@ -1069,23 +1071,40 @@ end
 -- A completion chip: tinted bordered square + centered marker (texture or dash).
 local function newChip(parent)
 	local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-	f:SetSize(M_CHIP, M_CHIP)
+	f:SetSize(M_CHIP_W, M_CHIP)
 	f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	local tex = f:CreateTexture(nil, "ARTWORK"); tex:SetPoint("CENTER"); f.tex = tex
 	local dash = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	dash:SetPoint("CENTER", 0, 1); dash:SetText("\226\128\148"); dash:SetTextColor(0.5, 0.5, 0.5)
 	f.dash = dash
+	-- In-progress cells carry the count itself (2/17) rather than a marker — the
+	-- same n/m the goal pane shows.
+	local count = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	count:SetPoint("CENTER", 0, 0); count:SetTextColor(AMBER[1], AMBER[2], AMBER[3])
+	f.count = count
 	return f
 end
 
-local function styleChip(f, state)
-	local def = CELL[state]
+-- n/m for an in-progress cell: a single-step goal's own progress when it has one
+-- (60/90 crests), otherwise completed steps out of total (2/17) — the same rule
+-- the goal pane's header count uses.
+local function cellCount(cell)
+	if cell.progress and cell.max then return cell.progress .. "/" .. cell.max end
+	return tostring(cell.done or 0) .. "/" .. tostring(cell.total or 0)
+end
+
+local function styleChip(f, cell)
+	local def = CELL[cell and cell.state]
 	if not def then f:Hide(); return end
 	f:Show()
 	f:SetBackdropColor(def.bg[1], def.bg[2], def.bg[3], def.bg[4])
 	f:SetBackdropBorderColor(def.edge[1], def.edge[2], def.edge[3], def.edge[4])
-	if def.mark == "dash" then
+	f.count:Hide()
+	if def.mark == "count" then
+		f.tex:Hide(); f.dash:Hide()
+		f.count:SetText(cellCount(cell)); f.count:Show()
+	elseif def.mark == "dash" then
 		f.tex:Hide(); f.dash:Show()
 	else
 		f.dash:Hide(); f.tex:Show()
@@ -1125,8 +1144,28 @@ local function newMatrixRow(M)
 	local rule = head:CreateTexture(nil, "ARTWORK")
 	rule:SetPoint("BOTTOMLEFT", 4, 0); rule:SetPoint("BOTTOMRIGHT", -2, 0)
 	rule:SetHeight(1); rule:SetColorTexture(1, 1, 1, 0.03)
-	head:SetScript("OnEnter", function(self) setRowHover(self.idx) end)
-	head:SetScript("OnLeave", function() setRowHover(nil) end)
+	head:SetScript("OnEnter", function(self)
+		setRowHover(self.idx)
+		if not self.charKey then return end
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(self.charKey, classRGB(self.charClass))
+		if self.isCurrent then
+			GameTooltip:AddLine("The character you're playing.", 0.6, 0.6, 0.6, true)
+		else
+			GameTooltip:AddLine("Shift-click to hide this character.", 0.6, 0.6, 0.6, true)
+		end
+		GameTooltip:Show()
+	end)
+	head:SetScript("OnLeave", function() setRowHover(nil); GameTooltip:Hide() end)
+	-- Shift-click hides the character account-wide (Store.setCharHidden); the
+	-- character you are logged in on is always a row, so it can't be hidden.
+	head:RegisterForClicks("LeftButtonUp")
+	head:SetScript("OnClick", function(self)
+		if not (IsShiftKeyDown() and self.charKey) or self.isCurrent then return end
+		ns.Goals.Store.setCharHidden(self.charKey, true)
+		GameTooltip:Hide()
+		refreshMatrix()
+	end)
 
 	local body = CreateFrame("Button", nil, M.bodyChild)
 	local bodyHi = body:CreateTexture(nil, "BACKGROUND")
@@ -1186,7 +1225,7 @@ local function updateAxis(slider, thumb, viewport, content)
 	end
 end
 
-local function refreshMatrix()
+function refreshMatrix()
 	local M = frame and frame.matrix
 	if not M then return end
 	local vm = ns.Goals.Presenter.matrix(ns.Goals.UIPanel.lastFlat())
@@ -1229,6 +1268,7 @@ local function refreshMatrix()
 		local y = -((ri - 1) * M_ROW_H)
 
 		row.head.idx, row.body.idx = ri, ri
+		row.head.charKey, row.head.charClass, row.head.isCurrent = col.key, col.class, col.current
 		row.head:ClearAllPoints(); row.head:SetPoint("TOPLEFT", 0, y); row.head:SetSize(M_NAME_W, M_ROW_H)
 		local cr, cg, cb = classRGB(col.class)
 		fitText(row.name, col.name, M_NAME_W - 14); row.name:SetTextColor(cr, cg, cb)
@@ -1243,9 +1283,8 @@ local function refreshMatrix()
 			local chip = row.chips[ci]
 			if not chip then chip = newChip(row.body); row.chips[ci] = chip end
 			chip:ClearAllPoints()
-			chip:SetPoint("LEFT", (ci - 1) * M_COL_W + (M_COL_W - M_CHIP) / 2, 0)
-			local cell = g.cells[col.key]
-			styleChip(chip, cell and cell.state)
+			chip:SetPoint("LEFT", (ci - 1) * M_COL_W + (M_COL_W - M_CHIP_W) / 2, 0)
+			styleChip(chip, g.cells[col.key])
 		end
 		for j = #vm.goals + 1, #row.chips do row.chips[j]:Hide() end
 	end
@@ -1259,6 +1298,18 @@ local function refreshMatrix()
 	updateAxis(M.hScroll, M.thumbH, M.bodySF:GetWidth(), contentW)
 
 	M.empty:SetShown(#vm.goals == 0 or #vm.chars == 0)
+
+	-- Restore control: only while something is hidden. It takes the bottom-left
+	-- corner when shown, so the legend slides over to sit beside it.
+	local anyHidden = #ns.Goals.Store.hiddenChars() > 0
+	M.restore:SetShown(anyHidden)
+	if not anyHidden then M.restore.close() end
+	M.legend:ClearAllPoints()
+	if anyHidden then
+		M.legend:SetPoint("BOTTOMLEFT", M.restore, "BOTTOMRIGHT", 12, 4)
+	else
+		M.legend:SetPoint("BOTTOMLEFT", 2, 8)
+	end
 end
 
 -- ---------------------------------------------------------------------------
@@ -2179,6 +2230,97 @@ local function buildGoalsTab(pane)
 	frame.goals = G
 end
 
+-- "Restore character" control: a compact drop-down button, shown in the grid's
+-- bottom-left corner only while at least one character is hidden. The list is
+-- built on open from Store.hiddenChars(); picking a name unhides it and the grid
+-- re-renders with that character (and its data) back in place.
+local RS_ROW_H = 20
+local function newRestoreControl(pane)
+	local b = CreateFrame("Button", nil, pane, "BackdropTemplate")
+	b:SetSize(168, 22)
+	b:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	b:SetBackdropColor(1, 1, 1, 0.05); b:SetBackdropBorderColor(1, 1, 1, 0.18)
+	local t = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	t:SetPoint("LEFT", 8, 0); t:SetJustifyH("LEFT"); t:SetText("Restore character")
+	t:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+	local arrow = b:CreateTexture(nil, "OVERLAY")
+	arrow:SetPoint("RIGHT", -6, -1); arrow:SetSize(16, 16)
+	arrow:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
+	arrow:SetVertexColor(0.7, 0.7, 0.72)
+	b:Hide()
+
+	-- Overlay list + a full-screen catcher behind it (outside-click closes),
+	-- opening UPWARD since the button sits at the bottom of the pane.
+	local catcher = CreateFrame("Button", nil, UIParent)
+	catcher:SetAllPoints(UIParent); catcher:SetFrameStrata("FULLSCREEN_DIALOG"); catcher:Hide()
+	local list = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	list:SetFrameStrata("FULLSCREEN_DIALOG")
+	list:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	list:SetBackdropColor(0.07, 0.065, 0.08, 0.98)
+	list:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.4)
+	list:Hide()
+
+	local function close()
+		list:Hide(); catcher:Hide()
+		if closeOpenDropdown == close then closeOpenDropdown = nil end
+	end
+	catcher:SetScript("OnClick", close)
+
+	local rows = {}
+	local function open()
+		local keys = ns.Goals.Store.hiddenChars()
+		list:SetWidth(b:GetWidth()); list:SetHeight(#keys * RS_ROW_H + 8)
+		list:ClearAllPoints(); list:SetPoint("BOTTOMLEFT", b, "TOPLEFT", 0, 2)
+		for i, key in ipairs(keys) do
+			local row = rows[i]
+			if not row then
+				row = CreateFrame("Button", nil, list)
+				row:SetHeight(RS_ROW_H)
+				local hl = row:CreateTexture(nil, "HIGHLIGHT"); hl:SetAllPoints()
+				hl:SetColorTexture(1, 1, 1, 0.06)
+				row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+				row.text:SetPoint("LEFT", 8, 0); row.text:SetJustifyH("LEFT")
+				row.text:SetWordWrap(false)
+				row:SetScript("OnClick", function(self)
+					ns.Goals.Store.setCharHidden(self.key, false)
+					close()
+					refreshMatrix()
+				end)
+				rows[i] = row
+			end
+			row.key = key
+			local name, realm = key:match("^([^-]+)"), key:match("%-(.+)$")
+			local label = "|c" .. hex({ classRGB(keyClass(key)) }) .. (name or key) .. "|r"
+			if realm then label = label .. "  |c" .. hex(SUBTLE) .. realm .. "|r" end
+			row.text:SetText(label)
+			row:ClearAllPoints()
+			row:SetPoint("BOTTOMLEFT", 4, 4 + (#keys - i) * RS_ROW_H)
+			row:SetPoint("RIGHT", list, "RIGHT", -4, 0)
+			row:Show()
+		end
+		for i = #keys + 1, #rows do rows[i]:Hide() end
+		catcher:Show(); list:Show()
+		list:SetFrameLevel(catcher:GetFrameLevel() + 10)
+		closeOpenDropdown = close
+	end
+
+	b:SetScript("OnEnter", function()
+		b:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 0.6)
+		GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+		GameTooltip:SetText("Restore character", 1, 1, 1)
+		GameTooltip:AddLine("Put a character you hid back into the matrix.", 0.8, 0.8, 0.8, true)
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", function()
+		b:SetBackdropBorderColor(1, 1, 1, 0.18); GameTooltip:Hide()
+	end)
+	b:SetScript("OnClick", function() if list:IsShown() then close() else open() end end)
+	b.close = close
+	return b
+end
+
 -- Completion Matrix grid: title/subtitle band, frozen "Character" corner + goal
 -- header row + character column (three synced ScrollFrames + two sliders), and a
 -- legend along the bottom.
@@ -2192,7 +2334,8 @@ local function buildMatrixTab(pane)
 	local sub = pane:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -4)
 	do local sf, _, sfl = sub:GetFont(); sub:SetFont(sf, 12, sfl) end
-	sub:SetText("Every tracked goal across every character on your account.")
+	sub:SetText("Every tracked goal across every character on your account.  "
+		.. "Shift-click a character to hide it.")
 	sub:SetTextColor(SUBTLE[1], SUBTLE[2], SUBTLE[3])
 
 	local topY = -M_HEADER
@@ -2247,9 +2390,12 @@ local function buildMatrixTab(pane)
 	legend:SetPoint("BOTTOMLEFT", 2, 8)
 	legend:SetText(
 		"|TInterface\\RaidFrame\\ReadyCheck-Ready:13:13|t COMPLETE     "
-		.. "|TInterface\\COMMON\\Indicator-Yellow:11:11|t IN PROGRESS     "
+		.. "|c" .. hex(AMBER) .. "n/m|r IN PROGRESS     "
 		.. "|cff808080\226\128\148|r NOT STARTED     "
 		.. "|TInterface\\LFGFrame\\UI-LFG-ICON-LOCK:13:13|t LOCKED")
+
+	local restore = newRestoreControl(pane)
+	restore:SetPoint("BOTTOMLEFT", 2, 4)
 
 	local empty = pane:CreateFontString(nil, "OVERLAY", "GameFontDisable")
 	empty:SetPoint("CENTER")
@@ -2264,6 +2410,7 @@ local function buildMatrixTab(pane)
 	M.cols, M.rows = {}, {}
 	M.hoverRow = nil
 	M.empty = empty
+	M.legend, M.restore = legend, restore
 	frame.matrix = M
 end
 
