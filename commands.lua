@@ -65,6 +65,14 @@ local function debugReport()
 	out("  checkpoint mounts=" .. #(col.mounts or {}) .. " pets=" .. #(col.pets or {}) .. " toys=" .. #(col.toys or {})
 		.. "  hash=" .. tostring(col.h) .. (col.captured_at and ("  @" .. col.captured_at) or ""))
 
+	-- Account identity (§3.3). A sibling of `collections` rather than a field inside
+	-- it, so the checkpoint hash never moves when the fingerprint does. Absent means the
+	-- companion payload carried no salt: the server's gate can then only answer
+	-- `world_only`, and it takes that exit before writing any audit row — so nothing on
+	-- the site says why the account never bound. This line is where it is visible.
+	out("  identity  fingerprint=" .. tostring(ns.account and ns.account.fingerprint)
+		.. "  salt=" .. tostring(ns.account and ns.account.salt_id))
+
 	-- Event-kind breakdown for the active session — reload-independent proof of what
 	-- the login pass + live deltas emitted (e.g. collection_observed×1). The async
 	-- collection scan lands a frame or two after login, so re-run /tiw debug if empty.

@@ -2451,11 +2451,13 @@ describe("lockout_changed §3.14 collector (change event, UPDATE_INSTANCE_INFO d
 	-- and the first non-empty read afterwards prunes the stale keys and emits the new one.
 	it("a weekly reset followed by a fresh kill emits as newly appeared", function()
 		local ns = setup()
-		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 4 } }
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 4, lockID = 111 } }
 		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- seed at 4/…
 		locks = {}
 		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- reset week: nothing saved
-		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
+		-- A NEW lock id, because that is what a reset issues. It is also the only thing that
+		-- separates this from a half-populated read of the same lock.
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1, lockID = 222 } }
 		mock.fireEvent("UPDATE_INSTANCE_INFO")         -- first kill of the new week
 
 		local rows = byKind(ns.session.events).lockout_changed or {}
@@ -2513,14 +2515,99 @@ describe("lockout_changed §3.14 collector (change event, UPDATE_INSTANCE_INFO d
 
 	it("does not emit on a decrease/reset; a later re-kill re-emits as new", function()
 		local ns = setup()
-		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 3 } }
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 3, lockID = 111 } }
 		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed at 3
 		locks = {}                                        -- weekly reset: lockout gone
 		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- pruned, no emit
 		assert.equal(0, #ns.session.events)
-		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1 } }
+		locks = { { instanceID = 1234, difficultyID = 2, encountersDone = 1, lockID = 222 } }
 		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- fresh lock -> emit as new
 		assert.equal(1, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	-- ── the half-populated read ────────────────────────────────────────────
+	-- The empty-read guard above covers GetNumSavedInstances() == 0. This is the other
+	-- shape of the same race, and the guard does not catch it: the lock IS listed, with its
+	-- real id, but encounterProgress has not landed and reads 0.
+	--
+	-- UPDATE_INSTANCE_INFO fires unprompted on every loading screen, so it happened on every
+	-- single zone-in. Observed live re-zoning into Castle Nathria: six events for three
+	-- lockouts that had not changed, and it repeated on each zone because the 0 overwrote the
+	-- baseline and the correct value then read as a change.
+
+	it("ignores a lock whose count falls without its lock id changing", function()
+		local ns = setup()
+		locks = { { instanceID = 2296, difficultyID = 15, encountersDone = 5, lockID = 492081506 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed at 5
+		locks = { { instanceID = 2296, difficultyID = 15, encountersDone = 0, lockID = 492081506 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- zone-in: progress not loaded yet
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	it("does not re-emit when the real count arrives after a half-populated read", function()
+		local ns = setup()
+		locks = { { instanceID = 2296, difficultyID = 15, encountersDone = 5, lockID = 492081506 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		locks = { { instanceID = 2296, difficultyID = 15, encountersDone = 0, lockID = 492081506 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		locks = { { instanceID = 2296, difficultyID = 15, encountersDone = 5, lockID = 492081506 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+
+		-- The second half of the ping-pong, and the reason the count was two per lock rather
+		-- than one: dropping the 0 is not enough, it must also not be written to the baseline.
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	it("a lock first seen with nothing done is seeded, not announced", function()
+		local ns = setup()
+		locks = { { instanceID = 2296, difficultyID = 14, encountersDone = 0, lockID = 492081411 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed
+		locks = { { instanceID = 2296, difficultyID = 14, encountersDone = 0, lockID = 492081411 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- zoning again, still nothing done
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+
+		-- …and the first real kill in it is progress, which is the event worth having.
+		locks = { { instanceID = 2296, difficultyID = 14, encountersDone = 1, lockID = 492081411 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		local rows = byKind(ns.session.events).lockout_changed or {}
+		assert.equal(1, #rows)
+		assert.equal(1, rows[1].data.encountersDone)
+	end)
+
+	it("re-zoning with several lockouts emits nothing at all", function()
+		-- The live trace, replayed: three lockouts, each read at 0 and then at its true
+		-- value. Six events before the fix.
+		local ns = setup()
+		local function state(a, b, c)
+			return {
+				{ instanceID = 603,  difficultyID = 33, encountersDone = a, lockID = 2078987794 },
+				{ instanceID = 2296, difficultyID = 14, encountersDone = b, lockID = 492081411 },
+				{ instanceID = 2296, difficultyID = 15, encountersDone = c, lockID = 492081506 },
+			}
+		end
+		locks = state(5, 1, 1)
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- seed
+		locks = state(0, 0, 0)
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- loading screen
+		locks = state(5, 1, 1)
+		mock.fireEvent("UPDATE_INSTANCE_INFO")            -- real data
+		assert.equal(0, #(byKind(ns.session.events).lockout_changed or {}))
+	end)
+
+	it("two instances at the same map and difficulty are separate lockouts", function()
+		-- Keying on the lock id rather than on instance:difficulty is what makes this
+		-- representable; the old key collapsed them onto one another.
+		local ns = setup()
+		locks = { { instanceID = 2296, difficultyID = 15, encountersDone = 3, lockID = 111 } }
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		locks = {
+			{ instanceID = 2296, difficultyID = 15, encountersDone = 3, lockID = 111 },
+			{ instanceID = 2296, difficultyID = 15, encountersDone = 1, lockID = 222 },
+		}
+		mock.fireEvent("UPDATE_INSTANCE_INFO")
+		local rows = byKind(ns.session.events).lockout_changed or {}
+		assert.equal(1, #rows)
+		assert.equal(1, rows[1].data.encountersDone)
 	end)
 
 	it("nudges RequestRaidInfo on ENCOUNTER_END success only", function()
