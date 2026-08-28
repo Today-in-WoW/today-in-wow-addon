@@ -1215,12 +1215,12 @@ end
 
 -- Everything at once, for a single-command smoke test of the whole stream.
 MOCK.all = function()
-	local out = {}
+	local lines = {}
 	for _, name in ipairs({ "boss", "bossdrop", "legacy", "rare", "raredrop",
 	                        "chest", "quest" }) do
-		out[#out + 1] = MOCK[name]()
+		lines[#lines + 1] = MOCK[name]()
 	end
-	return table.concat(out, "\n  ")
+	return table.concat(lines, "\n  ")
 end
 
 local function mockCmd(arg)

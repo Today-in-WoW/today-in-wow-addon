@@ -27,6 +27,8 @@ read_globals = {
 	"WorldMapFrame", "hooksecurefunc", "EventUtil", "CovenantMissionFrame",
 	"C_Item", "C_ToyBox",
 	"GetNumLootItems", "GetLootSlotType", "GetLootSlotLink", "GetLootSlotInfo", "GetLootSourceInfo",
+	"C_PartyInfo", "C_Loot", "IsInInstance",    -- encounter/loot collectors: loot method + legacy-loot + instance check
+	"BNGetInfo", "BNConnected",                 -- core/fingerprint: Battle.net account tag
 	"C_MountJournal", "PlayerHasToy",
 	"GetNumCompletedAchievements", "GetTotalAchievementPoints",
 	"GetCategoryList", "GetCategoryNumAchievements", "GetAchievementInfo",

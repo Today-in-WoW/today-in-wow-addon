@@ -82,11 +82,10 @@ local function diffAndEmit()
 		-- for three lockouts that had not changed.
 		--
 		-- Dropped without touching `last`, which is the part that stops the ping-pong.
-		if prev ~= nil and l.encountersDone < prev then
-			-- `last[k]` deliberately untouched. Dropping the event alone is not enough:
-			-- writing the 0 is what made the correct value read as a change a moment later
-			-- and produced the second event of every pair.
-		else
+		-- `last[k]` deliberately untouched: dropping the event alone is not enough --
+		-- writing the 0 is what made the correct value read as a change a moment later
+		-- and produced the second event of every pair.
+		if not (prev ~= nil and l.encountersDone < prev) then
 			-- Progress within a lock we already knew, or a lock appearing with work already
 			-- done in it. A lock seen for the FIRST time at 0 is neither: there is nothing
 			-- to report, and seeding it silently is what keeps the first real kill in it
