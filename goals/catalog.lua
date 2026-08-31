@@ -2503,7 +2503,7 @@ function Catalog.entries()
 				require = {
 					level = 80,
 				},
-				rev = 1,
+				rev = 2,
 				scope = "perchar",
 				steps = {
 					{
@@ -2599,6 +2599,46 @@ function Catalog.entries()
 						label = "Szarith the Fanged",
 						params = {
 							quest = 96030,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "CS: Venom Lancer Ori'kassi",
+						params = {
+							quest = 93722,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "CS: Malformed Leviathan",
+						params = {
+							quest = 93673,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "CS: Vassti, the Exalted Broodmother",
+						params = {
+							quest = 93676,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "CS: Ss'akrithos",
+						params = {
+							quest = 93715,
+						},
+						resets = "daily",
+					},
+					{
+						evaluator = "flag",
+						label = "CS: Looming Mutagenitor",
+						params = {
+							quest = 93718,
 						},
 						resets = "daily",
 					},
