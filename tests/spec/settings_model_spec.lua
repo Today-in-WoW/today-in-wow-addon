@@ -216,3 +216,45 @@ describe("SettingsModel — World Quest Scan Speed", function()
 		assert.has_no.errors(function() d.set("600") end)
 	end)
 end)
+
+-- "Hide Goal Tracking": automatic tracker suppression, bound to goals/autohide.lua.
+describe("SettingsModel — Hide Goal Tracking", function()
+	local function byKey2(model, key)
+		for _, d in ipairs(model) do if d.key == key then return d end end
+	end
+
+	local function withAutoHide()
+		local ns = harness()
+		local mode = "never"
+		ns.Goals.AutoHide = {
+			GetMode = function() return mode end,
+			SetMode = function(v) mode = v end,
+		}
+		return ns, function() return mode end
+	end
+
+	it("offers the four modes in order, under Goal Settings", function()
+		local ns = withAutoHide()
+		local d = byKey2(ns.Goals.SettingsModel(), "TIW_HIDE_TRACKING")
+		assert.equal("Hide Goal Tracking", d.label)
+		assert.equal("dropdown", d.kind)
+		local values = {}
+		for _, o in ipairs(d.options) do values[#values + 1] = o.value end
+		assert.same({ "never", "instance", "instance_level", "encounter" }, values)
+	end)
+
+	it("round-trips the mode through AutoHide", function()
+		local ns, mode = withAutoHide()
+		assert.equal("never", byKey2(ns.Goals.SettingsModel(), "TIW_HIDE_TRACKING").get())
+		byKey2(ns.Goals.SettingsModel(), "TIW_HIDE_TRACKING").set("instance_level")
+		assert.equal("instance_level", mode())
+		assert.equal("instance_level", byKey2(ns.Goals.SettingsModel(), "TIW_HIDE_TRACKING").get())
+	end)
+
+	it("degrades to never when AutoHide isn't loaded (headless)", function()
+		local ns = harness()
+		local d = byKey2(ns.Goals.SettingsModel(), "TIW_HIDE_TRACKING")
+		assert.equal("never", d.get())
+		assert.has_no.errors(function() d.set("instance") end)
+	end)
+end)

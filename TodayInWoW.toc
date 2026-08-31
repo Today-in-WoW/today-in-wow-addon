@@ -51,6 +51,7 @@ goals\catalog.lua
 goals\season.lua
 goals\presenter.lua
 goals\links.lua
+goals\autohide.lua
 goals\settings_model.lua
 goals\ui_panel.lua
 goals\ui_matrix.lua

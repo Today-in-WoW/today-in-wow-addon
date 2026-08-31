@@ -66,6 +66,20 @@ local WQ_SPEED_OPTIONS = {
 	  desc = "Lightest on your framerate." },
 }
 
+-- "Hide Goal Tracking" (goals/autohide.lua): when the tracker should be
+-- suppressed automatically, on top of the user's own show/hide choice.
+local HIDE_TRACKING_OPTIONS = {
+	{ value = "never", label = "Never",
+	  desc = "The tracker follows your show/hide choice only." },
+	{ value = "instance", label = "While inside instances",
+	  desc = "Hidden in any instanced zone -- dungeon, raid, battleground, arena or scenario." },
+	{ value = "instance_level", label = "While inside instances for my own level",
+	  desc = "As above, but only when the instance is close to your level (within 10). "
+		.. "Old content you outlevel keeps the tracker up; current content hides it." },
+	{ value = "encounter", label = "During encounters",
+	  desc = "Hidden during a boss encounter, a Mythic+ run, or a battleground/arena match." },
+}
+
 -- Points layout at Edit Mode rather than duplicating position/size sliders.
 local EDITMODE_NOTE = "Tracker position and size are set in Edit Mode (Game Menu -> Edit Mode -> Today in WoW)."
 
@@ -127,6 +141,19 @@ function ns.Goals.SettingsModel()
 				.. "It returns to its place when one of its steps resets.",
 			get = function() return ns.Goals.GetPref("hideCompletedGoals") end,
 			set = function(v) ns.Goals.SetPref("hideCompletedGoals", v) end,
+		},
+		{
+			kind = "dropdown", key = "TIW_HIDE_TRACKING", label = "Hide Goal Tracking",
+			subtitle = "Automatically hide the goal tracker in the situations you pick. "
+				.. "Your own show/hide choice is kept -- the tracker returns when the "
+				.. "situation ends.",
+			options = HIDE_TRACKING_OPTIONS,
+			get = function()
+				return ns.Goals.AutoHide and ns.Goals.AutoHide.GetMode() or "never"
+			end,
+			set = function(v)
+				if ns.Goals.AutoHide then ns.Goals.AutoHide.SetMode(v) end
+			end,
 		},
 		{
 			kind = "slider", key = "TIW_STEP_PREVIEW", label = "Steps shown",

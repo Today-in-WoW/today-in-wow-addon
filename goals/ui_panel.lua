@@ -161,7 +161,11 @@ local function applyVisibility()
 	if not frame then return end
 	local lem = editMode()
 	local inEdit = not not (lem and lem:IsInEditMode())
-	if userShown or inEdit then
+	-- "Hide Goal Tracking" (goals/autohide.lua) overrides the user's show choice
+	-- while its condition holds; userShown itself is left alone, so the tracker
+	-- comes back on its own when the instance/encounter ends.
+	local auto = ns.Goals.AutoHide and ns.Goals.AutoHide.ShouldHide()
+	if (userShown and not auto) or inEdit then
 		rebuild()
 		frame:Show()
 	else
@@ -171,6 +175,10 @@ local function applyVisibility()
 		frame.grabber:SetShown(inEdit and frame:IsShown())
 	end
 end
+
+-- Re-apply visibility from outside (goals/autohide.lua calls this when an
+-- encounter starts/ends or the zone changes). No-op before the frame is built.
+Panel.RefreshVisibility = applyVisibility
 
 -- Width drag (Edit Mode only): snap to the slider step, persist, re-anchor to
 -- the saved point, and re-wrap the content to the new width.
