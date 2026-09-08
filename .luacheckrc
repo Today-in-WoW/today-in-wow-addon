@@ -15,6 +15,9 @@ read_globals = {
 	"UnitGUID", "UnitName", "GetRealmName", "UnitIsDead", "UnitIsTapDenied", "UnitThreatSituation",
 	"UnitLevel", "UnitClass", "UnitRace", "UnitFactionGroup", "UnitSex",
 	"GetSpecialization", "GetSpecializationInfo", "GetAverageItemLevel",
+	-- PvP/M+ ratings (collectors/ratings.lua). Note GetPersonalRatedInfo and
+	-- RequestRatedInfo are BARE globals, not on C_PvP — C_PvP.GetPersonalRatedInfo is nil.
+	"GetPersonalRatedInfo", "RequestRatedInfo", "C_ChallengeMode", "GetCurrentArenaSeason",
 	"C_Covenants", "RequestTimePlayed",
 	"C_PetJournal",
 	"issecretvalue", "C_Secrets",

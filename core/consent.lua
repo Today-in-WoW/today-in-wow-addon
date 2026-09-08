@@ -79,6 +79,13 @@ Consent.CLASS = {
 	profession_unlearned = "personal",
 	reputation_changed   = "personal",
 	vault_progress       = "personal",
+	-- Personal, and never "generic" (character-rating-history §2.3). Under generic consent
+	-- the addon zeroes the character id, which collapses every character on a realm into a
+	-- single GUID — a rating attributed to that shared identity is meaningless at best and
+	-- cross-contaminating at worst, mixing several players' ratings into one series. The
+	-- site's fold drops such rows anyway (it cannot resolve a real character), so emitting
+	-- them would only ship data nothing can use.
+	rating_change        = "personal",
 }
 
 -- Monotonic ordering of the three states: a downgrade is new rank < old rank.

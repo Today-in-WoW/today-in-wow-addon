@@ -12,6 +12,7 @@
 local ORDER = {
 	"basics", "professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
 	"perks",
+	"ratings",
 }
 
 local function freshSnapshot()
@@ -41,6 +42,13 @@ local CHECKPOINT = { mounts = { 1589, 1581 }, pets = { 2891 }, toys = {},
                      appearances = {}, achievements = { 6, 503 }, decor = {} }
 
 local perks_c, perks_m = { 279, 13 }, { month = 44, earned = 1000, max = 1000, pending = 2 }
+-- Two Solo Shuffle rows (bracket 6) on different specs, deliberately out of key order: the
+-- pair (bracket, spec) is the series key, so C.ratings must sort them and must not collapse
+-- them onto one entry.
+local ratings = { { bracket = 6, spec = 262, rating = 1600, seasonBest = 1712 },
+	{ bracket = 6, spec = 258, rating = 1850, seasonBest = 1850 },
+	{ bracket = 0, spec = 0, rating = 1420, seasonBest = 1500 } }
+local ratings_season = 42
 
 local SESSION = { session_id = "S-abc123", char_guid = "Player-1234-DEADBEEF", schema_version = 1 }
 
@@ -54,6 +62,7 @@ local function registerAll(ns)
 	ns.Snapshot.Register("professions", function() return { contents = prof_c, data = prof_d } end)
 	ns.Snapshot.Register("reputations", function() return { contents = rep_c, data = rep_d } end)
 	ns.Snapshot.Register("perks", function() return { contents = perks_c, meta = perks_m } end)
+	ns.Snapshot.Register("ratings", function() return { ratings = ratings, season = ratings_season } end)
 end
 
 describe("§5/§7/§8 snapshot Capture", function()
@@ -74,6 +83,7 @@ describe("§5/§7/§8 snapshot Capture", function()
 			instancelocks = C.instancelocks(locks),
 			quests = C.ids({ 70123, 70200, 71000 }),
 			perks = C.perks(perks_c, perks_m),
+			ratings = C.ratings(ratings, ratings_season),
 		}
 
 		local baseline_hash = ns.Baseline.hash(CHECKPOINT)

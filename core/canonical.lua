@@ -118,6 +118,32 @@ function C.instancelocks(locks)
 	return concat(parts, ",")
 end
 
+-- ratings (character-rating-history §2.3): PvP rating and M+ score per series.
+-- Sorted on (bracket, spec) because that PAIR is the series key, never bracket alone:
+-- every Solo Shuffle bracket reports 6 and every Blitz bracket 8, so a character playing
+-- two specs of one family holds two genuinely different ratings at once.
+-- `seasonBest` is hashed alongside `rating` — it moves independently (a rating can fall
+-- while the season best stands), and a chain that ignored it would call a real change
+-- no change.
+-- `season` is hashed as a prefix, not just carried: a new season resets every rating, and
+-- the first snapshot of season N+1 can hold values identical to the last of season N. Without
+-- the season in the hash those two states are indistinguishable and the chain would call a
+-- full reset "no change".
+function C.ratings(rows, season)
+	local a = {}
+	for i = 1, #rows do a[i] = rows[i] end
+	sort(a, function(x, y)
+		if x.bracket ~= y.bracket then return x.bracket < y.bracket end
+		return x.spec < y.spec
+	end)
+	local parts = {}
+	for i = 1, #a do
+		local r = a[i]
+		parts[i] = format("%d:%d:%d:%d", r.bracket, r.spec, r.rating, r.seasonBest)
+	end
+	return format("%d|", season or 0) .. concat(parts, ",")
+end
+
 -- perks (§3.19): month/bar scalars, then the completed-activity ids. `meta` is nil
 -- until the client serves the month's activities (it can lag login by minutes), and
 -- that state canonicalizes to "" — deliberately NOT the same as a real 0-earned row.

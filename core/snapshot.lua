@@ -24,6 +24,8 @@ ns.Snapshot = Snapshot
 Snapshot.ORDER = {
 	"basics", "professions", "reputations", "currencies", "greatvault", "instancelocks", "quests",
 	"perks",
+	-- Appended, never inserted — the chain order is frozen (character-rating-history §2.3).
+	"ratings",
 }
 
 local scanners = {}
@@ -42,6 +44,7 @@ local function canonicalOf(cat, r, C)
 	if cat == "greatvault" then return C.greatvault(r.activities or {}) end
 	if cat == "instancelocks" then return C.instancelocks(r.locks or {}) end
 	if cat == "perks" then return C.perks(r.contents or {}, r.meta) end
+	if cat == "ratings" then return C.ratings(r.ratings or {}, r.season) end
 	if type(r.contents) == "string" then return r.contents end   -- already the joined id string (storage trim, §3.3)
 	return C.ids(r.contents or {})   -- mounts/toys/pets/appearances/decor/achievements/quests
 end

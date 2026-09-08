@@ -93,5 +93,6 @@ collectors\quest_lines.lua
 collectors\npc_defeats.lua
 collectors\encounter_defeated.lua
 collectors\lockout_changed.lua
+collectors\ratings.lua
 core\session.lua
 commands.lua
