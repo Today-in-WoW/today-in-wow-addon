@@ -145,10 +145,40 @@ local function emitChanges()
 	-- lost — pruning would re-emit the whole series as new on the next swap back.
 end
 
--- Blizzard's own protocol: request, then wait for the async update. Requesting on a spec
--- change matters because indexes 7 and 9 now report a different series entirely.
+-- ⚠ BOTH metrics are request-then-wait, and neither is ready at login.
+--
+-- PvP: Blizzard calls RequestRatedInfo in ConquestFrame_OnLoad and again on
+-- PLAYER_SPECIALIZATION_CHANGED (the latter matters because indexes 7 and 9 then report a
+-- different series entirely).
+--
+-- Mythic+: the same shape, and easy to miss because `GetOverallDungeonScore()` *looks* like
+-- a plain getter. `ChallengesFrameMixin:OnShow` calls `C_MythicPlus.RequestMapInfo()` and
+-- only reads the score from `Update()`, which runs on CHALLENGE_MODE_MAPS_UPDATE. Reading it
+-- cold at login returns 0 — and since a zero is an absence here, the M+ row would simply
+-- never be written, with no error to say why.
 local function requestRatedInfo()
 	if RequestRatedInfo then RequestRatedInfo() end
+	if C_MythicPlus and C_MythicPlus.RequestMapInfo then C_MythicPlus.RequestMapInfo() end
+end
+
+-- The snapshot is captured at login, potentially before either answer has arrived, so it can
+-- freeze an empty state. Recapture re-folds this one category and re-chains the session's
+-- events — the same §3.7 late-data path professions uses for its async skill data.
+--
+-- ⚠ Guarded, because Recapture re-chains EVERY event in the session and
+-- CHALLENGE_MODE_MAPS_UPDATE fires on routine UI activity, not only when the score lands.
+-- Recapturing unconditionally would rewrite the whole chain several times a session for no
+-- change. Compare canonical forms — the same string the chain hashes — so the guard is exact
+-- rather than a heuristic about which event "should" mean new data.
+local function onRatingsReady()
+	if not ns.session then return end
+	local stored = ns.session.snapshot and ns.session.snapshot.ratings
+	local fresh = scan()
+	local changed = not stored or
+		ns.Canonical.ratings(stored.ratings or {}, stored.season)
+			~= ns.Canonical.ratings(fresh.ratings, fresh.season)
+	if changed and ns.Snapshot.Recapture then ns.Snapshot.Recapture("ratings") end
+	emitChanges()
 end
 
 if ns.Schedule then
@@ -158,8 +188,11 @@ if ns.Schedule then
 	-- registered in ConquestFrame, PVPQueueFrame and PVPWeeklyRatedPanelMixin, always beside
 	-- the code that calls GetPersonalRatedInfo. PVP_REWARDS_UPDATE rides alongside it in most
 	-- of those lists but is about reward availability, not rating — do not key on it.
-	ns.Schedule.OnDirty({ "PVP_RATED_STATS_UPDATE", "CHALLENGE_MODE_COMPLETED" }, emitChanges)
+	-- CHALLENGE_MODE_MAPS_UPDATE is the M+ equivalent: the event ChallengesFrameMixin
+	-- redraws the score on. CHALLENGE_MODE_COMPLETED catches a run finishing mid-session.
+	ns.Schedule.OnDirty({ "PVP_RATED_STATS_UPDATE", "CHALLENGE_MODE_MAPS_UPDATE",
+		"CHALLENGE_MODE_COMPLETED" }, onRatingsReady)
 end
 
 ns.collectors.ratings = { rescan = scan, emitChanges = emitChanges,
-	requestRatedInfo = requestRatedInfo }
+	requestRatedInfo = requestRatedInfo, onRatingsReady = onRatingsReady }

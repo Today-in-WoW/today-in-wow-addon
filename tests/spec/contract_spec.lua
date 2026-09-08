@@ -87,6 +87,18 @@ describe("canonical(category)", function()
 	it("perks (not served yet -> empty, not a 0-earned row)", function()
 		assert.equal(cat.perks_empty.expected, C.perks(cat.perks_empty.input.contents, nil))
 	end)
+	-- The vector's rows arrive UNSORTED and span both per-spec families plus the M+ wire
+	-- sentinel (99), so this pins the sort order as well as the format. If this side ever
+	-- disagrees with the site's Python mirror, every upload carrying ratings fails chain
+	-- verification and the whole session is rejected as tampered.
+	it("ratings", function()
+		local p = cat.ratings.input
+		assert.equal(cat.ratings.expected, C.ratings(p.ratings, p.season))
+	end)
+	it("ratings (no season -> hashed as 0, never omitted)", function()
+		assert.equal(cat.ratings_no_season.expected,
+			C.ratings(cat.ratings_no_season.input.ratings, nil))
+	end)
 end)
 
 describe("chain", function()

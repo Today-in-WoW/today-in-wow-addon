@@ -306,6 +306,81 @@
         "contents": []
       },
       "expected": ""
+    },
+    "ratings": {
+      "input": {
+        "ratings": [
+          {
+            "bracket": 8,
+            "spec": 258,
+            "rating": 2100,
+            "seasonBest": 2100
+          },
+          {
+            "bracket": 0,
+            "spec": 0,
+            "rating": 1420,
+            "seasonBest": 1500
+          },
+          {
+            "bracket": 6,
+            "spec": 262,
+            "rating": 1600,
+            "seasonBest": 1712
+          },
+          {
+            "bracket": 6,
+            "spec": 258,
+            "rating": 1850,
+            "seasonBest": 1850
+          },
+          {
+            "bracket": 99,
+            "spec": 0,
+            "rating": 2701,
+            "seasonBest": 2701
+          }
+        ],
+        "season": 42
+      },
+      "expected": "42|0:0:1420:1500,6:258:1850:1850,6:262:1600:1712,8:258:2100:2100,99:0:2701:2701"
+    },
+    "ratings_no_season": {
+      "input": {
+        "ratings": [
+          {
+            "bracket": 8,
+            "spec": 258,
+            "rating": 2100,
+            "seasonBest": 2100
+          },
+          {
+            "bracket": 0,
+            "spec": 0,
+            "rating": 1420,
+            "seasonBest": 1500
+          },
+          {
+            "bracket": 6,
+            "spec": 262,
+            "rating": 1600,
+            "seasonBest": 1712
+          },
+          {
+            "bracket": 6,
+            "spec": 258,
+            "rating": 1850,
+            "seasonBest": 1850
+          },
+          {
+            "bracket": 99,
+            "spec": 0,
+            "rating": 2701,
+            "seasonBest": 2701
+          }
+        ]
+      },
+      "expected": "0|0:0:1420:1500,6:258:1850:1850,6:262:1600:1712,8:258:2100:2100,99:0:2701:2701"
     }
   },
   "baseline": {

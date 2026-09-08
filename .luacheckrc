@@ -17,7 +17,7 @@ read_globals = {
 	"GetSpecialization", "GetSpecializationInfo", "GetAverageItemLevel",
 	-- PvP/M+ ratings (collectors/ratings.lua). Note GetPersonalRatedInfo and
 	-- RequestRatedInfo are BARE globals, not on C_PvP — C_PvP.GetPersonalRatedInfo is nil.
-	"GetPersonalRatedInfo", "RequestRatedInfo", "C_ChallengeMode", "GetCurrentArenaSeason",
+	"GetPersonalRatedInfo", "RequestRatedInfo", "C_ChallengeMode", "C_MythicPlus", "GetCurrentArenaSeason",
 	"C_Covenants", "RequestTimePlayed",
 	"C_PetJournal",
 	"issecretvalue", "C_Secrets",

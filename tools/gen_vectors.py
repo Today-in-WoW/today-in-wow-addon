@@ -95,6 +95,19 @@ def c_perks(meta, contents) -> str:
     )
 
 
+# ratings (character-rating-history §2.3). Sorted on the PAIR (bracket, spec) — that is the
+# series key, since every Solo Shuffle bracket reports 6 and every Blitz bracket 8. `season`
+# is a prefix because a new season resets every rating, so the first snapshot of season N+1
+# can otherwise be byte-identical to the last of season N.
+def c_ratings(rows, season) -> str:
+    ordered = sorted(rows, key=lambda r: (r["bracket"], r["spec"]))
+    body = ",".join(
+        "%d:%d:%d:%d" % (r["bracket"], r["spec"], r["rating"], r["seasonBest"])
+        for r in ordered
+    )
+    return "%d|%s" % (season or 0, body)
+
+
 def genesis(sid, guid, sv, bh) -> str:
     return fnv1a(f"{sid}^{guid}^{sv}^{bh}")
 
@@ -180,6 +193,14 @@ def build():
     perks_c = [279, 13, 645]
     perks_m = {"month": 44, "earned": 1000, "max": 1000, "pending": 2}
 
+    ratings_rows = [
+        {"bracket": 8, "spec": 258, "rating": 2100, "seasonBest": 2100},
+        {"bracket": 0, "spec": 0, "rating": 1420, "seasonBest": 1500},
+        {"bracket": 6, "spec": 262, "rating": 1600, "seasonBest": 1712},
+        {"bracket": 6, "spec": 258, "rating": 1850, "seasonBest": 1850},
+        {"bracket": 99, "spec": 0, "rating": 2701, "seasonBest": 2701},
+    ]
+    ratings_season = 42
     v["canonical_category"] = {
         "basics": {"input": basics, "expected": c_payload(basics)},
         "professions": {"input": {"contents": prof_c, "data": prof_d}, "expected": c_professions(prof_c, prof_d)},
@@ -190,6 +211,15 @@ def build():
         "perks": {"input": {"contents": perks_c, "meta": perks_m}, "expected": c_perks(perks_m, perks_c)},
         # the not-yet-served state: contents empty, no meta -> empty canonical
         "perks_empty": {"input": {"contents": []}, "expected": c_perks(None, [])},
+        # ratings: deliberately supplied UNSORTED and spanning both per-spec families plus
+        # the M+ wire sentinel (99), so the vector pins the sort order rather than just the
+        # format. Two bracket-6 rows differing only by spec is the case that breaks if any
+        # implementation ever keys on bracket alone.
+        "ratings": {"input": {"ratings": ratings_rows, "season": ratings_season},
+                    "expected": c_ratings(ratings_rows, ratings_season)},
+        # no season yet (an addon build that could not read it): hashes as 0, never omitted
+        "ratings_no_season": {"input": {"ratings": ratings_rows},
+                              "expected": c_ratings(ratings_rows, None)},
     }
 
     # 6. account checkpoint (baseline_hash) — the six collection categories
