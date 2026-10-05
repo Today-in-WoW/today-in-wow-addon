@@ -223,6 +223,8 @@ local function footerVersion()
 	elseif GetAddOnMetadata then
 		v = GetAddOnMetadata("TodayInWoW", "Version")
 	end
+	-- The packager fills @project-version@ from the git tag, which already starts with "v".
+	v = v and (v:gsub("^[vV]", ""))
 	return "Today in WoW" .. (v and ("  \226\128\162  v" .. v) or "")
 end
 
