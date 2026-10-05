@@ -9,7 +9,8 @@ local _, ns = ...
 -- Before capturing the new bundle we bound stored growth: Drain.run clears
 -- sessions the companion has confirmed shipped (§6), then Retention.prune drops
 -- whole sessions older than RETENTION_DAYS (§4.1, whole-session only — never per
--- row, which would orphan a chain).
+-- row, which would orphan a chain). Both run over every character record, not
+-- just the one logging in.
 -- ===========================================================================
 
 local RETENTION_DAYS = 7   -- data_storage §4.1 (locked)
@@ -65,6 +66,35 @@ end
 -- checkpoint counts); collectors stay un-instrumented. No-op if ns.dbg is absent.
 local function dbg(m) if ns.dbg then ns.dbg(m) end end
 
+-- Drop sessions minted under a different guid than their record's char_guid.
+-- Records are keyed by Name-Realm, so deleting a character and recreating it
+-- under the same name reuses the record and overwrites char_guid — leaving the
+-- old character's sessions behind. Their genesis binds the OLD guid, so the site
+-- rejects them on every upload. Every record is swept, not just this login's:
+-- a recreated character that is never logged in again would otherwise keep
+-- shipping its orphans forever (its own prune only runs on its own login).
+local function dropForeignSessions()
+	local dropped = 0
+	for _, rec in pairs(TiWDB.characters) do
+		local guid = rec.char_guid
+		local sessions = rec.sessions
+		if guid and sessions then
+			local prefix = guid .. "-"
+			local kept = {}
+			for i = 1, #sessions do
+				local id = sessions[i].session_id
+				if type(id) == "string" and id:sub(1, #prefix) == prefix then
+					kept[#kept + 1] = sessions[i]
+				else
+					dropped = dropped + 1
+				end
+			end
+			rec.sessions = kept
+		end
+	end
+	return dropped
+end
+
 local function logScanDone(label)
 	local c = (ns.account and ns.account.collections) or {}
 	dbg(string.format("%s done — mounts=%d pets=%d toys=%d appearances=%d achievements=%d h=%s",
@@ -105,6 +135,9 @@ local function startSession()
 		opts = { generic = true }
 	end
 
+	local dropped = dropForeignSessions()
+	if dropped > 0 then dbg(string.format("dropped %d session(s) from a recreated character", dropped)) end
+
 	-- Account fingerprint (personal-data-ingestion §3.3). Refreshed before the
 	-- bundle is built so this login's upload already carries it — the site gates
 	-- every personal domain on it, and an upload without one is held back.
@@ -122,6 +155,16 @@ local function startSession()
 	dbg(string.format("drain → %d kept  rebaseline_at=%s", #target.sessions, tostring(rebaselineAt)))
 	target.sessions = ns.Retention.prune(target.sessions, GetServerTime(), RETENTION_DAYS)
 	dbg(string.format("prune → %d retained", #target.sessions))
+
+	-- The same bound for every other record. A character that is never logged in
+	-- again would otherwise keep its sessions forever and re-ship them in every
+	-- upload, long past RETENTION_DAYS.
+	for _, other in pairs(TiWDB.characters) do
+		if other ~= target and other.sessions then
+			ns.Drain.run(other)
+			other.sessions = ns.Retention.prune(other.sessions, GetServerTime(), RETENTION_DAYS)
+		end
+	end
 
 	-- Capture immediately so ns.session exists from the start of the session — the
 	-- delves/events collectors fire at PLAYER_ENTERING_WORLD and bail without it. The
