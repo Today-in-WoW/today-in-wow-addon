@@ -141,7 +141,9 @@ function AppStatus.summary(at)
 		return "Companion app: signed out. Sign in to the Today in WoW app to resume uploads "
 			.. "(last upload " .. sent .. ")."
 	end
-	return "Companion app: running, but uploads are failing (last success " .. sent .. ")."
+	-- "last seen" separates an app that is alive but cannot upload from one that
+	-- stopped days ago without crossing STALE_DAYS yet.
+	return "Companion app: uploads are failing (last seen " .. ran .. ", last success " .. sent .. ")."
 end
 
 -- Only these three are worth a chat line at login; ok/absent stay silent.

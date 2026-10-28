@@ -153,6 +153,13 @@ describe("core/app_status", function()
 		assert.is_string(ns.AppStatus.summary(NOW))
 	end)
 
+	it("says when the app was last seen in the failing message", function()
+		local t = healthy({ written_at = NOW - 4 * DAY })
+		t.upload.last_success_at = NOW - (ns.AppStatus.STALE_DAYS + 1) * DAY
+		write(t)
+		assert.is_truthy(ns.AppStatus.summary(NOW):find("last seen 4 days ago", 1, true))
+	end)
+
 	it("names the retention window in the stale message", function()
 		ns.RETENTION_DAYS = 7
 		write(healthy({ written_at = NOW - 9 * DAY }))
