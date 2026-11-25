@@ -381,6 +381,46 @@ describe("store sync §6.2 tombstones", function()
 		ns.Goals.Store.pruneTombstones()
 		assert.equal(1000, TiWDB.goals.tombstones["tiw:dev-mount"])
 	end)
+
+	local function expiredTombstone()
+		local ns, mock = harness()
+		ns.Goals.Store.install(fixtures().mount_account)
+		mock.now = 1000
+		ns.Goals.Store.remove("tiw:dev-mount")
+		mock.now = 1000 + (30 * 86400) + 1
+		return ns
+	end
+
+	it("a syncing install keeps an expired tombstone the payload has not confirmed", function()
+		local ns = expiredTombstone()
+		ns.Goals.Store.setAppliedPush(5)
+		ns.Goals.Store.pruneTombstones(nil, { subs = {
+			["tiw:dev-mount"] = { updated_at = 900, rev = 1, active = true },
+		} })
+		assert.equal(1000, TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
+
+	it("an expired tombstone confirmed by the payload is pruned", function()
+		local ns = expiredTombstone()
+		ns.Goals.Store.setAppliedPush(5)
+		ns.Goals.Store.pruneTombstones(nil, { subs = {
+			["tiw:dev-mount"] = { updated_at = 1000, deleted = true },
+		} })
+		assert.is_nil(TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
+
+	it("an install that never applied a payload prunes an expired tombstone", function()
+		local ns = expiredTombstone()
+		ns.Goals.Store.pruneTombstones(nil, nil)
+		assert.is_nil(TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
+
+	it("a syncing install without a companion file keeps its tombstones", function()
+		local ns = expiredTombstone()
+		ns.Goals.Store.setAppliedPush(5)
+		ns.Goals.Store.pruneTombstones(nil, nil)
+		assert.equal(1000, TiWDB.goals.tombstones["tiw:dev-mount"])
+	end)
 end)
 
 describe("store sync §6.1.1 applied_push", function()

@@ -131,11 +131,28 @@ function Store.remove(id, at)
 end
 
 -- Drop tombstones past the TTL. Cheap; call at login.
-function Store.pruneTombstones(now)
+--
+-- An install that has applied a payload (applied_push > 0) syncs with the site,
+-- so it drops an expired tombstone only once `payload` (TiWCompanionDB.goals, or
+-- nil) shows the site holds the same removal: a deleted entry at least as new.
+-- An unconfirmed tombstone is the only thing stopping the next payload from
+-- reinstalling the goal. An install that never applied a payload has nothing to
+-- be reinstalled by, so its tombstones just expire.
+function Store.pruneTombstones(now, payload)
 	local db = ns.Goals.db
 	local cutoff = (now or GetServerTime()) - TOMBSTONE_TTL
+	local syncing = Store.getAppliedPush() ~= 0
+	local subs = type(payload) == "table" and payload.subs or nil
 	for id, ts in pairs(db.tombstones) do
-		if ts < cutoff then db.tombstones[id] = nil end
+		if ts < cutoff then
+			local confirmed = false
+			if syncing then
+				local entry = type(subs) == "table" and subs[id] or nil
+				confirmed = type(entry) == "table" and entry.deleted == true
+					and (tonumber(entry.updated_at) or 0) >= ts
+			end
+			if not syncing or confirmed then db.tombstones[id] = nil end
+		end
 	end
 end
 

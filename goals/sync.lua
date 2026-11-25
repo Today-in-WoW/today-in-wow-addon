@@ -186,11 +186,17 @@ end
 -- check. Most installs have no companion app at all, and tombstones are written
 -- by any in-game goal removal — so hanging the prune off the payload path would
 -- leave the majority of users accumulating them forever.
+--
+-- What the prune may drop depends on the install. One that never applied a
+-- payload (no applied_push) drops a tombstone once it expires. One that has
+-- synced keeps it until the payload carries a deleted entry at least as new, so
+-- an expired removal the site never received cannot be undone by a later push.
+-- Without a companion file the payload is nil and a syncing install keeps all.
 function Sync.run(now)
-	ns.Goals.Store.pruneTombstones(now)
+	local db = type(_G.TiWCompanionDB) == "table" and _G.TiWCompanionDB or nil
+	ns.Goals.Store.pruneTombstones(now, db and db.goals)
 
-	local db = _G.TiWCompanionDB
-	if type(db) ~= "table" then return nil end
+	if not db then return nil end
 	return Sync.apply(db.goals, now)   -- passes through the second return
 end
 
