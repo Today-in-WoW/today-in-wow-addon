@@ -136,4 +136,32 @@ describe("§8 export", function()
 
 		assert.equal(0, ns.Export.markExported())              -- idempotent: nothing new to mark
 	end)
+
+	-- ns.Game comes from the real detection in core/namespace.lua, under the
+	-- mock's chosen game, so the payload marker tracks the client it runs on.
+	local function loadExportFor(game)
+		local mock = dofile("tests/wow_mock.lua")
+		mock.game = game
+		mock.install()
+		local ns = {}
+		assert(loadfile("core/namespace.lua"))("TiW", ns)
+		assert(loadfile("core/export.lua"))("TiW", ns)
+		return ns
+	end
+
+	it("payload carries game = forever in Forever mode", function()
+		_G.TiWDB = { account = {}, characters = {} }
+		local ns = loadExportFor("forever")
+		local p = ns.Export.buildPayload()
+		assert.equal("forever", p.game)
+		assert.equal("forever", ns.Export.decode(ns.Export.encode(p)).game)
+	end)
+
+	it("payload carries game = mainline in retail mode", function()
+		_G.TiWDB = { account = {}, characters = {} }
+		local ns = loadExportFor("mainline")
+		local p = ns.Export.buildPayload()
+		assert.equal("mainline", p.game)
+		assert.equal("mainline", ns.Export.decode(ns.Export.encode(p)).game)
+	end)
 end)

@@ -84,7 +84,8 @@ end
 -- hashes included, see header) so the backend verifies per-row without recomputing
 -- the chain. Only char_guid + the bundles are the site's data, so addon-internal
 -- per-character state (daily-dedup, §3.2/§3.10) is dropped. `v` is the data schema;
--- transient SV fields (trace, …) are excluded. We reference the live bundles (never
+-- `game` is ns.Game ("mainline" or "forever"), so the site files the upload under
+-- the client it came from. Transient SV fields (trace, …) are excluded. We reference the live bundles (never
 -- mutate them — the running session still needs them); serialize only reads.
 -- Consent gating (core/consent.lua): empty-session records are skipped so their
 -- name-realm keys never leak, and the account checkpoint ships ONLY under
@@ -105,6 +106,7 @@ function Export.buildPayload()
 	if gated and ns.Consent.get() ~= "everything" then account = {} end
 	return {
 		v          = ns.SCHEMA_VERSION,
+		game       = ns.Game,
 		account    = account,
 		characters = characters,
 	}
