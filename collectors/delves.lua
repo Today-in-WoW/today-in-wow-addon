@@ -17,7 +17,16 @@ local _, ns = ...
 -- the text. Dedup per delve per day (§3.2 reset-aware bucket; bountiful rotates
 -- at daily reset), persisted on ns.char (shared via ns.DailyDedup) so a relog
 -- mid-day doesn't re-ship a delve already seen today.
+--
+-- Skipped on Forever (ns.skipped.delves = "game") and without
+-- C_AreaPoiInfo.GetDelvesForMap ("api").
 -- ===========================================================================
+
+if ns.Game == "forever" or not (C_AreaPoiInfo and C_AreaPoiInfo.GetDelvesForMap) then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.delves = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 -- Reset-aware day bucket (§3.2): bountiful flips at the region daily reset, not
 -- UTC midnight, so derive the reset offset from GetSecondsUntilDailyReset.

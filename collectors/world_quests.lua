@@ -39,7 +39,15 @@ local _, ns = ...
 -- when its window genuinely rolls over (a new expiresAt). expiresAt is matched with
 -- a tolerance to absorb the ~minute scan-to-scan jitter; the store is pruned of
 -- windows that have already expired. expiresAt itself ships precise.
+--
+-- Skipped on Forever (ns.skipped.world_quests = "game") and without C_TaskQuest ("api").
 -- ===========================================================================
+
+if ns.Game == "forever" or not C_TaskQuest then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.world_quests = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 local deferrals  = {}    -- questID -> scans waited on reward data (bounded by REWARD_WAIT)
 local fallbackSeen = {}  -- used only before ns.char binds (pre-login); per-session

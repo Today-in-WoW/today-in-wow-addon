@@ -16,7 +16,15 @@ local _, ns = ...
 -- observePrey (lookup + dedup + emit) is the testable core; the UI hook is glue
 -- (untested per the brief, §6) and is guarded so loading without the Garrison UI,
 -- EventUtil, or hooksecurefunc is harmless.
+--
+-- Skipped on Forever (ns.skipped.prey_quests = "game") and without GetServerTime ("api").
 -- ===========================================================================
+
+if ns.Game == "forever" or not GetServerTime then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.prey_quests = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 -- Companion payload REPLACES the floor wholesale (mirrors core/whitelist.lua, §6).
 local function resolved()

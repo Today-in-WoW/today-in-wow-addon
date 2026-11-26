@@ -9,7 +9,16 @@ local _, ns = ...
 -- chain hashes: { type, index, threshold, progress, level }. `type` ships as its
 -- enum NUMBER (Enum.WeeklyRewardChestThresholdType), never a string (§3.15). The
 -- vault_progress change event (diff on progress increase) is folded in below.
+--
+-- Skipped on Forever (ns.skipped.great_vault = "game") and without C_WeeklyRewards
+-- ("api"); Snapshot.Capture then chains `greatvault` as empty.
 -- ===========================================================================
+
+if ns.Game == "forever" or not C_WeeklyRewards then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.great_vault = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 local function scan()
 	local activities = {}

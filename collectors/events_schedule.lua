@@ -16,7 +16,16 @@ local _, ns = ...
 -- scheduler only reports the future, so an expired startTime never recurs.
 -- Ongoing is keyed by UTC day-bucket (§3.2, shared via ns.DailyDedup) so a
 -- multi-day event re-emits once per day.
+--
+-- Skipped on Forever (ns.skipped.events_schedule = "game") and without
+-- C_EventScheduler ("api").
 -- ===========================================================================
+
+if ns.Game == "forever" or not C_EventScheduler then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.events_schedule = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 -- Persistent per-character store: areaPoiID -> { startTime -> true }. A relog
 -- doesn't re-ship an occurrence already seen; a genuinely new occurrence

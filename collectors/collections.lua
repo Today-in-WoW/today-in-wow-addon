@@ -32,6 +32,8 @@ local _, ns = ...
 -- coroutine loop; first-ever decor results emit collection_observed for the
 -- existing chest contents (upper-bound time — the API can't give us the precise
 -- acquisition moment for already-owned decor).
+--
+-- On Forever decor is skipped (ns.skipped.decor = "game"); the other five run unchanged.
 -- ===========================================================================
 
 local owned = {}       -- cat -> { id = true }; dedup, seeded from the checkpoint
@@ -212,7 +214,14 @@ local function achievementCount()
 	return select(2, GetNumCompletedAchievements()) or 0
 end
 
+-- Forever has no housing: decor never counts or scans there.
+if ns.Game == "forever" then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.decor = "game"
+end
+
 local function decorCount()
+	if ns.Game == "forever" then return nil end
 	if not (C_HousingCatalog and C_HousingCatalog.GetDecorTotalOwnedCount) then return nil end
 	return (C_HousingCatalog.GetDecorTotalOwnedCount()) or 0
 end
@@ -489,6 +498,7 @@ end
 -- collect / rebaseline_requested re-ships decor wholesale instead of emitting an
 -- observed row per existing chest item.
 local function decorScan(force)
+	if ns.Game == "forever" then return end
 	local col = ns.account and ns.account.collections
 	if not (col and C_HousingCatalog and C_HousingCatalog.CreateCatalogSearcher) then return end
 

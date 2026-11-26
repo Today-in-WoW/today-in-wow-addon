@@ -27,7 +27,16 @@ local _, ns = ...
 -- tree once per login (chunked on the coroutine runner §4c) and re-READS the
 -- cache on QUESTLINE_UPDATE (debounced) as replies stream in — natural map
 -- navigation keeps firing that event, giving free incremental re-reads.
+--
+-- Skipped on Forever (ns.skipped.quest_lines = "game") and without C_QuestInfoSystem
+-- ("api"), which processAvailable needs to classify each line.
 -- ===========================================================================
+
+if ns.Game == "forever" or not C_QuestInfoSystem then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.quest_lines = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 local fallbackStore = {}   -- used only before ns.char binds (pre-login); per-session
 

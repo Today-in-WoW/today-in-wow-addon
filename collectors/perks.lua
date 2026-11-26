@@ -24,7 +24,16 @@ local _, ns = ...
 -- fake 0/1000) — and the first update that carries data folds itself into THIS
 -- session's snapshot via Snapshot.Recapture, the §3.7 professions late-data pattern.
 -- Trader's Tender itself is NOT collected here: it is currency 2032 in §3.12.
+--
+-- Skipped on Forever (ns.skipped.perks = "game") and without C_PerksActivities
+-- ("api"); Snapshot.Capture then chains `perks` as empty.
 -- ===========================================================================
+
+if ns.Game == "forever" or not C_PerksActivities then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.perks = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 local function read()
 	local A = C_PerksActivities

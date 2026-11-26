@@ -31,7 +31,16 @@ local _, ns = ...
 --    rating. Writing the wrong spec silently overwrites another spec's real rating.
 --    Breadth across all 40 specs is the nightly ladder scan's job (§2.1); this is depth
 --    on the specs the player actually plays.
+--
+-- Skipped on Forever (ns.skipped.ratings = "game") and without GetPersonalRatedInfo
+-- ("api"); Snapshot.Capture then chains `ratings` as empty.
 -- ===========================================================================
+
+if ns.Game == "forever" or not GetPersonalRatedInfo then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.ratings = ns.Game == "forever" and "game" or "api"
+	return ns
+end
 
 -- In-game bracket index → the API's `bracket.id`, which is what the backend stores.
 -- Read off ConquestFrame's own frames (`v.bracketIndex`), so these are Blizzard's values
