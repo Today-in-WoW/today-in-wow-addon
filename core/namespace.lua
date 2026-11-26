@@ -13,12 +13,33 @@ local addonName, ns = ...
 -- Fix: init TiWDB + bind ns.account in ADDON_LOADED (below), which fires after our
 -- files load AND TiWDB is restored, and before PLAYER_LOGIN. The ns.* tables live
 -- on the addon namespace (never replaced by WoW), so they stay at file scope.
+--
+-- One codebase runs on retail and the Forever client:
+--   ns.Game      "forever" or "mainline", from the WOW_PROJECT_* constants (file
+--                scope: they are client constants, not SavedVariables).
+--   ns.charKey() the TiWDB.characters key: retail "Name-Realm"; Forever
+--                "Name-Surname" from UnitFullName, else "Name-Realm".
+--   ns.skipped   name -> "game" | "api" for modules that did not register here.
+--   Markers written at ADDON_LOADED: TiWDB.game = ns.Game, and TiWDB.region =
+--   GetCurrentRegionName() upper-cased (nil when missing, non-string or "").
 -- ===========================================================================
 
 ns.SCHEMA_VERSION = 1
 
+ns.Game = (WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT)
+	and "forever" or "mainline"
+
 ns.collectors = ns.collectors or {}   -- per-collector rescan entry points (/tiw collect)
 ns.tables = ns.tables or {}           -- shipped lookup floors (whitelist, …)
+ns.skipped = ns.skipped or {}         -- module name -> "game" | "api" (not loaded here)
+
+function ns.charKey()
+	if ns.Game == "forever" then
+		local name, surname = UnitFullName("player")
+		if name and surname and surname ~= "" then return name .. "-" .. surname end
+	end
+	return (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+end
 
 -- Breadcrumb log for in-game diagnosis (/tiw log). On `ns`, not TiWDB (see above):
 -- it survives the whole session; only a /reload rebuilds it, which is fine — we dump
@@ -46,4 +67,8 @@ f:SetScript("OnEvent", function(_, _, name)
 	TiWDB.account.collections = TiWDB.account.collections or {}
 	TiWDB.characters = TiWDB.characters or {}
 	ns.account = TiWDB.account            -- account-wide store (collection baselines, §5/§8)
+
+	TiWDB.game = ns.Game
+	local region = GetCurrentRegionName and GetCurrentRegionName()
+	TiWDB.region = (type(region) == "string" and region ~= "") and region:upper() or nil
 end)

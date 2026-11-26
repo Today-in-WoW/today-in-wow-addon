@@ -20,6 +20,16 @@
 --   mock.mapID          mapID returned by C_Map.GetBestMapForUnit("player")
 --   mock.secondsToReset seconds returned by C_DateAndTime.GetSecondsUntilDailyReset
 --   mock.setSecret(v)   mark a value so issecretvalue(v) == true
+--   mock.game           "mainline" or "forever" (default: "forever" when the env
+--                       var TIW_GAME is "forever", else "mainline"). install() sets
+--                       WOW_PROJECT_MAINLINE = 1 and, per game, WOW_PROJECT_ID /
+--                       WOW_PROJECT_CAMELOT (retail 1 / nil, Forever 18 / 18).
+--                       Forever mode also sets the retail-only APIs to nil
+--                       (C_TaskQuest, C_WeeklyRewards, C_MajorFactions, …), so a
+--                       spec that needs one must stub it AFTER install().
+--   mock.region         string returned by GetCurrentRegionName() (default "us")
+--   mock.surname        second value of UnitFullName("player") in Forever mode
+--                       (default "Surname"); retail returns "Realm" there
 -- ===========================================================================
 
 local function build()
@@ -33,6 +43,9 @@ local function build()
 		secrets = {},            -- value -> true
 		timers = {},             -- { due = epoch, fn = fn, ticker = bool, interval = n }
 		frames = {},             -- list of created frame tables
+		game = os.getenv("TIW_GAME") == "forever" and "forever" or "mainline",
+		region = "us",           -- GetCurrentRegionName() return
+		surname = "Surname",     -- UnitFullName second value in Forever mode
 	}
 
 	-- ----- secrets -----------------------------------------------------------
@@ -141,6 +154,20 @@ local function build()
 			GetSecondsUntilDailyReset = function() return mock.secondsToReset end,
 			GetSecondsUntilWeeklyReset = function() return mock.secondsToWeeklyReset end,
 		}
+
+		local forever = mock.game == "forever"
+		_G.WOW_PROJECT_MAINLINE = 1
+		_G.WOW_PROJECT_ID = forever and 18 or 1
+		_G.WOW_PROJECT_CAMELOT = forever and 18 or nil
+		if forever then
+			for _, name in ipairs({ "C_TaskQuest", "C_WeeklyRewards", "C_MajorFactions",
+				"C_PerksActivities", "C_PerksProgram", "C_EventScheduler", "C_QuestLine",
+				"C_HousingCatalog", "C_ChallengeMode", "C_MythicPlus" }) do
+				_G[name] = nil
+			end
+		end
+		_G.GetCurrentRegionName = function() return mock.region end
+		_G.UnitFullName = function() return "Name", (forever and mock.surname or "Realm") end
 	end
 
 	return mock

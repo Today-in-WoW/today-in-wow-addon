@@ -1,4 +1,4 @@
-﻿## Interface: 120105, 120107
+﻿## Interface: 120105, 120107, 16001
 ## X-Min-Interface: 120000
 ## Title: Today in WoW
 ## Notes: Manage lists of goals for collectors and collects world & character data for Today in WoW (todayinwow.com).
