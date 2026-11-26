@@ -31,6 +31,7 @@ local function harness()
 	_G.C_WeeklyRewards = nil
 
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	assert(loadfile("goals/registry.lua"))("TiW", ns)
 	assert(loadfile("goals/store.lua"))("TiW", ns)
 	assert(loadfile("goals/substrate.lua"))("TiW", ns)

@@ -530,7 +530,9 @@ end
 --   byBucket = { [key] = { { id, name, icon, desc, tag, reward, popular,
 --                            scope, require, imported }, ... } },     -- catalog order
 -- }. `imported` = the goal id is in the Store; bucket counts aggregate it.
+-- Empty on Forever: the shipped catalog holds retail goals only.
 function Presenter.catalog()
+	if ns.Game == "forever" then return { buckets = {}, byBucket = {} } end
 	local Catalog = ns.Goals.Catalog
 	local buckets, byKey = {}, {}
 	for _, b in ipairs(Catalog.buckets()) do

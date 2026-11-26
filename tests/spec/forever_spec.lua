@@ -325,3 +325,43 @@ describe("evaluators without their API", function()
 		assert.same({}, ns.Goals.Registry.unsupportedSteps(taskquestGoal()))
 	end)
 end)
+
+-- core/session.lua and goals/substrate.lua key a character with ns.charKey(), so
+-- the session record and the goal substrate name the same Forever character.
+-- The Browse catalog ships retail goals only, so it is empty on Forever.
+describe("one character key on Forever", function()
+	before_each(function() _G.TiWDB = nil end)
+	after_each(function() _G.TiWDB = nil end)
+
+	it("session and substrate use the same Forever key", function()
+		local ns, mock = boot("forever", function()
+			_G.UnitGUID = function() return "Player-1-CAFE" end
+			_G.TiWDB = { settings = { consent = "everything" },
+			             account = { collections = { h = "feedface" } } }
+		end)
+		for _, f in ipairs({ "core/hash.lua", "core/canonical.lua", "core/chain.lua",
+		                     "core/baseline.lua", "core/eventlog.lua", "core/snapshot.lua",
+		                     "core/retention.lua", "core/drain.lua", "core/consent.lua",
+		                     "core/session.lua" }) do
+			assert(loadfile(f))("TodayInWoW", ns)
+		end
+		mock.fireEvent("PLAYER_LOGIN")
+		assert.is_table(TiWDB.characters["Name-Surname"])
+
+		-- Loaded after the login: the substrate's own PLAYER_LOGIN capture needs
+		-- unit APIs this test does not stub.
+		for _, f in ipairs({ "goals/store.lua", "goals/substrate.lua" }) do
+			assert(loadfile(f))("TodayInWoW", ns)
+		end
+		assert.equal("Name-Surname", ns.charKey())
+		assert.equal(ns.charKey(), ns.Goals.Substrate.charKey())
+	end)
+
+	it("Browse catalog is empty on Forever", function()
+		local ns = boot("forever")
+		assert(loadfile("goals/presenter.lua"))("TodayInWoW", ns)
+		local vm = ns.Goals.Presenter.catalog()
+		assert.equal(0, #vm.buckets)
+		assert.is_nil(next(vm.byBucket))
+	end)
+end)

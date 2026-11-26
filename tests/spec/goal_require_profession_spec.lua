@@ -20,6 +20,7 @@ local function offlineHarness()
 	_G.GetRealmName = function() return "Realm" end
 	_G.C_QuestLog = nil
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/substrate.lua",
 		"goals/offline.lua", "goals/evaluators/flag.lua",
@@ -107,6 +108,7 @@ local function captureHarness(withAPI)
 		_G.GetProfessions = nil
 	end
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	for _, f in ipairs({ "goals/registry.lua", "goals/store.lua", "goals/substrate.lua" }) do
 		assert(loadfile(f))("TiW", ns)
 	end
@@ -151,6 +153,7 @@ local function presenterHarness(known)   -- `known` = skillLineID the char has, 
 		_G.GetProfessionInfo = function() return end
 	end
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/substrate.lua",
 		"goals/offline.lua", "goals/presenter.lua", "goals/evaluators/flag.lua",

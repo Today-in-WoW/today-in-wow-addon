@@ -175,6 +175,7 @@ local function loginWith(consent)
 		account = { collections = { h = "feedface" } },
 	}
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	for _, f in ipairs({
 		"core/hash.lua", "core/canonical.lua", "core/chain.lua",
 		"core/baseline.lua", "core/eventlog.lua", "core/snapshot.lua",

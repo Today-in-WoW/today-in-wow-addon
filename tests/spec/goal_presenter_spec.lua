@@ -30,6 +30,7 @@ local function harness(cfg)
 	-- current-char step APIs are NOT used: the presenter takes the current
 	-- char's step results from the threaded flatVM, never re-evaluates them.
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/substrate.lua",
 		"goals/offline.lua", "goals/season.lua", "goals/presenter.lua",

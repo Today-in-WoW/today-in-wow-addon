@@ -104,7 +104,7 @@ end
 
 local function startSession()
 	local guid = UnitGUID("player")
-	local key = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+	local key = ns.charKey()
 	dbg("login: " .. key)
 
 	local rec = TiWDB.characters[key]

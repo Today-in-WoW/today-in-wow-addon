@@ -40,9 +40,9 @@ Substrate.DEBOUNCE = 2   -- seconds; CURRENCY_DISPLAY_UPDATE burst coalescing
 -- sync with the record they rewrite (questSet itself fills a missing entry).
 local questSets = {}
 
--- "Name-Realm" for the logged-in character (same key scheme as TiWDB.characters).
+-- The logged-in character's key: ns.charKey(), the TiWDB.characters key.
 function Substrate.charKey()
-	return UnitName("player") .. "-" .. GetRealmName()
+	return ns.charKey()
 end
 
 -- Active saved-instance rows (reset > 0 only). `now` anchors the absolute

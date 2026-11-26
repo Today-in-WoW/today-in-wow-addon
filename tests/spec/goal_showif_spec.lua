@@ -231,6 +231,7 @@ local function presenterHarness()
 	_G.UnitClass = function() return "Mage", "MAGE" end
 	_G.C_QuestLog = nil
 	local ns = {}
+	ns.charKey = function() return UnitName("player") .. "-" .. GetRealmName() end   -- the retail key core/namespace.lua builds
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/substrate.lua",
 		"goals/offline.lua", "goals/season.lua", "goals/presenter.lua",
