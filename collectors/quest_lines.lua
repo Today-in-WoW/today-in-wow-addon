@@ -28,11 +28,11 @@ local _, ns = ...
 -- cache on QUESTLINE_UPDATE (debounced) as replies stream in — natural map
 -- navigation keeps firing that event, giving free incremental re-reads.
 --
--- Skipped on Forever (ns.skipped.quest_lines = "game") and without C_QuestInfoSystem
--- ("api"), which processAvailable needs to classify each line.
+-- Skipped on Forever (ns.skipped.quest_lines = "game") and without
+-- C_QuestLine.GetAvailableQuestLines ("api").
 -- ===========================================================================
 
-if ns.Game == "forever" or not C_QuestInfoSystem then
+if ns.Game == "forever" or not (C_QuestLine and C_QuestLine.GetAvailableQuestLines) then
 	ns.skipped = ns.skipped or {}
 	ns.skipped.quest_lines = ns.Game == "forever" and "game" or "api"
 	return ns

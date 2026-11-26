@@ -118,7 +118,7 @@ describe("D14 collectors on Forever", function()
 		{ name = "perks",           api = "C_PerksActivities" },
 		{ name = "ratings",         api = "GetPersonalRatedInfo", fn = true },
 		{ name = "events_schedule", api = "C_EventScheduler" },
-		{ name = "quest_lines",     api = "C_QuestInfoSystem" },
+		{ name = "quest_lines",     api = "C_QuestLine" },
 	}
 
 	-- A stub of the module's API: a function, or a table whose every field is a no-op.

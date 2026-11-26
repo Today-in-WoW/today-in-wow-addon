@@ -3537,6 +3537,8 @@ describe("quest_lines §3.18 collector (questline_offered, availability scan + d
 		_G.Enum = _G.Enum or {}
 		_G.Enum.QuestClassification = QC
 		_G.C_QuestInfoSystem = { GetQuestClassification = function(id) return classification[id] end }
+		-- The collector skips itself without this API; the tests drive processAvailable directly.
+		_G.C_QuestLine = { GetAvailableQuestLines = function() return {} end }
 		loadCollector(ns)
 		return ns
 	end
@@ -3547,7 +3549,7 @@ describe("quest_lines §3.18 collector (questline_offered, availability scan + d
 		classification = {}
 	end)
 	after_each(function()
-		_G.C_QuestInfoSystem = nil
+		_G.C_QuestInfoSystem, _G.C_QuestLine = nil, nil
 		if _G.Enum then _G.Enum.QuestClassification = nil end
 	end)
 
