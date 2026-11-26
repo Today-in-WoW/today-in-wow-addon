@@ -9,6 +9,13 @@ local _, ns = ...
 -- Per-character + weekly: live
 -- C_WeeklyRewards.GetActivities for the current char, the substrate `vault`
 -- section for offline alts (with `resets = "weekly"` invalidating a stale snap).
+-- Registers only when C_WeeklyRewards exists; otherwise ns.skipped.vault = "api".
+
+if not C_WeeklyRewards then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.vault = "api"
+	return
+end
 
 -- track string → Enum.WeeklyRewardChestThresholdType field name ("any" = all).
 local TRACK = { raid = "Raid", mythic = "Activities", world = "World" }

@@ -10,6 +10,13 @@ local _, ns = ...
 -- unloaded data answers not-done, which the §3a stale-hides rule absorbs.
 -- params:
 --   quest (questID, required)
+-- Registers only when C_TaskQuest exists; otherwise ns.skipped.taskquest = "api".
+
+if not C_TaskQuest then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.taskquest = "api"
+	return
+end
 
 ns.Goals.Registry.register("taskquest", {
 	events = { "QUEST_LOG_UPDATE" },

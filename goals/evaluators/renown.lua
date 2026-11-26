@@ -5,6 +5,13 @@ local _, ns = ...
 --   faction (majorFactionID, required), level (number, required).
 -- Done when renown level >= level; progress = current / target level.
 -- Classic standings are `reputation`; friendship factions are post-contest.
+-- Registers only when C_MajorFactions exists; otherwise ns.skipped.renown = "api".
+
+if not C_MajorFactions then
+	ns.skipped = ns.skipped or {}
+	ns.skipped.renown = "api"
+	return
+end
 
 ns.Goals.Registry.register("renown", {
 	events = { "MAJOR_FACTION_RENOWN_LEVEL_CHANGED" },

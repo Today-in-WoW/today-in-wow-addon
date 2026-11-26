@@ -2,15 +2,17 @@
 -- Covers validate (§4 strict rules) + evaluate (done paths, progress/max,
 -- API-absent resilience).  Run from the repo root: busted
 
-local function harness()
+-- noAPI: load with C_MajorFactions missing (renown then does not register).
+local function harness(noAPI)
 	local mock = dofile("tests/wow_mock.lua")
 	mock.install()
-	-- C_MajorFactions is NOT installed by the mock; tests stub it per-case.
-	_G.C_MajorFactions = nil
+	-- renown registers only when C_MajorFactions exists at load, so stub it before
+	-- loading; tests stub its functions per case.
+	_G.C_MajorFactions = not noAPI and {} or nil
 	local ns = {}
 	assert(loadfile("goals/registry.lua"))("TiW", ns)
 	assert(loadfile("goals/evaluators/renown.lua"))("TiW", ns)
-	return ns.Goals.Registry.get("renown")
+	return ns.Goals.Registry.get("renown"), ns
 end
 
 -- ---------------------------------------------------------------------------
@@ -211,11 +213,10 @@ describe("renown evaluate — API-unavailable paths (§5 resilience)", function(
 	before_each(function() ev = harness() end)
 	after_each(function() _G.C_MajorFactions = nil end)
 
-	it("C_MajorFactions nil → done=false, stale=true, no error", function()
-		_G.C_MajorFactions = nil
-		local r = ev.evaluate({ faction = 2503, level = 25 })
-		assert.is_false(r.done)
-		assert.is_true(r.stale)
+	it("C_MajorFactions nil at load → renown does not register, skipped = api", function()
+		local def, ns = harness(true)
+		assert.is_nil(def)
+		assert.equal("api", ns.skipped.renown)
 	end)
 
 	it("C_MajorFactions present but GetCurrentRenownLevel absent → done=false, stale=true", function()

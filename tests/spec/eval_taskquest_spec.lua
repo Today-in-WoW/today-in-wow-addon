@@ -3,11 +3,15 @@
 -- world state, charKey ignored; the §3a showif rotation gate's live signal.
 -- Run from the repo root: busted
 
-local function harness()
+-- noAPI: load with C_TaskQuest missing (taskquest then does not register).
+local function harness(noAPI)
+	-- taskquest registers only when C_TaskQuest exists at load, so stub it before
+	-- loading; tests stub IsActive per case.
+	_G.C_TaskQuest = not noAPI and {} or nil
 	local ns = {}
 	assert(loadfile("goals/registry.lua"))("TiW", ns)
 	assert(loadfile("goals/evaluators/taskquest.lua"))("TiW", ns)
-	return ns.Goals.Registry.get("taskquest")
+	return ns.Goals.Registry.get("taskquest"), ns
 end
 
 describe("taskquest evaluator — validate", function()
@@ -32,9 +36,11 @@ describe("taskquest evaluator — evaluate", function()
 		assert.same({ done = false }, def.evaluate({ quest = 93756 }))
 	end)
 
-	it("stale when C_TaskQuest is unavailable — never a guess", function()
+	it("not registered without C_TaskQuest; stale without IsActive — never a guess", function()
+		local missing, ns = harness(true)
+		assert.is_nil(missing)
+		assert.equal("api", ns.skipped.taskquest)
 		local def = harness()
-		assert.same({ done = false, stale = true }, def.evaluate({ quest = 93755 }))
 		_G.C_TaskQuest = {}
 		assert.same({ done = false, stale = true }, def.evaluate({ quest = 93755 }))
 	end)

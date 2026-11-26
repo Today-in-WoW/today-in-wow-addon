@@ -10,6 +10,8 @@ local V1_EVALUATORS = {
 }
 
 local function loadAll()
+	-- renown registers only when C_MajorFactions exists at load.
+	_G.C_MajorFactions = {}
 	local ns = {}
 	assert(loadfile("goals/registry.lua"))("TiW", ns)
 	for _, name in ipairs(V1_EVALUATORS) do

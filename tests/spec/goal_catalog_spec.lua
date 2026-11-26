@@ -22,6 +22,9 @@ local function harness()
 	local mock = dofile("tests/wow_mock.lua")
 	mock.install()
 	_G.TiWDB = nil
+	-- renown, taskquest and vault register only when their retail API exists at
+	-- load; the shipped catalog is checked against the full retail set.
+	_G.C_MajorFactions, _G.C_TaskQuest, _G.C_WeeklyRewards = {}, {}, {}
 	local ns = {}
 	local files = {
 		"goals/registry.lua", "goals/store.lua", "goals/catalog.lua",

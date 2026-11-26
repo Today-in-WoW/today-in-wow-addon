@@ -260,3 +260,68 @@ describe("D14 collectors on Forever", function()
 		assert.has_no.errors(function() wq.set("600") end)
 	end)
 end)
+
+-- renown, taskquest and vault read retail-only APIs. Each registers only when its
+-- API exists; there is no game check (D14). A goal step that uses a missing
+-- evaluator shows as unsupported through Registry.unsupportedSteps.
+describe("evaluators without their API", function()
+	local EVALUATORS = {
+		{ name = "renown",    api = "C_MajorFactions" },
+		{ name = "taskquest", api = "C_TaskQuest" },
+		{ name = "vault",     api = "C_WeeklyRewards" },
+	}
+
+	local function setAPIs(value)
+		return function()
+			for _, e in ipairs(EVALUATORS) do _G[e.api] = value end
+		end
+	end
+
+	local function loadEvaluators(game, setup)
+		local ns = boot(game, setup)
+		assert(loadfile("goals/registry.lua"))("TodayInWoW", ns)
+		for _, e in ipairs(EVALUATORS) do
+			assert.has_no.errors(function()
+				assert(loadfile("goals/evaluators/" .. e.name .. ".lua"))("TodayInWoW", ns)
+			end)
+		end
+		return ns
+	end
+
+	local function taskquestGoal()
+		return { v = 1, id = "tiw:tq", rev = 1, name = "tq", scope = "account",
+		         steps = { { label = "weekly", evaluator = "taskquest", params = { quest = 93755 } } } }
+	end
+
+	before_each(function() _G.TiWDB = nil end)
+	after_each(function()
+		setAPIs(nil)()
+		_G.TiWDB = nil
+	end)
+
+	for _, game in ipairs({ "mainline", "forever" }) do
+		for _, e in ipairs(EVALUATORS) do
+			it(game .. ": " .. e.name .. " does not register and records api when " .. e.api .. " is missing", function()
+				local ns = loadEvaluators(game, setAPIs(nil))
+				assert.is_nil(ns.Goals.Registry.get(e.name))
+				assert.equal("api", ns.skipped[e.name])
+			end)
+
+			it(game .. ": " .. e.name .. " registers when " .. e.api .. " is present", function()
+				local ns = loadEvaluators(game, setAPIs({}))
+				assert.is_table(ns.Goals.Registry.get(e.name))
+				assert.is_nil(ns.skipped[e.name])
+			end)
+		end
+	end
+
+	it("a goal step that uses taskquest is unsupported without C_TaskQuest", function()
+		local ns = loadEvaluators("forever", setAPIs(nil))
+		assert.same({ 1 }, ns.Goals.Registry.unsupportedSteps(taskquestGoal()))
+	end)
+
+	it("the same step is supported when C_TaskQuest is present", function()
+		local ns = loadEvaluators("forever", setAPIs({}))
+		assert.same({}, ns.Goals.Registry.unsupportedSteps(taskquestGoal()))
+	end)
+end)

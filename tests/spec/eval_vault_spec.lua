@@ -13,12 +13,15 @@ local KEY = "Alt-Realm"
 local ENUM = { WeeklyRewardChestThresholdType = { Raid = 1, Activities = 3, World = 6 } }
 local RAID, MYTHIC, WORLD = 1, 3, 6
 
-local function harness()
+-- noAPI: load with C_WeeklyRewards missing (vault then does not register).
+local function harness(noAPI)
 	local mock = dofile("tests/wow_mock.lua")
 	mock.install(); mock.now = NOW
 	_G.TiWDB = nil
 	_G.Enum = ENUM
-	_G.C_WeeklyRewards = nil
+	-- vault registers only when C_WeeklyRewards exists at load, so stub it before
+	-- loading; tests stub GetActivities per case.
+	_G.C_WeeklyRewards = not noAPI and {} or nil
 	local ns = {}
 	for _, f in ipairs({
 		"goals/registry.lua", "goals/store.lua", "goals/substrate.lua",
@@ -111,10 +114,11 @@ describe("vault.evaluate — live", function()
 		assert.is_false(ev(ns).evaluate({ track = "raid", slots = 2, ilvl = 600 }).done)
 	end)
 
-	it("C_WeeklyRewards nil / GetActivities nil → stale", function()
+	it("C_WeeklyRewards nil → not registered; GetActivities nil → stale", function()
+		local missing = harness(true)
+		assert.is_nil(ev(missing))
+		assert.equal("api", missing.skipped.vault)
 		local ns = harness()
-		_G.C_WeeklyRewards = nil
-		assert.is_true(ev(ns).evaluate({ track = "raid" }).stale)
 		_G.C_WeeklyRewards = {}
 		assert.is_true(ev(ns).evaluate({ track = "raid" }).stale)
 	end)
