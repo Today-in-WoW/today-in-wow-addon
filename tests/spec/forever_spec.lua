@@ -144,7 +144,14 @@ describe("D14 collectors on Forever", function()
 		ns.account = { collections = {} }
 		ns.session = { snapshot = { tail = "00000000" }, session_tail = "00000000",
 		               events = {}, next_seq = 1 }
-		return ns
+		return ns, mock
+	end
+
+	-- How many mock frames have registered `event`.
+	local function framesFor(mock, event)
+		local n = 0
+		for _, fr in ipairs(mock.frames) do if fr._events[event] then n = n + 1 end end
+		return n
 	end
 
 	-- Count every way a collector can register work at load: name -> calls.
@@ -202,7 +209,9 @@ describe("D14 collectors on Forever", function()
 
 		it(m.name .. " records api when its API is missing on retail", function()
 			local ns = bootCore("mainline", function() _G[m.api] = nil end)
+			local calls = countRegistrations(ns)
 			loadCollector(ns, m.name)
+			assert.same({}, calls)
 			assert.is_nil(ns.collectors[m.name])
 			assert.equal("api", ns.skipped[m.name])
 		end)
@@ -210,7 +219,7 @@ describe("D14 collectors on Forever", function()
 
 	it("decor is skipped on Forever; mounts still scan", function()
 		local searches, counts = 0, 0
-		local ns = bootCore("forever", function()
+		local ns, mock = bootCore("forever", function()
 			_G.C_HousingCatalog = {
 				GetDecorTotalOwnedCount = function() counts = counts + 1; return 3 end,
 				CreateCatalogSearcher = function() searches = searches + 1; return {} end,
@@ -229,6 +238,14 @@ describe("D14 collectors on Forever", function()
 		assert.equal(0, counts)
 		assert.equal("game", ns.skipped.decor)
 		assert.same({ 100 }, ns.account.collections.mounts)
+		assert.equal(0, framesFor(mock, "HOUSE_DECOR_ADDED_TO_CHEST"))
+		assert.equal(1, framesFor(mock, "NEW_MOUNT_ADDED"))
+	end)
+
+	it("decor registers its live event on retail", function()
+		local ns, mock = bootCore("mainline")
+		loadCollector(ns, "collections")
+		assert.equal(1, framesFor(mock, "HOUSE_DECOR_ADDED_TO_CHEST"))
 	end)
 
 	it("Snapshot.Capture chains greatvault, perks and ratings as empty on Forever", function()

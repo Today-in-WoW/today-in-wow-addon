@@ -689,7 +689,7 @@ f:RegisterEvent("NEW_PET_ADDED")
 f:RegisterEvent("TRANSMOG_COLLECTION_SOURCE_ADDED")
 f:RegisterEvent("ACHIEVEMENT_EARNED")
 f:RegisterEvent("CRITERIA_EARNED")
-f:RegisterEvent("HOUSE_DECOR_ADDED_TO_CHEST")
+if ns.Game ~= "forever" then f:RegisterEvent("HOUSE_DECOR_ADDED_TO_CHEST") end -- D14: no decor on Forever
 f:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if not ns.session then return end
 

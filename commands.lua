@@ -203,6 +203,10 @@ local PROBE_APIS = {
 	"Settings.CreateSlider", "Settings.CreateSliderOptions", "Settings.OpenToCategory",
 	"Settings.RegisterAddOnCategory", "Settings.RegisterProxySetting",
 	"Settings.RegisterVerticalLayoutCategory", "Settings.VarType",
+	-- Two entries below show as missing on a healthy retail client too, so they are
+	-- not a port gap: CovenantMissionFrame lives in the load-on-demand
+	-- Blizzard_GarrisonUI, and bare GetAddOnMetadata (a fallback for
+	-- C_AddOns.GetAddOnMetadata) is gone from modern retail.
 	"BNConnected", "BNGetInfo", "CovenantMissionFrame", "CreateColor", "CreateFrame",
 	"CreateSettingsListSectionHeaderInitializer", "debugprofilestop", "GameTooltip",
 	"GetAchievementCriteriaInfo", "GetAchievementCriteriaInfoByID", "GetAchievementInfo",
