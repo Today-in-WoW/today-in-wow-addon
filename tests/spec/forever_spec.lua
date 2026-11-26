@@ -365,3 +365,127 @@ describe("one character key on Forever", function()
 		assert.is_nil(next(vm.byBucket))
 	end)
 end)
+
+describe("Util.missingAPIs", function()
+	it("returns the dotted names that resolve to nil, in input order", function()
+		dofile("tests/wow_mock.lua").install()
+		local ns = {}
+		assert(loadfile("core/util.lua"))("TodayInWoW", ns)
+		assert.same({ "C_Fake.Fn", "NoSuchGlobal" },
+			ns.Util.missingAPIs({ "C_Fake.Fn", "GetServerTime", "NoSuchGlobal", "C_Timer.After" }))
+	end)
+
+	it("counts a nil namespace and a nil function in a present namespace", function()
+		dofile("tests/wow_mock.lua").install()
+		local ns = {}
+		assert(loadfile("core/util.lua"))("TodayInWoW", ns)
+		assert.same({ "C_Fake.Fn", "C_Timer.NoSuchFn" },
+			ns.Util.missingAPIs({ "C_Fake.Fn", "C_Timer.NoSuchFn", "C_Timer.After" }))
+	end)
+end)
+
+-- /tiw on a Forever client: the D14 collectors are absent (the setup of "D14
+-- collectors on Forever"), and commands.lua runs through SlashCmdList.TIW.
+describe("/tiw on Forever", function()
+	local PREFIX = "^|cff66ccff%[TiW%]|r "
+	local printed, realPrint
+
+	local function bootForever()
+		local mock = dofile("tests/wow_mock.lua")
+		mock.game = "forever"
+		mock.install()
+		_G.UnitName = function() return "Name" end
+		_G.GetRealmName = function() return "Realm" end
+		local ns = {}
+		for _, f in ipairs({ "core/hash.lua", "core/canonical.lua", "core/chain.lua",
+		                     "core/baseline.lua", "core/eventlog.lua", "core/util.lua",
+		                     "core/secrets.lua", "core/scheduler.lua", "core/snapshot.lua",
+		                     "core/namespace.lua" }) do
+			assert(loadfile(f))("TodayInWoW", ns)
+		end
+		mock.fireEvent("ADDON_LOADED", "TodayInWoW")
+		ns.session = { snapshot = { tail = "00000000" }, session_tail = "00000000",
+		               events = {}, next_seq = 1 }
+		for _, name in ipairs({ "world_quests", "delves", "great_vault", "prey_quests", "perks",
+		                        "ratings", "events_schedule", "quest_lines", "collections" }) do
+			assert(loadfile("collectors/" .. name .. ".lua"))("TodayInWoW", ns)
+		end
+		assert(loadfile("goals/registry.lua"))("TodayInWoW", ns)
+		for _, name in ipairs({ "flag", "renown", "taskquest", "vault" }) do
+			assert(loadfile("goals/evaluators/" .. name .. ".lua"))("TodayInWoW", ns)
+		end
+		_G.SlashCmdList = {}
+		assert(loadfile("commands.lua"))("TodayInWoW", ns)
+		return ns
+	end
+
+	-- The printed lines without the "[TiW] " prefix.
+	local function run(msg)
+		printed = {}
+		SlashCmdList.TIW(msg)
+		return printed
+	end
+
+	local function find(lines, pattern)
+		for i, l in ipairs(lines) do if l:find(pattern) then return i, l end end
+	end
+
+	before_each(function()
+		_G.TiWDB = nil
+		realPrint = _G.print
+		_G.print = function(s) printed[#printed + 1] = (tostring(s):gsub(PREFIX, "")) end
+	end)
+
+	after_each(function()
+		_G.print = realPrint
+		_G.TiWDB, _G.SlashCmdList, _G.SLASH_TIW1 = nil, nil, nil
+		_G.UnitName, _G.GetRealmName, _G.GetBuildInfo = nil, nil, nil
+		dofile("tests/wow_mock.lua").install()
+	end)
+
+	it("probe reports game, markers, key, skipped modules, evaluators and missing APIs first", function()
+		bootForever()
+		_G.GetBuildInfo = function() return "1.60.1", "71139", "Nov 1 2026", 16001 end
+		local lines = run("probe")
+		assert.equal("game=forever project=18 interface=16001", lines[1])
+		assert.equal("TiWDB.game=forever TiWDB.region=US", lines[2])
+		assert.equal("UnitFullName=Name,Surname GetRealmName=Realm key=Name-Surname", lines[3])
+		assert.truthy(lines[4]:find("^skipped: "))
+		assert.truthy(lines[4]:find("world_quests(game)", 1, true))
+		assert.truthy(lines[4]:find("decor(game)", 1, true))
+		assert.truthy(lines[4]:find("renown(api)", 1, true))
+		assert.truthy(lines[4]:find("^skipped: decor%(game%) delves%(game%) events_schedule%(game%)"))
+		local ie, evals = find(lines, "^evaluators: ")
+		assert.equal("evaluators: flag", evals)
+		local im = find(lines, "^missing APIs %(%d+%): ")
+		assert.truthy(im > ie)
+		-- the list wraps, so search the missing line and its continuations
+		local missing = " " .. table.concat(lines, " ", im) .. " "
+		assert.truthy(missing:find(" C_TaskQuest.GetQuestsOnMap ", 1, true))
+		assert.is_nil(missing:find(" GetServerTime ", 1, true))
+		-- the existing count lines follow the new ones
+		local ia = find(lines, "^appear ")
+		assert.truthy(ia > im)
+		for _, l in ipairs(lines) do assert.truthy(#l <= 200, l) end
+	end)
+
+	it("probe says none for empty skipped and missing lists", function()
+		local ns = bootForever()
+		for k in pairs(ns.skipped) do ns.skipped[k] = nil end
+		ns.Util.missingAPIs = function() return {} end
+		local lines = run("probe")
+		assert.equal("skipped: none", lines[4])
+		assert.truthy(find(lines, "^missing APIs: none$"))
+	end)
+
+	for cmd, pattern in pairs({ wq = "world_quests not loaded", ql = "quest_lines not loaded",
+	                            perks = "C_PerksActivities unavailable", collect = "re%-baselining" }) do
+		it("/tiw " .. cmd .. " prints one short line and raises no error", function()
+			bootForever()
+			local lines
+			assert.has_no.errors(function() lines = run(cmd) end)
+			assert.equal(1, #lines)
+			assert.truthy(lines[1]:find(pattern))
+		end)
+	end
+end)

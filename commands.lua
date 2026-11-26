@@ -133,11 +133,131 @@ local function trace(seq, kind, data, h)
 		.. ns.Canonical.payload(data) .. "  |cff808080" .. tostring(h) .. "|r")
 end
 
--- Throwaway research probe (/tiw probe): dumps the cheap collection-count APIs the
+-- Every WoW API global and C_* function the addon reads. /tiw probe lists the ones
+-- this client lacks, which is the port check on Forever. Built from the Forever API
+-- inventory and checked against the addon source; keep it in step when a module
+-- starts calling a new API.
+local PROBE_APIS = {
+	"C_AddOns.GetAddOnMetadata",
+	"C_AreaPoiInfo.GetAreaPOIInfo", "C_AreaPoiInfo.GetAreaPOISecondsLeft",
+	"C_AreaPoiInfo.GetDelvesForMap",
+	"C_Calendar.GetDayEvent", "C_Calendar.GetMonthInfo", "C_Calendar.GetNumDayEvents",
+	"C_Calendar.OpenCalendar",
+	"C_ChallengeMode.GetOverallDungeonScore",
+	"C_Covenants.GetActiveCovenantID",
+	"C_CurrencyInfo.GetCurrencyIDFromLink", "C_CurrencyInfo.GetCurrencyInfo",
+	"C_CurrencyInfo.GetCurrencyLink", "C_CurrencyInfo.GetCurrencyListInfo",
+	"C_CurrencyInfo.GetCurrencyListLink", "C_CurrencyInfo.GetCurrencyListSize",
+	"C_CurrencyInfo.GetFactionGrantedByCurrency",
+	"C_DateAndTime.GetCurrentCalendarTime", "C_DateAndTime.GetSecondsUntilDailyReset",
+	"C_DateAndTime.GetSecondsUntilWeeklyReset",
+	"C_EventScheduler.GetOngoingEvents", "C_EventScheduler.GetScheduledEvents",
+	"C_EventScheduler.HasData", "C_EventScheduler.RequestEvents",
+	"C_GossipInfo.GetActiveQuests", "C_GossipInfo.GetAvailableQuests",
+	"C_GossipInfo.GetFriendshipReputation", "C_GossipInfo.GetFriendshipReputationRanks",
+	"C_HousingCatalog.CreateCatalogSearcher", "C_HousingCatalog.GetDecorTotalOwnedCount",
+	"C_Item.GetItemInfo", "C_Item.GetItemInfoInstant", "C_Item.RequestLoadItemDataByID",
+	"C_Loot.IsLegacyLootModeEnabled",
+	"C_MajorFactions.GetCurrentRenownLevel", "C_MajorFactions.GetMajorFactionData",
+	"C_Map.GetBestMapForUnit", "C_Map.GetMapChildrenInfo", "C_Map.GetMapInfo",
+	"C_MountJournal.GetMountIDs", "C_MountJournal.GetMountInfoByID",
+	"C_MythicPlus.RequestMapInfo",
+	"C_PartyInfo.GetLootMethod",
+	"C_PerksActivities.GetPerksActivitiesInfo",
+	"C_PerksActivities.GetPerksActivitiesPendingCompletion",
+	"C_PerksProgram.GetCurrencyAmount", "C_PerksProgram.GetPendingChestRewards",
+	"C_PerksProgram.RequestPendingChestRewards",
+	"C_PetJournal.GetNumCollectedInfo", "C_PetJournal.GetNumPets", "C_PetJournal.GetPetInfoByIndex",
+	"C_PetJournal.GetPetInfoByPetID",
+	"C_QuestInfoSystem.GetQuestClassification", "C_QuestInfoSystem.GetQuestRewardSpells",
+	"C_QuestInfoSystem.HasQuestRewardSpells",
+	"C_QuestLine.GetAvailableQuestLines", "C_QuestLine.RequestQuestLinesForMap",
+	"C_QuestLog.DoesQuestAwardReputationWithFaction", "C_QuestLog.GetAllCompletedQuestIDs",
+	"C_QuestLog.GetInfo", "C_QuestLog.GetNumQuestLogEntries", "C_QuestLog.GetQuestRewardCurrencies",
+	"C_QuestLog.GetQuestTagInfo", "C_QuestLog.GetTitleForQuestID", "C_QuestLog.IsOnQuest",
+	"C_QuestLog.IsQuestFlaggedCompleted", "C_QuestLog.IsQuestFlaggedCompletedOnAccount",
+	"C_QuestLog.QuestContainsFirstTimeRepBonusForPlayer", "C_QuestLog.ReadyForTurnIn",
+	"C_QuestLog.RequestLoadQuestByID",
+	"C_Reputation.GetFactionDataByID", "C_Reputation.GetFactionDataByIndex",
+	"C_Reputation.GetFactionParagonInfo", "C_Reputation.GetNumFactions",
+	"C_Reputation.IsMajorFaction",
+	"C_Secrets.HasSecretRestrictions",
+	"C_Spell.GetSpellInfo", "C_Spell.GetSpellLink",
+	"C_TaskQuest.GetQuestInfoByQuestID", "C_TaskQuest.GetQuestsOnMap",
+	"C_TaskQuest.GetQuestTimeLeftMinutes", "C_TaskQuest.GetQuestTimeLeftSeconds",
+	"C_TaskQuest.IsActive", "C_TaskQuest.RequestPreloadRewardData",
+	"C_Timer.After",
+	"C_ToyBox.GetNumToys", "C_ToyBox.GetToyFromIndex", "C_ToyBox.GetToyInfo",
+	"C_TradeSkillUI.GetAllProfessionTradeSkillLines", "C_TradeSkillUI.GetProfessionInfoBySkillLineID",
+	"C_TransmogCollection.GetAllAppearanceSources", "C_TransmogCollection.GetCategoryAppearances",
+	"C_TransmogCollection.GetCategoryCollectedCount", "C_TransmogCollection.GetCategoryTotal",
+	"C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance",
+	"C_UIWidgetManager.GetAllWidgetsBySetID",
+	"C_UIWidgetManager.GetTextWithStateWidgetVisualizationInfo",
+	"C_WeeklyRewards.GetActivities",
+	"Enum.HousingCatalogEntryType", "Enum.ItemClass", "Enum.ItemMiscellaneousSubclass",
+	"Enum.LootSlotType", "Enum.QuestClassification", "Enum.TransmogCollectionTypeMeta",
+	"Enum.UIMapType", "Enum.UIWidgetVisualizationType", "Enum.WeeklyRewardChestThresholdType",
+	"EventUtil.ContinueOnAddOnLoaded",
+	"Settings.CreateCheckbox", "Settings.CreateControlTextContainer", "Settings.CreateDropdown",
+	"Settings.CreateSlider", "Settings.CreateSliderOptions", "Settings.OpenToCategory",
+	"Settings.RegisterAddOnCategory", "Settings.RegisterProxySetting",
+	"Settings.RegisterVerticalLayoutCategory", "Settings.VarType",
+	"BNConnected", "BNGetInfo", "CovenantMissionFrame", "CreateColor", "CreateFrame",
+	"CreateSettingsListSectionHeaderInitializer", "debugprofilestop", "GameTooltip",
+	"GetAchievementCriteriaInfo", "GetAchievementCriteriaInfoByID", "GetAchievementInfo",
+	"GetAchievementNumCriteria", "GetActiveQuestID", "GetAddOnMetadata", "GetAvailableQuestID",
+	"GetAverageItemLevel", "GetBuildInfo", "GetCategoryList", "GetCategoryNumAchievements",
+	"GetCurrentArenaSeason", "GetCurrentRegionName", "GetCursorPosition", "GetInstanceInfo",
+	"GetLFGDungeonInfo", "GetLootSlotInfo", "GetLootSlotLink", "GetLootSlotType", "GetLootSourceInfo",
+	"GetNumActiveQuests", "GetNumAvailableQuests", "GetNumCompletedAchievements", "GetNumLootItems",
+	"GetNumQuestLogRewards", "GetNumSavedInstances", "GetNumSavedWorldBosses", "GetPersonalRatedInfo",
+	"GetProfessionInfo", "GetProfessions", "GetQuestID", "GetQuestLogRewardInfo",
+	"GetQuestLogRewardMoney", "GetRealmName", "GetSavedInstanceEncounterInfo", "GetSavedInstanceInfo",
+	"GetSavedWorldBossInfo", "GetServerTime", "GetSpecialization", "GetSpecializationInfo", "GetTime",
+	"GetTotalAchievementPoints", "HaveQuestData", "HaveQuestRewardData", "hooksecurefunc",
+	"InCombatLockdown", "IsInInstance", "issecretvalue", "IsShiftKeyDown",
+	"LOCALIZED_CLASS_NAMES_MALE", "MinimalSliderWithSteppersMixin", "Minimap", "PlayerHasToy",
+	"RAID_CLASS_COLORS", "RequestRaidInfo", "RequestRatedInfo", "RequestTimePlayed", "SlashCmdList",
+	"StaticPopup_Show", "StaticPopupDialogs", "UIParent", "UISpecialFrames", "UnitClass",
+	"UnitFactionGroup", "UnitFullName", "UnitGUID", "UnitIsDead", "UnitIsTapDenied", "UnitLevel",
+	"UnitName", "UnitRace", "UnitSex", "UnitThreatSituation", "WorldMapFrame",
+}
+
+-- head, then the items space-separated; a list that would pass ~200 characters
+-- continues on the next chat line. An empty list prints "<head> none".
+local function outList(head, items)
+	if #items == 0 then out(head .. " none"); return end
+	local line = head
+	for _, s in ipairs(items) do
+		if #line + 1 + #s > 200 then out(line); line = " " end
+		line = line .. " " .. s
+	end
+	out(line)
+end
+
+-- /tiw probe: the port check (which game, which markers, which key, what skipped
+-- itself, what this client lacks), then the cheap collection-count APIs the
 -- count-gated reconcile depends on (data_storage §3.4). Run it COLD at login, then
 -- again after opening each collection UI and toggling a wardrobe filter, to confirm
 -- each count is stable and filter-independent before it becomes a login gate.
 local function probe()
+	out("game=" .. tostring(ns.Game) .. " project=" .. tostring(WOW_PROJECT_ID)
+		.. " interface=" .. tostring(GetBuildInfo and select(4, GetBuildInfo())))
+	out("TiWDB.game=" .. tostring(TiWDB and TiWDB.game) .. " TiWDB.region=" .. tostring(TiWDB and TiWDB.region))
+	local name, second
+	if UnitFullName then name, second = UnitFullName("player") end
+	out("UnitFullName=" .. tostring(name) .. "," .. tostring(second)
+		.. " GetRealmName=" .. tostring(GetRealmName and GetRealmName()) .. " key=" .. ns.charKey())
+
+	local skipped = {}
+	for mod, why in pairs(ns.skipped or {}) do skipped[#skipped + 1] = mod .. "(" .. why .. ")" end
+	table.sort(skipped)
+	outList("skipped:", skipped)
+	outList("evaluators:", (ns.Goals and ns.Goals.Registry) and ns.Goals.Registry.names() or {})
+	local missing = ns.Util.missingAPIs(PROBE_APIS)
+	outList(#missing > 0 and ("missing APIs (" .. #missing .. "):") or "missing APIs:", missing)
+
 	-- Achievements — Wowhead gates on the 2nd return (completed); points is a backup.
 	if GetNumCompletedAchievements then
 		local total, completed = GetNumCompletedAchievements()

@@ -20,6 +20,9 @@ ns = ns or {}
 --       per-character "seen since the last daily reset" set; wipes store.set when
 --       the daily bucket flips. The caller owns membership (id present == seen);
 --       store = { set, bucket } persisted on ns.char so a /reload doesn't re-emit.
+--   ns.Util.missingAPIs(names) -> {string}   /tiw probe
+--       names are dotted global paths ("C_TaskQuest.GetQuestsOnMap",
+--       "GetServerTime"); returns the ones that resolve to nil, in input order.
 -- ===========================================================================
 
 local floor = math.floor
@@ -41,6 +44,20 @@ function Util.npcIDFromGUID(guid)
 	local kind, id = guid:match("^(%a+)%-%d+%-%d+%-%d+%-%d+%-(%d+)%-")
 	if kind ~= "Creature" and kind ~= "Vehicle" then return nil end
 	return tonumber(id)
+end
+
+-- A nil namespace and a nil member of a present namespace both count as missing.
+function Util.missingAPIs(names)
+	local missing = {}
+	for _, name in ipairs(names) do
+		local v = _G
+		for part in name:gmatch("[^%.]+") do
+			v = type(v) == "table" and v[part] or nil
+			if v == nil then break end
+		end
+		if v == nil then missing[#missing + 1] = name end
+	end
+	return missing
 end
 
 local Bucket = {}
