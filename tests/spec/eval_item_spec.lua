@@ -3,8 +3,9 @@
 -- Run from the repo root: busted
 --
 -- Live: bag count from C_Item.GetItemCount (or the global GetItemCount); with
--- bank=true the bank half is the current character's substrate snapshot
--- (inventory.bank), never a live read — the bank is readable only while open.
+-- bank=true the bank half is read live while the bank is open (Substrate.liveBank())
+-- and comes from the current character's substrate snapshot (inventory.bank)
+-- while it is closed.
 -- Offline: the stored substrate's inventory (bags + bank).
 -- Bank never captured (inventory.bank nil) answers the bag count with stale=true.
 

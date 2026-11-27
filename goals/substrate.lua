@@ -393,9 +393,14 @@ for _, ev in ipairs({
 	"PLAYER_LOGIN", "UPDATE_INSTANCE_INFO", "BOSS_KILL", "CURRENCY_DISPLAY_UPDATE",
 	"QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED", "UNIT_QUEST_LOG_CHANGED",
 	"WEEKLY_REWARDS_UPDATE",
-	"BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
 }) do
 	f:RegisterEvent(ev)
+end
+-- Inventory events: pcall so a client that rejects one cannot raise at load.
+for _, ev in ipairs({
+	"BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
+}) do
+	pcall(f.RegisterEvent, f, ev)
 end
 f:SetScript("OnEvent", function(_, event, arg1)
 	if event == "PLAYER_LOGIN" then
@@ -413,6 +418,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
 		bankOpen = true
 		Substrate.captureBank()
 	elseif event == "BANKFRAME_CLOSED" then
+		Substrate.captureBank()   -- flush a change still inside the debounce; unreadable keeps the old snapshot
 		bankOpen = false
 	elseif event == "PLAYERBANKSLOTS_CHANGED" then
 		if bankOpen then debounce("bank", captureBankIfOpen) end

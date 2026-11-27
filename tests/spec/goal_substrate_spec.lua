@@ -579,6 +579,25 @@ describe("Substrate inventory", function()
 		assert.same({ [ORE] = 41, [HERB] = 7 }, inventory(ns).bank)
 	end)
 
+	it("a bank change in the last debounce window before the bank closes is kept", function()
+		local ns, mock = harness()
+		fillBags(mock)
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		-- deposit 20 of the 22 ORE in the bags: bags 22 -> 2, bank 41 -> 61
+		mock.bags[0] = { [4] = slot(CLOTH, 1) }
+		mock.bags[1] = { slot(ORE, 2) }
+		mock.bank[6] = { slot(ORE, 60) }
+		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 2)
+		mock.fireEvent("BAG_UPDATE_DELAYED")
+		mock.advance(1)   -- inside the debounce
+		mock.fireEvent("BANKFRAME_CLOSED")
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 1)
+		assert.equal(2, inventory(ns).bags[ORE])
+		assert.same({ [ORE] = 61, [HERB] = 7 }, inventory(ns).bank)
+	end)
+
 	it("a bank slot change before any bank visit leaves bank nil", function()
 		local ns, mock = harness()
 		fillBank(mock)
