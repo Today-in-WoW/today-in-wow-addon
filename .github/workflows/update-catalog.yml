@@ -1,7 +1,8 @@
 name: Update catalog
 
-# Regenerate goals/catalog.lua from the Goal Repository DB (via the public
-# catalog-export API) and open a PR when it changed. The catalog changes when
+# Regenerate goals/catalog.lua and goals/catalog_forever.lua (one catalog per game)
+# from the Goal Repository DB (via the public catalog-export API) and open a PR when
+# either changed. The catalog changes when
 # curators edit goals on the site, not when code is pushed — so this runs on a
 # schedule (and on demand), NOT on push.
 #
@@ -37,14 +38,16 @@ jobs:
         id: regen
         run: |
           API="${{ github.event.inputs.api_base || 'https://www.todayinwow.com/api' }}"
-          echo "Probing $API/goals/catalog-export"
-          if ! curl -fsS "$API/goals/catalog-export" -o /tmp/export.json; then
+          echo "Probing $API/goals/catalog-export (mainline and forever)"
+          if ! curl -fsS "$API/goals/catalog-export" -o /tmp/export.json \
+             || ! curl -fsS "$API/goals/catalog-export?game=forever" -o /tmp/export_forever.json; then
             echo "catalog-export not reachable — nothing to do."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           python3 tools/build_catalog.py --file /tmp/export.json
-          if git diff --quiet -- goals/catalog.lua; then
+          python3 tools/build_catalog.py --file /tmp/export_forever.json --game forever
+          if git diff --quiet -- goals/catalog.lua goals/catalog_forever.lua; then
             echo "Catalog already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -60,7 +63,9 @@ jobs:
           commit-message: "chore: regenerate goal catalog from DB"
           title: "chore: regenerate goal catalog from DB"
           body: |
-            Automated regeneration of `goals/catalog.lua` from the Goal Repository
-            DB via `GET /api/goals/catalog-export` (`tools/build_catalog.py`).
+            Automated regeneration of `goals/catalog.lua` and
+            `goals/catalog_forever.lua` from the Goal Repository DB via
+            `GET /api/goals/catalog-export` and `?game=forever`
+            (`tools/build_catalog.py`).
           labels: automated
           delete-branch: true

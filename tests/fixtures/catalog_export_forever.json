@@ -1,0 +1,32 @@
+{
+  "data": {
+    "activities": [
+      {"key": "endgame", "label": "Endgame", "icon": "Interface\\Icons\\Item_SparkofRagnoros", "description": "Sparks, Voidcores, and weekly choice events.", "sort": 1},
+      {"key": "reputation", "label": "Reputation", "icon": "Interface\\Icons\\Achievement_Reputation_01", "description": "Weekly quests and renown grinds across the worlds.", "sort": 2}
+    ],
+    "goals": [
+      {
+        "definition": {
+          "v": 1,
+          "id": "forever-fixture-honor",
+          "rev": 1,
+          "name": "Forever fixture: Honor",
+          "scope": "account",
+          "steps": [
+            {"label": "Earn Honor", "evaluator": "currency", "params": {"currency": 1792, "amount": 25000}}
+          ]
+        },
+        "activity": "endgame",
+        "expansion": null,
+        "reward": [],
+        "cadence": [],
+        "tag": null,
+        "reward_text": null,
+        "fl_shipped": true,
+        "fl_popular": false,
+        "fl_published": true,
+        "sort": 0
+      }
+    ]
+  }
+}

@@ -345,7 +345,7 @@ end)
 
 -- core/session.lua and goals/substrate.lua key a character with ns.charKey(), so
 -- the session record and the goal substrate name the same Forever character.
--- The Browse catalog ships retail goals only, so it is empty on Forever.
+-- Browse lists the Forever catalog on Forever (the presenter has no game gate).
 describe("one character key on Forever", function()
 	before_each(function() _G.TiWDB = nil end)
 	after_each(function() _G.TiWDB = nil end)
@@ -374,12 +374,25 @@ describe("one character key on Forever", function()
 		assert.equal(ns.charKey(), ns.Goals.Substrate.charKey())
 	end)
 
-	it("Browse catalog is empty on Forever", function()
-		local ns = boot("forever")
-		assert(loadfile("goals/presenter.lua"))("TodayInWoW", ns)
+	it("Browse catalog lists the Forever catalog on Forever", function()
+		local ns, mock = boot("forever")
+		for _, f in ipairs({ "goals/registry.lua", "goals/store.lua", "goals/presenter.lua" }) do
+			assert(loadfile(f))("TodayInWoW", ns)
+		end
+		mock.fireEvent("ADDON_LOADED", "TodayInWoW")   -- the Store binds TiWDB.goals here
+		-- Stands in for the generated goals/catalog_forever.lua: one bucket, one entry
+		-- (same shape as tests/fixtures/catalog_export_forever.json).
+		ns.Goals.Catalog = {
+			buckets = function() return { { key = "endgame", label = "Endgame" } } end,
+			entries = function()
+				return { { bucket = "endgame", goal = { v = 1, id = "forever-fixture-honor",
+					name = "Forever fixture: Honor", scope = "account" } } }
+			end,
+		}
 		local vm = ns.Goals.Presenter.catalog()
-		assert.equal(0, #vm.buckets)
-		assert.is_nil(next(vm.byBucket))
+		assert.equal(1, #vm.buckets)
+		assert.equal(1, vm.buckets[1].total)
+		assert.equal("forever-fixture-honor", vm.byBucket.endgame[1].id)
 	end)
 end)
 

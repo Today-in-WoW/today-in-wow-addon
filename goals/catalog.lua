@@ -1,4 +1,5 @@
 local _, ns = ...
+if ns.Game == "forever" then return end
 
 -- ===========================================================================
 -- goals/catalog.lua  ·  GENERATED -- do not edit by hand.
@@ -8,6 +9,7 @@ local _, ns = ...
 -- goals + activity buckets into the addon's Catalog contract. Curate goals on the
 -- site, then regenerate -- .github/workflows/update-catalog.yml does this on a
 -- schedule and opens a PR. See docs (goal-repository-plan.md §8) in the site repo.
+-- The guard above keeps this file inert on the other game: one catalog per game.
 -- ===========================================================================
 
 ns.Goals = ns.Goals or {}

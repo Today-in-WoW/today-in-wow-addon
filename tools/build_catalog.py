@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""build_catalog.py -- generate this addon's goals/catalog.lua from the site DB.
+"""build_catalog.py -- generate this addon's goal catalogs from the site DB.
 
 The Goal Repository DB (production) is the source of truth. This tool fetches
 GET /api/goals/catalog-export (an ingest-shaped manifest of the fl_shipped goals +
 activity buckets) and serializes it to goals/catalog.lua, matching the addon's
 Catalog contract (buckets() / entries() / goal()).
+
+One catalog ships per game. `--game forever` fetches ?game=forever and writes
+goals/catalog_forever.lua. Each generated file starts with a guard on ns.Game, so
+only the file for the running game sets ns.Goals.Catalog.
 
 The bridge: production is where curators edit goals, but the addon ships from here.
 So we read production over HTTP (default) -- no DB access needed. The
@@ -16,6 +20,7 @@ Usage:
   python tools/build_catalog.py --url http://localhost:8000/api   # a dev backend
   python tools/build_catalog.py --file export.json    # serialize a saved manifest
   python tools/build_catalog.py --out goals/catalog.lua
+  python tools/build_catalog.py --game forever        # writes goals/catalog_forever.lua
 """
 import argparse, json, os, re, urllib.request
 
@@ -75,16 +80,31 @@ def _lua_map(d, indent):
     return "{\n" + body + ",\n" + ("\t" * indent) + "}"
 
 
+GAMES = {
+    "mainline": {
+        "out": os.path.join("goals", "catalog.lua"),
+        "query": "",
+        "guard": 'if ns.Game == "forever" then return end',
+    },
+    "forever": {
+        "out": os.path.join("goals", "catalog_forever.lua"),
+        "query": "?game=forever",
+        "guard": 'if ns.Game ~= "forever" then return end',
+    },
+}
+
 HEADER = '''local _, ns = ...
+%(guard)s
 
 -- ===========================================================================
--- goals/catalog.lua  ·  GENERATED -- do not edit by hand.
+-- goals/%(name)s  ·  GENERATED -- do not edit by hand.
 --
 -- Emitted from the Goal Repository DB by tools/build_catalog.py, which fetches
--- GET /api/goals/catalog-export from production and serializes the fl_shipped
+-- GET /api/goals/catalog-export%(query)s from production and serializes the fl_shipped
 -- goals + activity buckets into the addon's Catalog contract. Curate goals on the
 -- site, then regenerate -- .github/workflows/update-catalog.yml does this on a
 -- schedule and opens a PR. See docs (goal-repository-plan.md §8) in the site repo.
+-- The guard above keeps this file inert on the other game: one catalog per game.
 -- ===========================================================================
 
 ns.Goals = ns.Goals or {}
@@ -123,19 +143,24 @@ def _entry(g):
     return e
 
 
-def build_catalog_lua(manifest):
+def build_catalog_lua(manifest, game="mainline"):
+    cfg = GAMES[game]
+    header = HEADER % {"guard": cfg["guard"], "query": cfg["query"],
+                       "name": os.path.basename(cfg["out"])}
     buckets = [_bucket(a) for a in manifest.get("activities", [])]
     entries = [_entry(g) for g in manifest.get("goals", [])]
-    out = [HEADER]
+    out = [header]
     out.append("\nfunction Catalog.buckets()\n\treturn " + _lua_array(buckets, 1) + "\nend\n")
     out.append("\nfunction Catalog.entries()\n\treturn " + _lua_array(entries, 1) + "\nend\n")
     out.append(FOOTER)
     return "".join(out)
 
 
-def fetch_manifest(api_url):
-    url = api_url.rstrip("/") + "/goals/catalog-export"
-    with urllib.request.urlopen(url) as r:
+def fetch_manifest(api_url, game="mainline"):
+    url = api_url.rstrip("/") + "/goals/catalog-export" + GAMES[game]["query"]
+    # The default Python-urllib agent gets a 403 from the production edge.
+    req = urllib.request.Request(url, headers={"User-Agent": "tiw-build-catalog"})
+    with urllib.request.urlopen(req) as r:
         return json.loads(r.read().decode("utf-8"))["data"]
 
 
@@ -143,17 +168,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default=DEFAULT_API, help="backend API base (default production)")
     ap.add_argument("--file", help="read manifest JSON from a file instead of HTTP")
-    ap.add_argument("--out", help="output path (default goals/catalog.lua)")
+    ap.add_argument("--game", choices=sorted(GAMES), default="mainline",
+                    help="which game's catalog to build (default mainline)")
+    ap.add_argument("--out", help="output path (default goals/catalog.lua, or "
+                                  "goals/catalog_forever.lua for --game forever)")
     args = ap.parse_args()
 
     if args.file:
         manifest = json.load(open(args.file, encoding="utf-8"))
         manifest = manifest.get("data", manifest)
     else:
-        manifest = fetch_manifest(args.url)
+        manifest = fetch_manifest(args.url, args.game)
 
-    lua = build_catalog_lua(manifest)
-    dest = args.out or os.path.join(REPO, "goals", "catalog.lua")
+    lua = build_catalog_lua(manifest, args.game)
+    dest = args.out or os.path.join(REPO, GAMES[args.game]["out"])
     open(dest, "w", encoding="utf-8", newline="\n").write(lua)
     print("wrote %s: %d buckets, %d goals"
           % (dest, len(manifest.get("activities", [])), len(manifest.get("goals", []))))
