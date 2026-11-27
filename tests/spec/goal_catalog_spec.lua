@@ -288,8 +288,11 @@ end
 
 -- The first code line after `local _, ns = ...`.
 local function guardLine(path)
+	local fh = assert(io.open(path, "r"))   -- closed here: Windows cannot delete an open file
+	local text = fh:read("*a")
+	fh:close()
 	local seenHeader = false
-	for line in io.lines(path) do
+	for line in text:gmatch("[^\r\n]*") do
 		if seenHeader and line:match("%S") then return line end
 		if line == "local _, ns = ..." then seenHeader = true end
 	end
