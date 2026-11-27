@@ -414,6 +414,53 @@ describe("Util.missingAPIs", function()
 	end)
 end)
 
+describe("Util.rejectedEvents", function()
+	local realCreateFrame
+
+	-- Frames the helper creates, with RegisterEvent raising for the `bad` names.
+	local function stubFrames(bad)
+		local frames = {}
+		local create = _G.CreateFrame
+		_G.CreateFrame = function(...)
+			local f = create(...)
+			local register = f.RegisterEvent
+			f.RegisterEvent = function(self, ev)
+				if bad[ev] then error("unknown event " .. ev) end
+				register(self, ev)
+			end
+			frames[#frames + 1] = f
+			return f
+		end
+		return frames
+	end
+
+	before_each(function()
+		dofile("tests/wow_mock.lua").install()
+		realCreateFrame = _G.CreateFrame
+	end)
+
+	after_each(function() _G.CreateFrame = realCreateFrame end)
+
+	it("returns the names that raise, in input order, and leaves no event registered", function()
+		local frames = stubFrames({ BANKFRAME_OPENED = true, NO_SUCH_EVENT = true })
+		local ns = {}
+		assert(loadfile("core/util.lua"))("TodayInWoW", ns)
+		assert.same({ "BANKFRAME_OPENED", "NO_SUCH_EVENT" },
+			ns.Util.rejectedEvents({ "BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED",
+				"NO_SUCH_EVENT" }))
+		assert.truthy(#frames > 0)
+		for _, f in ipairs(frames) do assert.same({}, f._events) end
+	end)
+
+	it("returns an empty list when every event registers", function()
+		local frames = stubFrames({})
+		local ns = {}
+		assert(loadfile("core/util.lua"))("TodayInWoW", ns)
+		assert.same({}, ns.Util.rejectedEvents({ "BAG_UPDATE_DELAYED", "BANKFRAME_OPENED" }))
+		for _, f in ipairs(frames) do assert.same({}, f._events) end
+	end)
+end)
+
 -- /tiw on a Forever client: the D14 collectors are absent (the setup of "D14
 -- collectors on Forever"), and commands.lua runs through SlashCmdList.TIW.
 describe("/tiw on Forever", function()
@@ -497,6 +544,54 @@ describe("/tiw on Forever", function()
 		local ia = find(lines, "^appear ")
 		assert.truthy(ia > im)
 		for _, l in ipairs(lines) do assert.truthy(#l <= 200, l) end
+	end)
+
+	it("probe names C_Container.GetContainerNumSlots as missing when C_Container is gone", function()
+		bootForever()
+		_G.C_Container = nil
+		local lines = run("probe")
+		local im = find(lines, "^missing APIs %(%d+%): ")
+		local missing = " " .. table.concat(lines, " ", im) .. " "
+		assert.truthy(missing:find(" C_Container.GetContainerNumSlots ", 1, true))
+		assert.truthy(missing:find(" C_Container.GetContainerItemInfo ", 1, true))
+		assert.is_nil(missing:find(" C_Item.GetItemCount ", 1, true))
+	end)
+
+	it("probe names the item-count and bag-index entries as missing when they are gone", function()
+		bootForever()
+		_G.C_Item.GetItemCount, _G.GetItemCount, _G.Enum.BagIndex = nil, nil, nil
+		local lines = run("probe")
+		local im = find(lines, "^missing APIs %(%d+%): ")
+		local missing = " " .. table.concat(lines, " ", im) .. " "
+		assert.truthy(missing:find(" C_Item.GetItemCount ", 1, true))
+		assert.truthy(missing:find(" GetItemCount ", 1, true))
+		assert.truthy(missing:find(" Enum.BagIndex ", 1, true))
+	end)
+
+	it("probe prints rejected events (n) when the client refuses an inventory event", function()
+		bootForever()
+		local create = _G.CreateFrame
+		_G.CreateFrame = function(...)
+			local f = create(...)
+			local register = f.RegisterEvent
+			f.RegisterEvent = function(self, ev)
+				if ev == "BANKFRAME_OPENED" then error("unknown event") end
+				register(self, ev)
+			end
+			return f
+		end
+		local lines = run("probe")
+		local im = find(lines, "^missing APIs ")
+		local ir, line = find(lines, "^rejected events")
+		assert.equal("rejected events (1): BANKFRAME_OPENED", line)
+		assert.truthy(ir > im)
+		assert.truthy(ir < find(lines, "^appear "))
+	end)
+
+	it("probe says rejected events: none when the client accepts every inventory event", function()
+		bootForever()
+		local lines = run("probe")
+		assert.truthy(find(lines, "^rejected events: none$"))
 	end)
 
 	it("probe says none for empty skipped and missing lists", function()

@@ -23,6 +23,10 @@ ns = ns or {}
 --   ns.Util.missingAPIs(names) -> {string}   /tiw probe
 --       names are dotted global paths ("C_TaskQuest.GetQuestsOnMap",
 --       "GetServerTime"); returns the ones that resolve to nil, in input order.
+--   ns.Util.rejectedEvents(names) -> {string}   /tiw probe
+--       registers each event on a scratch frame under pcall and returns the ones
+--       the client refuses (an unknown event raises), in input order. The frame
+--       is left with no event registered.
 -- ===========================================================================
 
 local floor = math.floor
@@ -58,6 +62,16 @@ function Util.missingAPIs(names)
 		if v == nil then missing[#missing + 1] = name end
 	end
 	return missing
+end
+
+function Util.rejectedEvents(names)
+	local rejected = {}
+	local frame = CreateFrame("Frame")
+	for _, name in ipairs(names) do
+		if not pcall(frame.RegisterEvent, frame, name) then rejected[#rejected + 1] = name end
+	end
+	frame:UnregisterAllEvents()
+	return rejected
 end
 
 local Bucket = {}

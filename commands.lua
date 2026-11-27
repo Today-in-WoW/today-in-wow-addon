@@ -144,6 +144,7 @@ local PROBE_APIS = {
 	"C_Calendar.GetDayEvent", "C_Calendar.GetMonthInfo", "C_Calendar.GetNumDayEvents",
 	"C_Calendar.OpenCalendar",
 	"C_ChallengeMode.GetOverallDungeonScore",
+	"C_Container.GetContainerItemInfo", "C_Container.GetContainerNumSlots",
 	"C_Covenants.GetActiveCovenantID",
 	"C_CurrencyInfo.GetCurrencyIDFromLink", "C_CurrencyInfo.GetCurrencyInfo",
 	"C_CurrencyInfo.GetCurrencyLink", "C_CurrencyInfo.GetCurrencyListInfo",
@@ -156,7 +157,7 @@ local PROBE_APIS = {
 	"C_GossipInfo.GetActiveQuests", "C_GossipInfo.GetAvailableQuests",
 	"C_GossipInfo.GetFriendshipReputation", "C_GossipInfo.GetFriendshipReputationRanks",
 	"C_HousingCatalog.CreateCatalogSearcher", "C_HousingCatalog.GetDecorTotalOwnedCount",
-	"C_Item.GetItemInfo", "C_Item.GetItemInfoInstant", "C_Item.RequestLoadItemDataByID",
+	"C_Item.GetItemCount", "C_Item.GetItemInfo", "C_Item.GetItemInfoInstant", "C_Item.RequestLoadItemDataByID",
 	"C_Loot.IsLegacyLootModeEnabled",
 	"C_MajorFactions.GetCurrentRenownLevel", "C_MajorFactions.GetMajorFactionData",
 	"C_Map.GetBestMapForUnit", "C_Map.GetMapChildrenInfo", "C_Map.GetMapInfo",
@@ -195,6 +196,7 @@ local PROBE_APIS = {
 	"C_UIWidgetManager.GetAllWidgetsBySetID",
 	"C_UIWidgetManager.GetTextWithStateWidgetVisualizationInfo",
 	"C_WeeklyRewards.GetActivities",
+	"Enum.BagIndex", "Enum.BagIndex.CharacterBankTab_1",
 	"Enum.HousingCatalogEntryType", "Enum.ItemClass", "Enum.ItemMiscellaneousSubclass",
 	"Enum.LootSlotType", "Enum.QuestClassification", "Enum.TransmogCollectionTypeMeta",
 	"Enum.UIMapType", "Enum.UIWidgetVisualizationType", "Enum.WeeklyRewardChestThresholdType",
@@ -206,14 +208,15 @@ local PROBE_APIS = {
 	-- Two entries below show as missing on a healthy retail client too, so they are
 	-- not a port gap: CovenantMissionFrame lives in the load-on-demand
 	-- Blizzard_GarrisonUI, and bare GetAddOnMetadata (a fallback for
-	-- C_AddOns.GetAddOnMetadata) is gone from modern retail.
+	-- C_AddOns.GetAddOnMetadata) is gone from modern retail. GetItemCount is the
+	-- fallback for C_Item.GetItemCount and is in neither client's API docs.
 	"BNConnected", "BNGetInfo", "CovenantMissionFrame", "CreateColor", "CreateFrame",
 	"CreateSettingsListSectionHeaderInitializer", "debugprofilestop", "GameTooltip",
 	"GetAchievementCriteriaInfo", "GetAchievementCriteriaInfoByID", "GetAchievementInfo",
 	"GetAchievementNumCriteria", "GetActiveQuestID", "GetAddOnMetadata", "GetAvailableQuestID",
 	"GetAverageItemLevel", "GetBuildInfo", "GetCategoryList", "GetCategoryNumAchievements",
 	"GetCurrentArenaSeason", "GetCurrentRegionName", "GetCursorPosition", "GetInstanceInfo",
-	"GetLFGDungeonInfo", "GetLootSlotInfo", "GetLootSlotLink", "GetLootSlotType", "GetLootSourceInfo",
+	"GetItemCount", "GetLFGDungeonInfo", "GetLootSlotInfo", "GetLootSlotLink", "GetLootSlotType", "GetLootSourceInfo",
 	"GetNumActiveQuests", "GetNumAvailableQuests", "GetNumCompletedAchievements", "GetNumLootItems",
 	"GetNumQuestLogRewards", "GetNumSavedInstances", "GetNumSavedWorldBosses", "GetPersonalRatedInfo",
 	"GetProfessionInfo", "GetProfessions", "GetQuestID", "GetQuestLogRewardInfo",
@@ -226,6 +229,12 @@ local PROBE_APIS = {
 	"StaticPopup_Show", "StaticPopupDialogs", "UIParent", "UISpecialFrames", "UnitClass",
 	"UnitFactionGroup", "UnitFullName", "UnitGUID", "UnitIsDead", "UnitIsTapDenied", "UnitLevel",
 	"UnitName", "UnitRace", "UnitSex", "UnitThreatSituation", "WorldMapFrame",
+}
+
+-- Events the inventory substrate and the item evaluator register. /tiw probe lists
+-- the ones this client refuses.
+local PROBE_EVENTS = {
+	"BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
 }
 
 -- head, then the items space-separated; a list that would pass ~200 characters
@@ -261,6 +270,8 @@ local function probe()
 	outList("evaluators:", (ns.Goals and ns.Goals.Registry) and ns.Goals.Registry.names() or {})
 	local missing = ns.Util.missingAPIs(PROBE_APIS)
 	outList(#missing > 0 and ("missing APIs (" .. #missing .. "):") or "missing APIs:", missing)
+	local rejected = ns.Util.rejectedEvents(PROBE_EVENTS)
+	outList(#rejected > 0 and ("rejected events (" .. #rejected .. "):") or "rejected events:", rejected)
 
 	-- Achievements — Wowhead gates on the 2nd return (completed); points is a backup.
 	if GetNumCompletedAchievements then
