@@ -255,11 +255,28 @@ local function loadFor(game, files)
 	return ns
 end
 
+-- The Python interpreter name: CI (ubuntu) has python3, a Windows dev box has python.
+local pythonCmd
+local function python()
+	if pythonCmd then return pythonCmd end
+	for _, cmd in ipairs({ "python3", "python" }) do
+		local p = io.popen(cmd .. " --version 2>&1")
+		local out = p and p:read("*a") or ""
+		if p then p:close() end
+		if out:match("^Python 3") then pythonCmd = cmd; return cmd end
+	end
+	error("no Python 3 interpreter found: tried `python3 --version` and `python --version`")
+end
+
+-- Temp files written by buildFromFixture; the describe block removes them.
+local built = {}
+
 -- Run tools/build_catalog.py over the fixture for `game`; return the output path.
 local function buildFromFixture(game)
 	local dir = os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
 	local out = dir .. "/tiw_catalog_" .. game .. "_" .. os.time() .. ".lua"
-	local p = assert(io.popen('python tools/build_catalog.py --file ' .. FIXTURE ..
+	built[#built + 1] = out
+	local p = assert(io.popen(python() .. ' tools/build_catalog.py --file ' .. FIXTURE ..
 		' --game ' .. game .. ' --out "' .. out .. '" 2>&1'))
 	local log = p:read("*a")
 	p:close()
@@ -279,7 +296,11 @@ local function guardLine(path)
 end
 
 describe("one catalog per game", function()
-	after_each(function() _G.TiWDB = nil end)
+	after_each(function()
+		_G.TiWDB = nil
+		for _, f in ipairs(built) do os.remove(f) end
+		built = {}
+	end)
 
 	it("lists catalog_forever.lua right after catalog.lua in the .toc", function()
 		local prev
