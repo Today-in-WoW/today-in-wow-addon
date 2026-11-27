@@ -131,6 +131,34 @@ describe("item.evaluate live", function()
 			ev(ns).evaluate({ item = ITEM, amount = 30, bank = true }))
 	end)
 
+	it("counts an open bank live, so a deposit shows before the substrate rescan", function()
+		local ns, mock = harness()
+		local tab1 = _G.Enum.BagIndex.CharacterBankTab_1
+		seed(ns, ME, { bags = {} })
+		mock.bags[0] = { [1] = { itemID = ITEM, stackCount = 10 } }
+		mock.bank[tab1] = { [1] = { itemID = ITEM, stackCount = 25 } }
+		mock.fireEvent("BANKFRAME_OPENED")          -- snapshot: bank 25
+		-- Deposit 5: bags 5, bank 30. No timer has run, so the snapshot still says 25.
+		mock.bags[0] = { [1] = { itemID = ITEM, stackCount = 5 } }
+		mock.bank[tab1] = { [1] = { itemID = ITEM, stackCount = 30 } }
+		assert.equal(25, ns.Goals.Substrate.get(ME).inventory.bank[ITEM])
+		assert.same({ done = true, progress = 35, max = 30 },
+			ev(ns).evaluate({ item = ITEM, amount = 30, bank = true }))
+	end)
+
+	it("uses the snapshot once the bank is closed", function()
+		local ns, mock = harness()
+		local tab1 = _G.Enum.BagIndex.CharacterBankTab_1
+		seed(ns, ME, { bags = {} })
+		mock.bags[0] = { [1] = { itemID = ITEM, stackCount = 10 } }
+		mock.bank[tab1] = { [1] = { itemID = ITEM, stackCount = 25 } }
+		mock.fireEvent("BANKFRAME_OPENED")
+		mock.fireEvent("BANKFRAME_CLOSED")
+		mock.bank[tab1] = {}                        -- closed bank reads empty
+		assert.same({ done = true, progress = 35, max = 30 },
+			ev(ns).evaluate({ item = ITEM, amount = 30, bank = true }))
+	end)
+
 	it("counts through the global GetItemCount when C_Item and C_Container are absent", function()
 		local ns, mock = harness()
 		bagsHold(mock, 12)

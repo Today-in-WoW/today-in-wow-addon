@@ -35,7 +35,8 @@ local _, ns = ...
 -- The exception is `inventory = { bags = {[itemID] = count} | nil, bank = {[itemID]
 -- = count} | nil }` (distinct item ids, not slots; bags = Backpack..ReagentBag,
 -- bank = character bank tabs only), which is nil-able on purpose: bags is nil when
--- C_Container is missing (the item evaluator then counts live), bank is nil until
+-- C_Container is missing (the item evaluator then counts live for the logged-in
+-- character and answers stale for an offline alt), bank is nil until
 -- the character has opened its bank once (nil = unknown, never 0). The bank
 -- snapshot survives login captures and bag rescans untouched.
 -- ===========================================================================
@@ -375,6 +376,14 @@ end
 -- changes; BAG_UPDATE_DELAYED rescans the bank too while it is open, in case a
 -- tab-to-tab move does not raise it (not observable from the docs).
 local bankOpen = false
+-- Current bank counts read from the client right now, nothing written; nil while
+-- the bank is closed or unreadable (callers fall back to the snapshot). Lets the
+-- item evaluator see a deposit before the debounced rescan has run.
+function Substrate.liveBank()
+	if not bankOpen then return nil end
+	return scanBank()
+end
+
 local function captureBankIfOpen()
 	if bankOpen then Substrate.captureBank() end
 end

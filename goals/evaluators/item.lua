@@ -8,10 +8,12 @@ local _, ns = ...
 -- progress = count, max = amount.
 --
 -- Live: the bag count comes from C_Item.GetItemCount (or the global
--- GetItemCount). The bank is readable only while it is open, so `bank = true`
--- adds the current character's substrate snapshot (inventory.bank), the same
--- snapshot an offline alt is answered from. A bank never captured (nil) is
--- unknown, not zero: the answer is the bag count with stale = true.
+-- GetItemCount). The bank is readable only while it is open: with `bank = true`
+-- the open bank is counted from the client right then (Substrate.liveBank), so a
+-- deposit shows before the debounced substrate rescan. A closed bank adds the
+-- current character's substrate snapshot (inventory.bank), the same snapshot an
+-- offline alt is answered from. A bank never captured (nil) is unknown, not
+-- zero: the answer is the bag count with stale = true.
 -- Offline: the stored substrate's inventory.bags (+ inventory.bank).
 
 local function result(count, params, stale)
@@ -53,6 +55,7 @@ ns.Goals.Registry.register("item", {
 		end
 		if not params.bank then return result(count, params) end
 		local bank = inv and inv.bank
+		if not charKey then bank = (Substrate and Substrate.liveBank()) or bank end
 		if not bank then return result(count, params, true) end
 		return result(count + (bank[params.item] or 0), params)
 	end,
