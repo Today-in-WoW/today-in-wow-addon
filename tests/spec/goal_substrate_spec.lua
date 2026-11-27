@@ -511,7 +511,7 @@ describe("Substrate inventory", function()
 		mock.fireEvent("PLAYER_LOGIN")
 		mock.fireEvent("BANKFRAME_OPENED")
 		mock.fireEvent("BANKFRAME_CLOSED")
-		mock.bank = {}   -- a closed bank reads empty; that must not reach the record
+		mock.bank = { [6] = { slot(ORE, 999) } }   -- a scan now would differ from the snapshot
 		mock.bags[1] = { slot(ORE, 10) }
 		mock.fireEvent("BAG_UPDATE_DELAYED")
 		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
@@ -572,7 +572,7 @@ describe("Substrate inventory", function()
 		mock.fireEvent("BANKFRAME_OPENED")
 		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 1)
 		mock.fireEvent("BANKFRAME_CLOSED")
-		mock.bank = {}
+		mock.bank = { [6] = { slot(ORE, 999) } }   -- a scan now would differ from the snapshot
 		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)   -- the queued rescan fires closed
 		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 2)
 		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)

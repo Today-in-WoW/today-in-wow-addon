@@ -32,7 +32,9 @@ local _, ns = ...
 --
 -- Capture never errors: a missing API namespace produces an empty section
 -- (lockouts = {}, currencies = {}, quests = ""), seen is always stamped.
--- The exception is `inventory`, which is nil-able on purpose: bags is nil when
+-- The exception is `inventory = { bags = {[itemID] = count} | nil, bank = {[itemID]
+-- = count} | nil }` (distinct item ids, not slots; bags = Backpack..ReagentBag,
+-- bank = character bank tabs only), which is nil-able on purpose: bags is nil when
 -- C_Container is missing (the item evaluator then counts live), bank is nil until
 -- the character has opened its bank once (nil = unknown, never 0). The bank
 -- snapshot survives login captures and bag rescans untouched.
