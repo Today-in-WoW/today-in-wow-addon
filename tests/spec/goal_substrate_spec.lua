@@ -444,3 +444,173 @@ describe("Substrate event wiring", function()
 		assert.equal("93784,112", ns.Goals.Store.getSubstrate(KEY).questsActive)
 	end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- inventory: bags at login and on BAG_UPDATE_DELAYED, bank while it is open
+-- ---------------------------------------------------------------------------
+
+describe("Substrate inventory", function()
+	local ORE, HERB, CLOTH = 2770, 2447, 2589
+
+	local function slot(itemID, stackCount) return { itemID = itemID, stackCount = stackCount } end
+
+	-- Two bags and the reagent bag: ORE spans two slots in the backpack and one
+	-- slot in bag 1, so the sum only comes out right if both walks add up.
+	local function fillBags(mock)
+		mock.bags[0] = { slot(ORE, 15), slot(ORE, 5), [4] = slot(CLOTH, 1) }   -- slot 3 empty
+		mock.bags[1] = { slot(ORE, 2) }
+		mock.bags[5] = { slot(HERB, 30) }
+	end
+
+	-- The last character bank tab differs per client (6 tabs retail, 9 Forever).
+	local function lastBankTab(mock)
+		return 6 + (mock.game == "forever" and 8 or 5)
+	end
+
+	local function fillBank(mock)
+		mock.bank[6] = { slot(ORE, 40) }
+		mock.bank[lastBankTab(mock)] = { slot(HERB, 7), slot(ORE, 1) }
+		-- First account (warband) bank tab: out of scope, must never be counted.
+		mock.bank[lastBankTab(mock) + 1] = { slot(CLOTH, 99) }
+	end
+
+	local function inventory(ns)
+		return ns.Goals.Store.getSubstrate(KEY).inventory
+	end
+
+	it("bag walk sums one item across slots and bags, reagent bag included", function()
+		local ns, mock = harness()
+		fillBags(mock)
+		ns.Goals.Substrate.capture()
+		assert.same({ [ORE] = 22, [HERB] = 30, [CLOTH] = 1 }, inventory(ns).bags)
+	end)
+
+	it("a character that never opened the bank has bank == nil", function()
+		local ns, mock = harness()
+		fillBags(mock)
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		assert.is_nil(inventory(ns).bank)
+	end)
+
+	it("BANKFRAME_OPENED stores the bank by item, over every character tab of this client", function()
+		local ns, mock = harness()
+		fillBags(mock)
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		-- The warband tab (CLOTH 99) is excluded; the last character tab counts.
+		assert.same({ [ORE] = 41, [HERB] = 7 }, inventory(ns).bank)
+		assert.same({ [ORE] = 22, [HERB] = 30, [CLOTH] = 1 }, inventory(ns).bags)
+	end)
+
+	it("a bag change keeps the bank snapshot from the last time the bank was open", function()
+		local ns, mock = harness()
+		fillBags(mock)
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		mock.fireEvent("BANKFRAME_CLOSED")
+		mock.bank = {}   -- a closed bank reads empty; that must not reach the record
+		mock.bags[1] = { slot(ORE, 10) }
+		mock.fireEvent("BAG_UPDATE_DELAYED")
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.equal(30, inventory(ns).bags[ORE])   -- 15 + 5 + 10
+		assert.same({ [ORE] = 41, [HERB] = 7 }, inventory(ns).bank)
+	end)
+
+	it("the next login capture keeps the bank snapshot", function()
+		local ns, mock = harness()
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		mock.bank = {}
+		ns.Goals.Substrate.capture()
+		assert.same({ [ORE] = 41, [HERB] = 7 }, inventory(ns).bank)
+	end)
+
+	it("BAG_UPDATE_DELAYED rescans once per burst, after the debounce", function()
+		local ns, mock = harness()
+		mock.fireEvent("PLAYER_LOGIN")
+		local calls = 0
+		_G.C_Container.GetContainerNumSlots = function() calls = calls + 1; return 0 end
+		mock.fireEvent("BAG_UPDATE_DELAYED")
+		mock.fireEvent("BAG_UPDATE_DELAYED")
+		assert.equal(0, calls)
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.equal(6, calls)   -- backpack, four bags and the reagent bag, once
+	end)
+
+	it("a bank slot change while the bank is open rescans the bank after the debounce", function()
+		local ns, mock = harness()
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		mock.bank[6] = { slot(ORE, 3) }
+		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 1)
+		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 2)
+		assert.equal(41, inventory(ns).bank[ORE])
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.equal(4, inventory(ns).bank[ORE])   -- 3 + 1
+	end)
+
+	it("BAG_UPDATE_DELAYED while the bank is open also rescans the bank (cover for moves the slot event misses)", function()
+		local ns, mock = harness()
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		mock.bank[6] = { slot(ORE, 3) }
+		mock.fireEvent("BAG_UPDATE_DELAYED")
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.equal(4, inventory(ns).bank[ORE])
+	end)
+
+	it("a bank slot change after the bank closed is ignored", function()
+		local ns, mock = harness()
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")
+		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 1)
+		mock.fireEvent("BANKFRAME_CLOSED")
+		mock.bank = {}
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)   -- the queued rescan fires closed
+		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 2)
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.same({ [ORE] = 41, [HERB] = 7 }, inventory(ns).bank)
+	end)
+
+	it("a bank slot change before any bank visit leaves bank nil", function()
+		local ns, mock = harness()
+		fillBank(mock)
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("PLAYERBANKSLOTS_CHANGED", 1)
+		mock.advance(ns.Goals.Substrate.DEBOUNCE + 0.1)
+		assert.is_nil(inventory(ns).bank)
+	end)
+
+	it("a bank that reports no slots at all is not stored as an empty bank", function()
+		local ns, mock = harness()
+		mock.fireEvent("PLAYER_LOGIN")
+		mock.fireEvent("BANKFRAME_OPENED")   -- mock.bank is empty: nothing readable
+		assert.is_nil(inventory(ns).bank)
+	end)
+
+	it("with C_Container absent nothing errors and no bags are stored", function()
+		local ns, mock = harness()
+		_G.C_Container = nil
+		assert.is_true(pcall(ns.Goals.Substrate.capture))
+		assert.is_true(pcall(mock.fireEvent, "BANKFRAME_OPENED"))
+		assert.is_true(pcall(ns.Goals.Substrate.captureBags))
+		assert.is_nil(inventory(ns).bags)
+		assert.is_nil(inventory(ns).bank)
+	end)
+
+	it("captureBags and captureBank are no-ops before any capture", function()
+		local ns, mock = harness()
+		fillBags(mock)
+		fillBank(mock)
+		assert.is_true(pcall(ns.Goals.Substrate.captureBags))
+		assert.is_true(pcall(ns.Goals.Substrate.captureBank))
+		assert.is_nil(ns.Goals.Store.getSubstrate(KEY))
+	end)
+end)

@@ -29,6 +29,7 @@ read_globals = {
 	"C_UIWidgetManager", "C_DateAndTime", "Enum",
 	"WorldMapFrame", "hooksecurefunc", "EventUtil", "CovenantMissionFrame",
 	"C_Item", "C_ToyBox",
+	"C_Container",                             -- goals/substrate.lua: bag and bank inventory scan
 	"GetNumLootItems", "GetLootSlotType", "GetLootSlotLink", "GetLootSlotInfo", "GetLootSourceInfo",
 	"C_PartyInfo", "C_Loot", "IsInInstance",    -- encounter/loot collectors: loot method + legacy-loot + instance check
 	"BNGetInfo", "BNConnected",                 -- core/fingerprint: Battle.net account tag

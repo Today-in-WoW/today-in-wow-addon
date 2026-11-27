@@ -30,6 +30,14 @@
 --   mock.region         string returned by GetCurrentRegionName() (default "us")
 --   mock.surname        second value of UnitFullName("player") in Forever mode
 --                       (default "Surname"); retail returns "Realm" there
+--   mock.bags           bag contents: { [bagIndex] = { [slot] = {itemID=, stackCount=} } }
+--   mock.bank           character bank tab contents, same shape (the mock does not
+--                       model "readable only while the bank is open"; specs empty
+--                       mock.bank to stand in for a closed bank)
+--                       install() publishes Enum.BagIndex (Backpack..ReagentBag 0..5,
+--                       CharacterBankTab_1.. from 6: 6 tabs retail, 9 Forever),
+--                       C_Container.GetContainerNumSlots/GetContainerItemInfo,
+--                       C_Item.GetItemCount and GetItemCount(itemID, includeBank)
 -- ===========================================================================
 
 local function build()
@@ -46,6 +54,8 @@ local function build()
 		game = os.getenv("TIW_GAME") == "forever" and "forever" or "mainline",
 		region = "us",           -- GetCurrentRegionName() return
 		surname = "Surname",     -- UnitFullName second value in Forever mode
+		bags = {},               -- [bagIndex] = { [slot] = {itemID=, stackCount=} }
+		bank = {},               -- character bank tabs, same shape
 	}
 
 	-- ----- secrets -----------------------------------------------------------
@@ -166,6 +176,38 @@ local function build()
 				_G[name] = nil
 			end
 		end
+		-- Bag and bank containers. Indices and tab counts: client API docs, see
+		-- goals/substrate.lua (BagIndexConstantsDocumentation fdid 4870143).
+		local bagIndex = { Backpack = 0, Bag_1 = 1, Bag_2 = 2, Bag_3 = 3, Bag_4 = 4, ReagentBag = 5 }
+		for n = 1, forever and 9 or 6 do bagIndex["CharacterBankTab_" .. n] = 5 + n end
+		_G.Enum = _G.Enum or {}
+		_G.Enum.BagIndex = bagIndex
+		local function container(bag) return mock.bags[bag] or mock.bank[bag] end
+		_G.C_Container = {
+			GetContainerNumSlots = function(bag)
+				local n = 0
+				for slot in pairs(container(bag) or {}) do n = math.max(n, slot) end
+				return n
+			end,
+			GetContainerItemInfo = function(bag, slot)
+				local c = container(bag)
+				return c and c[slot]
+			end,
+		}
+		local function itemCount(itemID, includeBank)
+			local total = 0
+			for _, set in ipairs(includeBank and { mock.bags, mock.bank } or { mock.bags }) do
+				for _, slots in pairs(set) do
+					for _, info in pairs(slots) do
+						if info.itemID == itemID then total = total + info.stackCount end
+					end
+				end
+			end
+			return total
+		end
+		_G.C_Item = _G.C_Item or {}
+		_G.C_Item.GetItemCount = itemCount
+		_G.GetItemCount = itemCount
 		_G.GetCurrentRegionName = function() return mock.region end
 		_G.UnitFullName = function() return "Name", (forever and mock.surname or "Realm") end
 	end

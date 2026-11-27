@@ -20,6 +20,11 @@ local _, ns = ...
 --   QUEST_ACCEPTED / QUEST_REMOVED /  -> questsActive/questsReady re-scan,
 --     UNIT_QUEST_LOG_CHANGED / turn-in    debounced
 --   WEEKLY_REWARDS_UPDATE             -> vault section re-scan, debounced
+--   BAG_UPDATE_DELAYED                -> inventory.bags re-scan, debounced
+--                                        (and inventory.bank too while the bank is open)
+--   BANKFRAME_OPENED                  -> inventory.bank re-scan (bank is readable only
+--                                        while open; BANKFRAME_CLOSED stops the rescans)
+--   PLAYERBANKSLOTS_CHANGED           -> inventory.bank re-scan, debounced, bank open only
 --
 -- Persistence goes through Store.writeSubstrate — store.lua stays the sole
 -- writer of TiWDB.goals. Local functionality: never consent-gated, never
@@ -27,6 +32,10 @@ local _, ns = ...
 --
 -- Capture never errors: a missing API namespace produces an empty section
 -- (lockouts = {}, currencies = {}, quests = ""), seen is always stamped.
+-- The exception is `inventory`, which is nil-able on purpose: bags is nil when
+-- C_Container is missing (the item evaluator then counts live), bank is nil until
+-- the character has opened its bank once (nil = unknown, never 0). The bank
+-- snapshot survives login captures and bag rescans untouched.
 -- ===========================================================================
 
 ns.Goals = ns.Goals or {}
@@ -171,6 +180,62 @@ local function scanVault()
 	return out
 end
 
+-- Bag and bank containers. A snapshot counts distinct item ids, not slots:
+-- { [itemID] = total stackCount }.
+-- Container indices (Enum.BagIndex, BagIndexConstantsDocumentation fdid 4870143,
+-- checked in retail 12.1.5.70961 and Forever wowf 1.60.1.71139):
+--   Backpack 0, Bag_1..Bag_4 1..4, ReagentBag 5 (same in both clients);
+--   CharacterBankTab_1.. start at 6: retail has 6 tabs (6..11), Forever has 9
+--   (6..14). The account (warband) bank tabs follow (retail 12.., Forever 15..)
+--   and are out of scope. The tab count is the one difference between the
+--   clients, so the bank walk reads Enum.BagIndex.CharacterBankTab_<n> until the
+--   name is missing instead of branching on the game.
+-- Slot reading: C_Container.GetContainerNumSlots(index) and
+--   C_Container.GetContainerItemInfo(index, slot) -> nil for an empty slot, else
+--   a table with itemID and stackCount (ContainerDocumentation fdid 4637075,
+--   identical in both clients).
+local BAG_FIRST, BAG_LAST = 0, 5   -- Backpack .. ReagentBag
+
+-- Adds one container's stacks into items; returns its slot count.
+local function tallyContainer(bag, items)
+	local numSlots = C_Container.GetContainerNumSlots(bag) or 0
+	for slot = 1, numSlots do
+		local info = C_Container.GetContainerItemInfo(bag, slot)
+		if info and info.itemID then
+			items[info.itemID] = (items[info.itemID] or 0) + (info.stackCount or 1)
+		end
+	end
+	return numSlots
+end
+
+local function hasContainerAPI()
+	return C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo
+end
+
+-- nil when C_Container is missing.
+local function scanBags()
+	if not hasContainerAPI() then return nil end
+	local items = {}
+	for bag = BAG_FIRST, BAG_LAST do tallyContainer(bag, items) end
+	return items
+end
+
+-- The character bank tabs' items; nil when the API is missing or the tabs report
+-- no slots at all (the bank is not readable right now: keep the old snapshot
+-- rather than record an empty bank).
+local function scanBank()
+	local BI = Enum and Enum.BagIndex
+	if not (BI and BI.CharacterBankTab_1 and hasContainerAPI()) then return nil end
+	local items, slots = {}, 0
+	local n = 1
+	while BI["CharacterBankTab_" .. n] do
+		slots = slots + tallyContainer(BI["CharacterBankTab_" .. n], items)
+		n = n + 1
+	end
+	if slots == 0 then return nil end
+	return items
+end
+
 -- Full scan of the live character -> Store.writeSubstrate(charKey(), record).
 -- Record shape: see goal-format-v1 §6. Never errors — missing API namespaces
 -- yield empty sections; seen is always stamped.
@@ -179,6 +244,7 @@ function Substrate.capture()
 	local key = Substrate.charKey()
 	local now = GetServerTime()
 	local active, ready = scanActiveQuests()
+	local previous = Store.getSubstrate(key)
 	Store.writeSubstrate(key, {
 		seen         = now,
 		meta         = { level = UnitLevel("player"), class = select(2, UnitClass("player")),
@@ -189,6 +255,8 @@ function Substrate.capture()
 		questsActive = active,
 		questsReady  = ready,
 		vault        = scanVault(),
+		inventory    = { bags = scanBags(),
+		                 bank = previous and previous.inventory and previous.inventory.bank },
 	})
 	questSets[key] = nil
 	if ns.dbg and t0 then ns.dbg(string.format("substrate.capture %.1fms", debugprofilestop() - t0)) end
@@ -226,6 +294,27 @@ function Substrate.captureVault()
 	if not rec then return end
 	rec.vault = scanVault()
 	Store.writeSubstrate(key, rec)
+end
+
+-- inventory.bags / inventory.bank: rebuild one half of the inventory section.
+-- captureBank only stores a readable bank, so a closed bank cannot overwrite
+-- the last snapshot with an empty one.
+local function writeInventory(field, items)
+	local key = Substrate.charKey()
+	local rec = Store.getSubstrate(key)
+	if not rec then return end
+	rec.inventory = rec.inventory or {}
+	rec.inventory[field] = items
+	Store.writeSubstrate(key, rec)
+end
+
+function Substrate.captureBags()
+	writeInventory("bags", scanBags())
+end
+
+function Substrate.captureBank()
+	local items = scanBank()
+	if items then writeInventory("bank", items) end
 end
 
 -- Incremental: append questID to the current character's quests string (and
@@ -278,11 +367,22 @@ local function debounce(kind, fn)
 	end)
 end
 
+-- The bank is readable only while open (spec D23), so its rescans run only
+-- between BANKFRAME_OPENED and BANKFRAME_CLOSED, also when a queued rescan fires
+-- late. The client docs name PLAYERBANKSLOTS_CHANGED for character bank slot
+-- changes; BAG_UPDATE_DELAYED rescans the bank too while it is open, in case a
+-- tab-to-tab move does not raise it (not observable from the docs).
+local bankOpen = false
+local function captureBankIfOpen()
+	if bankOpen then Substrate.captureBank() end
+end
+
 local f = CreateFrame("Frame")
 for _, ev in ipairs({
 	"PLAYER_LOGIN", "UPDATE_INSTANCE_INFO", "BOSS_KILL", "CURRENCY_DISPLAY_UPDATE",
 	"QUEST_TURNED_IN", "QUEST_ACCEPTED", "QUEST_REMOVED", "UNIT_QUEST_LOG_CHANGED",
 	"WEEKLY_REWARDS_UPDATE",
+	"BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
 }) do
 	f:RegisterEvent(ev)
 end
@@ -295,6 +395,16 @@ f:SetScript("OnEvent", function(_, event, arg1)
 		debounce("currency", Substrate.captureCurrencies)
 	elseif event == "WEEKLY_REWARDS_UPDATE" then
 		debounce("vault", Substrate.captureVault)
+	elseif event == "BAG_UPDATE_DELAYED" then
+		debounce("bags", Substrate.captureBags)
+		if bankOpen then debounce("bank", captureBankIfOpen) end
+	elseif event == "BANKFRAME_OPENED" then
+		bankOpen = true
+		Substrate.captureBank()
+	elseif event == "BANKFRAME_CLOSED" then
+		bankOpen = false
+	elseif event == "PLAYERBANKSLOTS_CHANGED" then
+		if bankOpen then debounce("bank", captureBankIfOpen) end
 	elseif event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED"
 		or event == "UNIT_QUEST_LOG_CHANGED" then
 		debounce("quests", Substrate.captureActiveQuests)
