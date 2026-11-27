@@ -23,7 +23,8 @@ local _, ns = ...
 --   BAG_UPDATE_DELAYED                -> inventory.bags re-scan, debounced
 --                                        (and inventory.bank too while the bank is open)
 --   BANKFRAME_OPENED                  -> inventory.bank re-scan (bank is readable only
---                                        while open; BANKFRAME_CLOSED stops the rescans)
+--                                        while open; BANKFRAME_CLOSED takes a last scan,
+--                                        then stops the rescans)
 --   PLAYERBANKSLOTS_CHANGED           -> inventory.bank re-scan, debounced, bank open only
 --
 -- Persistence goes through Store.writeSubstrate — store.lua stays the sole
